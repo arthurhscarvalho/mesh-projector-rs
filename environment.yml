@@ -1,0 +1,12 @@
+name: meshpca2
+channels:
+  - conda-forge
+dependencies:
+  - python==3.10.0
+  - pip==23.3.1
+  - pip:
+      - maturin==1.5.1
+      - patchelf==0.17.2.1
+      - numpy==1.26.4
+      - open3d==0.17.0
+      - opencv-python==4.9.0.80
