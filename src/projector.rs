@@ -1,6 +1,8 @@
 use nd::{s, Array2, Array3, Array4};
 use std::f64;
 
+use crate::conditional_log;
+
 /// Helper: computes barycentric coordinates of point (px,py) with respect to triangle vertices (ax,ay), (bx,by), (cx,cy).
 /// Returns (u,v,w) such that p = u*a + v*b + w*c and u+v+w = 1.
 /// Returns None if the triangle area is nearly zero (degenerate).
@@ -68,7 +70,10 @@ pub fn compute_mesh_projections_textured(
     triangle_uvs: Array2<f64>, // Per-triangle-corner UVs
     precision: u32,
     filtering: u32,
+    logging_enabled: bool,
 ) -> (Array4<u8>, Array3<f64>, [u64; 6]) {
+    conditional_log!(logging_enabled, info, "Inititalizing projector back-end");
+
     let max_bound: u64 = 1 << precision;
     let max_bound_f64: f64 = max_bound as f64;
     let max_bound_u: usize = max_bound as usize;
@@ -86,7 +91,11 @@ pub fn compute_mesh_projections_textured(
     let initial_color_val: u8 = 255; // Background color (white) as u8
 
     if points.is_empty() || triangles.is_empty() || texture.is_empty() || triangle_uvs.is_empty() {
-        eprintln!("Warning: Empty input detected (points, triangles, texture, or uvs).");
+        conditional_log!(
+            logging_enabled,
+            warn,
+            "Empty input detected (points, triangles, texture, or uvs)."
+        );
         return (
             Array4::from_elem((num_images, rows, cols, channels), initial_color_val),
             Array3::zeros((num_images, rows, cols)),
@@ -96,19 +105,20 @@ pub fn compute_mesh_projections_textured(
 
     if triangles.nrows() * 3 != triangle_uvs.nrows() {
         panic!(
-             "Inconsistent input: Number of triangle indices ({}) * 3 != number of triangle UVs ({}).",
-             triangles.nrows(), triangle_uvs.nrows()
+            "Inconsistent input: Number of triangle indices ({}) * 3 != number of triangle UVs ({}).",
+            triangles.nrows(), triangle_uvs.nrows()
          );
     }
 
     let mut images = Array4::from_elem((num_images, rows, cols, channels), initial_color_val);
     let mut ocp_maps = Array3::zeros((num_images, rows, cols)); // 0.0 = empty, 1.0 = occupied
     let mut z_buffers = Array3::from_elem((num_images, rows, cols), f64::INFINITY);
-    for i in (1..num_images).step_by(2) {
-        z_buffers.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY);
-    }
-
+    (1..num_images)
+        .step_by(2)
+        .for_each(|i| z_buffers.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY));
     let projection_plane_axes: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
+
+    conditional_log!(logging_enabled, info, "Starting rasterization loop");
 
     // --- Rasterization Loop ---
     let num_faces = triangles.nrows();
@@ -252,6 +262,7 @@ pub fn compute_mesh_projections_textured(
     // --- Optional Outlier Filtering Pass (Needs slight adaptation for u8 images) ---
     let mut freqs: [u64; 6] = [0; 6];
     if filtering > 0 {
+        conditional_log!(logging_enabled, info, "Starting filtering loop");
         let w = filtering as usize;
         let filter_threshold = 0.1 * max_bound_f64;
         let ocp_maps_orig = ocp_maps.clone();

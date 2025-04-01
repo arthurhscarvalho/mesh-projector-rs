@@ -2,6 +2,9 @@ import os
 
 import numpy as np
 import open3d as o3d
+from loguru import logger
+
+from textwrap import dedent
 
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
@@ -14,6 +17,7 @@ def read_mesh(
     precision,
     enable_post_processing=False,  # Default to False for safer texture mapping
     flip_v_coordinate=True,  # Default to True as it's common, but make it configurable
+    verbose=False,
 ):
     """
     Reads a mesh and its texture, processes geometry and UVs, preparing data for export.
@@ -41,9 +45,11 @@ def read_mesh(
         ValueError: If the mesh or texture cannot be loaded or lacks required components.
         FileNotFoundError: If the texture file does not exist when explicit loading is attempted.
     """
-    print(f"Loading mesh: {obj_location}")
-    print(f"Post-processing enabled: {enable_post_processing}")
-    print(f"Flip V coordinate: {flip_v_coordinate}")
+    if verbose is not True:
+        logger.remove()
+    logger.info(f"Loading mesh: {obj_location}")
+    logger.info(f"Post-processing enabled: {enable_post_processing}")
+    logger.info(f"Flip V coordinate: {flip_v_coordinate}")
 
     mesh = o3d.io.read_triangle_mesh(
         obj_location, enable_post_processing=enable_post_processing
@@ -56,7 +62,7 @@ def read_mesh(
     texture_loaded_explicitly = False
     # Check if textures are already loaded (e.g., from MTL or embedded)
     if not mesh.has_textures() or not mesh.textures or mesh.textures[0].is_empty():
-        print(
+        logger.info(
             f"Mesh '{obj_location}' has no embedded/MTL texture or it's invalid. Attempting explicit load..."
         )
         if not os.path.exists(texture_file):
@@ -67,13 +73,13 @@ def read_mesh(
                 raise ValueError("Loaded texture image is empty.")
             mesh.textures = [texture_img]
             texture_loaded_explicitly = True
-            print(f"Successfully loaded texture explicitly: {texture_file}")
+            logger.info(f"Successfully loaded texture explicitly: {texture_file}")
         except Exception as e:
             raise ValueError(
                 f"Mesh has no texture and failed to load explicitly from {texture_file}: {e}"
             )
     elif not mesh.textures[0].is_empty():
-        print("Texture found associated with the mesh (e.g., via MTL file).")
+        logger.info("Texture found associated with the mesh (e.g., via MTL file).")
     else:
         # This case should ideally not be hit due to the outer check, but belt-and-suspenders
         raise ValueError(
@@ -101,8 +107,8 @@ def read_mesh(
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
         # Handle grayscale images - potentially convert them to RGB if needed by Rust
         # Or raise error if color is expected. For now, just warn.
-        print(
-            f"Warning: Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
+        logger.warning(
+            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
         )
         # Example: Convert grayscale to RGB if necessary downstream
         # if texture_np.ndim == 2:
@@ -111,7 +117,7 @@ def read_mesh(
         #      texture_np = np.concatenate((texture_np,) * 3, axis=2)
 
     tex_height, tex_width, tex_channels = texture_np.shape
-    print(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
+    logger.info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
 
     # Get per-triangle UVs. Open3D stores them flattened: (t1_v0_u, t1_v0_v, t1_v1_u, t1_v1_v, ...)
     # Reshape them to (num_triangles * 3, 2) for easier processing
@@ -127,24 +133,24 @@ def read_mesh(
             f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
         )
 
-    print(f"Raw triangle UVs shape: {triangle_uvs.shape}")
+    logger.info(f"Raw triangle UVs shape: {triangle_uvs.shape}")
     # Clamp UVs to [0, 1] range to avoid issues with sampling outside bounds
     triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
 
     # IMPORTANT: Optionally flip the V (vertical) coordinate.
     if flip_v_coordinate:
-        print("Flipping V coordinate (1.0 - v)")
+        logger.info("Flipping V coordinate (1.0 - v)")
         triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
     else:
-        print("Using original V coordinate")
+        logger.info("Using original V coordinate")
 
     # --- Vertex Data ---
     vertices = np.asarray(mesh.vertices)  # XYZ positions
     # Using uint32 for indices - adjust to uint64 if necessary for huge meshes
     triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
 
-    print(f"Original vertices shape: {vertices.shape}")
-    print(f"Triangle indices shape: {triangle_indices.shape}")
+    logger.info(f"Original vertices shape: {vertices.shape}")
+    logger.info(f"Triangle indices shape: {triangle_indices.shape}")
 
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
@@ -158,17 +164,17 @@ def read_mesh(
     # --- Vertex Scaling (Keep this logic) ---
     min_bound = vertices.min(axis=0)
     max_bound = vertices.max(axis=0)
-    print(f"Original BBox Min: {min_bound}, Max: {max_bound}")
+    logger.info(f"Original BBox Min: {min_bound}, Max: {max_bound}")
 
     # Shift if necessary to make min bound >= 0
     shift = np.maximum(0, -min_bound)  # Calculate shift only for negative components
     if np.any(shift > 0):
-        print(f"Shifting vertices by: {shift}")
+        logger.info(f"Shifting vertices by: {shift}")
         vertices += shift
         # Recalculate bounds after shift
         min_bound = vertices.min(axis=0)  # Should be >= 0 now
         max_bound = vertices.max(axis=0)
-        print(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
+        logger.info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
 
     bbox_size = max_bound - min_bound  # Size along each axis
 
@@ -177,37 +183,35 @@ def read_mesh(
 
     # Uniform scaling based on the *largest* dimension
     max_dim = np.max(bbox_size)
-    target_max_val = (
-        1 << precision
-    ) - 1.0  # Target maximum coordinate value (e.g., 65535.0 for precision=16)
+    # Target maximum coordinate value (e.g., 65535.0 for precision=16)
+    target_max_val = (1 << precision) - 1.0
     scale_factor = target_max_val / max_dim
     # Apply scaling slightly less than full range to potentially avoid edge cases if clamping downstream
     # scale_factor *= (1.0 - 1e-6 / (1 << precision)) # Optional: slightly smaller scale
 
-    print(f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}")
+    logger.info(
+        f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}"
+    )
     vertices *= scale_factor
 
     # Update bounds after scaling
     min_bound_scaled = vertices.min(axis=0)
     max_bound_scaled = vertices.max(axis=0)
-    print(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
+    logger.info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
 
     # Optional: Clamp vertices to ensure they are within [0, target_max_val]
     # This can be useful if floating point inaccuracies push values slightly out
     # vertices = np.clip(vertices, 0.0, target_max_val)
     # print("Clamped scaled vertices to [0, target_max_val]")
 
-    print("-" * 20)
-    print("Final Data Shapes:")
-    print(f"  Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}")
-    print(
-        f"  Triangle Indices: {triangle_indices.shape}, dtype={triangle_indices.dtype}"
-    )
-    print(f"  Texture: {texture_np.shape}, dtype={texture_np.dtype}")
-    print(
-        f"  Triangle UVs (processed): {triangle_uvs.shape}, dtype={triangle_uvs.dtype}"
-    )
-    print("-" * 20)
+    final_info = dedent(f"""
+        Final Data Shapes:
+            Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}
+            Triangle Indices: {triangle_indices.shape}, dtype={triangle_indices.dtype}
+            Texture: {texture_np.shape}, dtype={texture_np.dtype}
+            Triangle UVs (processed): {triangle_uvs.shape}, dtype={triangle_uvs.dtype}
+    """).strip()
+    logger.info(final_info)
 
     # Return data needed by Rust
     return (
@@ -227,8 +231,12 @@ def generate_projections(
     filtering=2,
     verbose=False,
 ):
+    if verbose is not True:
+        logger.remove()
+    logger.info("Sending data to Rust back-end")
     images, ocp_maps = _internal_generate_projections(
         points, triangles, texture, triangle_uvs, precision, filtering, verbose
     )
     images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
+    logger.info("Projections successfully generated!")
     return images, ocp_maps

@@ -11,6 +11,8 @@ crate-type = ["cdylib"]
 ndarray = "0.16.1"
 num = "0.4.3"
 numpy = "0.24.0"
+log = "0.4.27"
+colog = "1.3.0"
 
 [dependencies.pyo3]
 version = "0.24.1"

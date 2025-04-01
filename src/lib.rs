@@ -1,3 +1,5 @@
+extern crate colog;
+extern crate log;
 extern crate ndarray as nd;
 extern crate num;
 extern crate numpy;
@@ -8,6 +10,7 @@ use numpy::{PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
+mod logging;
 mod projector;
 mod utils;
 
@@ -20,11 +23,12 @@ fn generate_projections<'py>(
     triangle_uvs: PyReadonlyArray2<f64>,
     precision: u32,
     filtering: u32,
-    verbose: bool,
+    logging_enabled: bool,
 ) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f64>>) {
-    if verbose {
-        println!("Generating projections");
+    if logging_enabled {
+        colog::init();
     }
+    conditional_log!(logging_enabled, info, "Back-end projector starting");
     let points = utils::to_ndarray2(&points).unwrap();
     let triangles = utils::to_ndarray2(&triangles).unwrap().map(|&v| v as usize);
     let texture = utils::to_ndarray3(&texture).unwrap().map(|&v| v as u8);
@@ -36,14 +40,16 @@ fn generate_projections<'py>(
         triangle_uvs,
         precision,
         filtering,
+        logging_enabled,
+    );
+    conditional_log!(
+        logging_enabled,
+        info,
+        "Back-end projections generation complete!"
     );
     let images = PyArray4::from_owned_array(py, images);
     let ocp_maps = PyArray3::from_owned_array(py, ocp_maps);
-    if verbose {
-        for i in 0..6 {
-            println!("{} points removed from projection {}", &freqs[i], &i);
-        }
-    }
+    log_removed_points!(logging_enabled, freqs);
     (images, ocp_maps)
 }
 
