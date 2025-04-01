@@ -1,12 +1,13 @@
-name: meshpca2
+name: mesh_projector
 channels:
   - conda-forge
 dependencies:
-  - python==3.10.0
-  - pip==23.3.1
+  - python==3.12.9
+  - pip==25.0.1
   - pip:
-      - maturin==1.5.1
-      - patchelf==0.17.2.1
-      - numpy==1.26.4
-      - open3d==0.17.0
-      - opencv-python==4.9.0.80
+      - maturin==1.8.3
+      - patchelf==0.17.2.2
+      - numpy==2.2.4
+      - open3d==0.19.0
+      - opencv-python==4.11.0.86
+      - toml==0.10.2

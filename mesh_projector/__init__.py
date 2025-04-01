@@ -1,6 +1,7 @@
+import os
+
 import numpy as np
 import open3d as o3d
-import os
 
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
@@ -217,75 +218,17 @@ def read_mesh(
     )
 
 
-def compute_projections(
-    vertices, colors, texture, triangles, precision, filtering, verbose
-):
-    images, ocp_maps = _internal_generate_projections(
-        vertices, colors, texture, triangles, precision, filtering, verbose
-    )
-    images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
-    return images, ocp_maps
-
-
 def generate_projections(
-    vertices,
-    colors,
-    texture,
+    points,
     triangles,
+    texture,
+    triangle_uvs,
     precision,
     filtering=2,
     verbose=False,
 ):
-    """
-    Generate projections from a given point cloud.
-
-    Parameters
-    ----------
-    points : (M, 3) array_like
-        Points from the point cloud.
-    colors : (M, 3) array_like
-        Colors from the point cloud.
-    filtering : int, optional
-        Filtering factor.
-        Default is 2.
-    crop : bool, optional
-        If True, the generated projections will be cropped.
-        Default is False.
-    verbose: bool, optional
-        Whether to display verbose information or not.
-        Default is False.
-
-    Returns
-    -------
-    projections : (P, N, M, C) np.ndarray
-        A list of six RGB images corresponding to the projections generated
-        from the point cloud.
-    occupancy_maps : (P, N, M) np.ndarray
-        A list of binary images corresponding to the occupancy maps
-        from the generated projections.
-
-    Notes
-    -----
-    For the points arguments, any kind of dtype is accepted, but
-    the array will eventually be converted to np.double.
-
-    For the colors arguments, it is expected that the colors are
-    on the [0, 1] range, or [0, 255]. Other ranges are not supported.
-    Any dtype is accepted, but the array will eventually be converted
-    to np.uint8.
-
-    It is recommended to simply read the point cloud using open3d,
-    and pass the points and colors parameters as np.ndarrays.
-
-    Point clouds without colors currently are not supported.
-    """
-    images, ocp_maps = compute_projections(
-        vertices,
-        colors,
-        texture,
-        triangles,
-        precision,
-        filtering,
-        verbose,
+    images, ocp_maps = _internal_generate_projections(
+        points, triangles, texture, triangle_uvs, precision, filtering, verbose
     )
+    images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
     return images, ocp_maps
