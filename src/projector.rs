@@ -94,7 +94,7 @@ pub fn compute_mesh_projections_textured(
         conditional_log!(
             logging_enabled,
             warn,
-            "Warning: Empty input detected (points, triangles, texture, or uvs)."
+            "Empty input detected (points, triangles, texture, or uvs)."
         );
         return (
             Array4::from_elem((num_images, rows, cols, channels), initial_color_val),
@@ -256,15 +256,10 @@ pub fn compute_mesh_projections_textured(
         }
     }
 
-    conditional_log!(
-        logging_enabled && filtering > 0,
-        info,
-        "Starting filtering loop"
-    );
-
     // --- Optional Outlier Filtering Pass (Needs slight adaptation for u8 images) ---
     let mut freqs: [u64; 6] = [0; 6];
     if filtering > 0 {
+        conditional_log!(logging_enabled, info, "Starting filtering loop");
         let w = filtering as usize;
         let filter_threshold = 0.1 * max_bound_f64;
         let ocp_maps_orig = ocp_maps.clone();
