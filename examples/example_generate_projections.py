@@ -19,7 +19,7 @@ if __name__ == "__main__":
     # mesh_projector parameters
     precision = 12
     filtering = 0
-    verbose = False
+    verbose = True
 
     # Load mesh through helper function
     obj_path = "assets/just_a_girl_C0-L5_deq_tri.obj"

@@ -113,6 +113,9 @@ pub fn compute_mesh_projections_textured(
     let mut images = Array4::from_elem((num_images, rows, cols, channels), initial_color_val);
     let mut ocp_maps = Array3::zeros((num_images, rows, cols)); // 0.0 = empty, 1.0 = occupied
     let mut z_buffers = Array3::from_elem((num_images, rows, cols), f64::INFINITY);
+    (1..num_images)
+        .step_by(2)
+        .for_each(|i| z_buffers.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY));
     let projection_plane_axes: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
 
     conditional_log!(logging_enabled, info, "Starting rasterization loop");

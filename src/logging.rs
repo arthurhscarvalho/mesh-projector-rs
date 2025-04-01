@@ -8,11 +8,11 @@ macro_rules! conditional_log {
 }
 
 #[macro_export]
-macro_rules! range_conditional_log {
-    ($logging_enabled:expr, $range:expr, $level:ident, $freqs:expr, $message:expr) => {
+macro_rules! log_removed_points {
+    ($logging_enabled:expr, $freqs:expr) => {
         if $logging_enabled {
-            for i in $range {
-                conditional_log!(true, $level, $message, $freqs[i], i);
+            for i in 0..6 {
+                log::info!("{} points removed from projection {}", $freqs[i], i);
             }
         }
     };

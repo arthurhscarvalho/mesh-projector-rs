@@ -49,15 +49,7 @@ fn generate_projections<'py>(
     );
     let images = PyArray4::from_owned_array(py, images);
     let ocp_maps = PyArray3::from_owned_array(py, ocp_maps);
-    for i in 0..6 {
-        conditional_log!(
-            logging_enabled,
-            info,
-            "{} points removed from projection {}",
-            &freqs[i],
-            &i
-        );
-    }
+    log_removed_points!(logging_enabled, freqs);
     (images, ocp_maps)
 }
 
