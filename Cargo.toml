@@ -8,10 +8,10 @@ name = "mesh_projector"
 crate-type = ["cdylib"]
 
 [dependencies]
-numpy = "0.15"
-ndarray = "0.15"
+ndarray = "0.15.6"
 num = "0.4.3"
+numpy = "0.24.0"
 
 [dependencies.pyo3]
-version = "0.15.1"
+version = "0.24.1"
 features = ["extension-module"]
