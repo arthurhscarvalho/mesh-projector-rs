@@ -1,14 +1,18 @@
+import os
+import time
+
 import cv2
 import numpy as np
+
 import mesh_projector
-import time
 
 
 def save_projections(projections):
+    os.makedirs("./projections", exist_ok=True)
     for i in range(len(projections)):
         image = projections[i].astype(np.uint8)
         image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(f"projection_{i}.png", image_bgr)
+        cv2.imwrite(f"projections/projection_{i}.png", image_bgr)
 
 
 if __name__ == "__main__":
