@@ -1,4 +1,4 @@
-use nd::{s, Array1, Array2, Array3, Array4, ArrayView1, ArrayView2, ArrayView3, Axis};
+use nd::{s, Array2, Array3, Array4};
 use std::f64;
 
 /// Helper: computes barycentric coordinates of point (px,py) with respect to triangle vertices (ax,ay), (bx,by), (cx,cy).

@@ -1,6 +1,7 @@
 # Custom
 *.png
 projections/
+SJTU-TMQA/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

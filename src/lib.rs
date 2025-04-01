@@ -25,10 +25,10 @@ fn generate_projections<'py>(
     if verbose {
         println!("Generating projections");
     }
-    let points = utils::to_ndarray(&points);
-    let triangles = utils::to_ndarray(&triangles).map(|&v| v as usize);
+    let points = utils::to_ndarray2(&points);
+    let triangles = utils::to_ndarray2(&triangles).map(|&v| v as usize);
     let texture = utils::to_ndarray3(&texture).map(|&v| v as u8);
-    let triangle_uvs = utils::to_ndarray(&triangle_uvs);
+    let triangle_uvs = utils::to_ndarray2(&triangle_uvs);
     let (images, ocp_maps, freqs) = projector::compute_mesh_projections_textured(
         points,
         triangles,
@@ -37,10 +37,7 @@ fn generate_projections<'py>(
         precision,
         filtering,
     );
-    let (images, ocp_maps) = (
-        images.to_owned().to_pyarray(_py),
-        ocp_maps.to_owned().to_pyarray(_py),
-    );
+    let (images, ocp_maps) = (images.to_pyarray(_py), ocp_maps.to_pyarray(_py));
     if verbose {
         for i in 0..6 {
             println!("{} points removed from projection {}", &freqs[i], &i);
