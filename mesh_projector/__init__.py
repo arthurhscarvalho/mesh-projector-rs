@@ -16,7 +16,7 @@ def read_mesh(
     texture_file,
     precision,
     enable_post_processing=False,  # Default to False for safer texture mapping
-    flip_v_coordinate=True,  # Default to True as it's common, but make it configurable
+    flip_v_coordinate=False,  # Default to False for now, but make it configurable
     verbose=False,
 ):
     """
