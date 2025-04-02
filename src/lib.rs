@@ -4,6 +4,7 @@ extern crate ndarray as nd;
 extern crate num;
 extern crate numpy;
 extern crate pyo3;
+extern crate rayon;
 
 use numpy::{PyArray3, PyArray4};
 use numpy::{PyReadonlyArray2, PyReadonlyArray3};
@@ -33,11 +34,11 @@ fn generate_projections<'py>(
     let triangles = utils::to_ndarray2(&triangles).unwrap().map(|&v| v as usize);
     let texture = utils::to_ndarray3(&texture).unwrap().map(|&v| v as u8);
     let triangle_uvs = utils::to_ndarray2(&triangle_uvs).unwrap();
-    let (images, ocp_maps, freqs) = projector::compute_mesh_projections_textured(
-        points,
-        triangles,
-        texture,
-        triangle_uvs,
+    let (images, ocp_maps, freqs) = projector::compute_mesh_projections(
+        points.view(),
+        triangles.view(),
+        texture.view(),
+        triangle_uvs.view(),
         precision,
         filtering,
         logging_enabled,
@@ -49,7 +50,7 @@ fn generate_projections<'py>(
     );
     let images = PyArray4::from_owned_array(py, images);
     let ocp_maps = PyArray3::from_owned_array(py, ocp_maps);
-    log_removed_points!(logging_enabled, freqs);
+    log_removed_points!(logging_enabled && filtering > 0, freqs);
     (images, ocp_maps)
 }
 
