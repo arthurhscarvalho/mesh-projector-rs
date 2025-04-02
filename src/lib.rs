@@ -18,14 +18,14 @@ mod utils;
 #[pyfunction]
 fn generate_projections<'py>(
     py: Python<'py>,
-    points: PyReadonlyArray2<f64>,
+    points: PyReadonlyArray2<f32>,
     triangles: PyReadonlyArray2<usize>,
     texture: PyReadonlyArray3<u8>,
-    triangle_uvs: PyReadonlyArray2<f64>,
+    triangle_uvs: PyReadonlyArray2<f32>,
     precision: u32,
     filtering: u32,
     logging_enabled: bool,
-) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f64>>) {
+) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f32>>) {
     if logging_enabled {
         colog::init();
     }

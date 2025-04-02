@@ -215,10 +215,10 @@ def read_mesh(
 
     # Return data needed by Rust
     return (
-        vertices.astype(np.float64),
-        triangle_indices.astype(np.uint64),
+        vertices.astype(np.float32),
+        triangle_indices.astype(np.uint32),
         texture_np.astype(np.uint8),
-        triangle_uvs.astype(np.float64),
+        triangle_uvs.astype(np.float32),
     )
 
 
