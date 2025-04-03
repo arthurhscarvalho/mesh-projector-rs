@@ -1,10 +1,9 @@
 import os
+from textwrap import dedent
 
 import numpy as np
 import open3d as o3d
 from loguru import logger
-
-from textwrap import dedent
 
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
@@ -31,7 +30,7 @@ def read_mesh(
                                        Defaults to False.
         flip_v_coordinate (bool): If True, flips the V texture coordinate (1.0 - v).
                                   Needed if texture origin is top-left and UVs assume
-                                  bottom-left. Defaults to True.
+                                  bottom-left. Defaults to False.
 
     Returns:
         tuple: Contains:
@@ -228,9 +227,36 @@ def generate_projections(
     texture,
     triangle_uvs,
     precision,
-    filtering=2,
+    filtering=0,
     verbose=False,
 ):
+    """
+    Computes 6 orthographic projections (front/back for X/Y/Z) of a textured mesh.
+
+    This function calls a Rust back-end to perform the projection calculations.
+
+    Args:
+        points (np.ndarray[np.float32]): Vertex coordinates as a (N, 3) array, where N is the number of vertices.
+        triangles (np.ndarray[np.uint64]): Triangle indices as an (M, 3) array, where M is the number of triangles.
+                                           Each row contains indices into the `points` array defining a triangle.
+        texture (np.ndarray[np.uint8]): Texture image data as an (H, W, C) array, where H/W are height/width,
+                                        and C is the number of color channels.
+        triangle_uvs (np.ndarray[np.float32]): UV coordinates corresponding to each vertex *within each triangle*.
+                                               This is an (M * 3, 2) array. The order must match the expanded
+                                               vertex order implicit in `triangles` (i.e., UVs for tri 0 vertex 0,
+                                               tri 0 vertex 1, tri 0 vertex 2, tri 1 vertex 0, ...).
+        precision (int): A power-of-2 exponent determining the output image resolution.
+                         The output images will be `(2^precision) x (2^precision)`.
+        filtering (int, optional): Radius of the square neighborhood window for outlier filtering. Defaults to 0.
+                                   A value of 0 disables the filtering step.
+        verbose (bool, optional): Flag to enable or disable logging messages. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing:
+            - images (np.ndarray[np.uint8]): An array of shape (6, H, W, C) holding the 6 rendered projection images.
+            - ocp_maps (np.ndarray[np.float32]): An array of shape (6, H, W) holding the 6 occlusion maps,
+                                                where 1.0 indicates a mesh pixel and 0.0 indicates background.
+    """
     if verbose is not True:
         logger.remove()
     logger.info("Sending data to Rust back-end")
