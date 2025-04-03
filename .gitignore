@@ -4,6 +4,7 @@ projections/
 SJTU-TMQA/
 *.lock
 .DS_Store
+!assets/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
