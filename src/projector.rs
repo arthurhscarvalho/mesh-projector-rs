@@ -65,12 +65,12 @@ impl ProjectionConfig {
         let is_front_view = view_type == 0;
 
         let view_dir = match (depth_axis, view_type) {
-            (0, 0) => (1.0f32, 0.0f32, 0.0f32),
-            (0, 1) => (-1.0f32, 0.0f32, 0.0f32),
-            (1, 0) => (0.0f32, 1.0f32, 0.0f32),
-            (1, 1) => (0.0f32, -1.0f32, 0.0f32),
-            (2, 0) => (0.0f32, 0.0f32, 1.0f32),
-            (2, 1) => (0.0f32, 0.0f32, -1.0f32),
+            (0, 0) => (1.0, 0.0, 0.0),
+            (0, 1) => (-1.0, 0.0, 0.0),
+            (1, 0) => (0.0, 1.0, 0.0),
+            (1, 1) => (0.0, -1.0, 0.0),
+            (2, 0) => (0.0, 0.0, 1.0),
+            (2, 1) => (0.0, 0.0, -1.0),
             _ => unreachable!(),
         };
 
@@ -114,10 +114,10 @@ fn barycentric(
     if denom.abs() < BARYCENTRIC_EPSILON {
         return None;
     }
-    let inv_denom = 1.0f32 / denom;
+    let inv_denom = 1.0 / denom;
     let v = (d11 * d20 - d01 * d21) * inv_denom;
     let w = (d00 * d21 - d01 * d20) * inv_denom;
-    let u = 1.0f32 - v - w;
+    let u = 1.0 - v - w;
     Some((u, v, w))
 }
 
@@ -167,7 +167,7 @@ fn rasterize_triangle(
     let dot = normal[0] * projection_config.view_dir.0
         + normal[1] * projection_config.view_dir.1
         + normal[2] * projection_config.view_dir.2;
-    if dot >= 0.0f32 {
+    if dot >= 0.0 {
         return;
     }
     let i0 = triangles[[t_idx, 0]];
@@ -225,18 +225,18 @@ fn rasterize_triangle(
                         let interp_v = u * uv0[1] + v * uv1[1] + w * uv2[1];
                         let tex_x = (interp_u * texture_data.width_f32)
                             .round()
-                            .max(0.0f32)
-                            .min(texture_data.width_f32 - 1.0f32)
+                            .max(0.0)
+                            .min(texture_data.width_f32 - 1.0)
                             as usize;
-                        let tex_y = ((1.0f32 - interp_v) * texture_data.height_f32)
+                        let tex_y = ((1.0 - interp_v) * texture_data.height_f32)
                             .round()
-                            .max(0.0f32)
-                            .min(texture_data.height_f32 - 1.0f32)
+                            .max(0.0)
+                            .min(texture_data.height_f32 - 1.0)
                             as usize;
                         for chan in 0..texture_data.channels {
                             image_slice[[r, c, chan]] = texture_data.texture[[tex_y, tex_x, chan]];
                         }
-                        ocp_slice[[r, c]] = 1.0f32;
+                        ocp_slice[[r, c]] = 1.0;
                     }
                 }
             }
@@ -275,7 +275,7 @@ fn filter_outliers(
                     let mut row_outlier_coords = Vec::new();
                     for c_offset in 0..num_inner_cols {
                         let c = col_start + c_offset;
-                        if ocp_orig_slice[[r, c]] == 0.0f32 {
+                        if ocp_orig_slice[[r, c]] == 0.0 {
                             continue;
                         }
                         let center_depth = z_slice[[r, c]];
@@ -286,23 +286,23 @@ fn filter_outliers(
                         let r_end_nb = r + w + 1;
                         let c_start_nb = c - w;
                         let c_end_nb = c + w + 1;
-                        let mut sum_depth = 0.0f32;
-                        let mut count_neighbors = 0.0f32;
+                        let mut sum_depth = 0.0;
+                        let mut count_neighbors = 0.0;
                         for nr in r_start_nb..r_end_nb {
                             for nc in c_start_nb..c_end_nb {
                                 if nr == r && nc == c {
                                     continue;
                                 }
-                                if ocp_orig_slice[[nr, nc]] > 0.0f32 {
+                                if ocp_orig_slice[[nr, nc]] > 0.0 {
                                     let neighbor_depth = z_slice[[nr, nc]];
                                     if neighbor_depth.is_finite() {
                                         sum_depth += neighbor_depth;
-                                        count_neighbors += 1.0f32;
+                                        count_neighbors += 1.0;
                                     }
                                 }
                             }
                         }
-                        if count_neighbors > 0.0f32 {
+                        if count_neighbors > 0.0 {
                             let avg_neighbor_depth = sum_depth / count_neighbors;
                             let depth_diff = center_depth - avg_neighbor_depth;
                             let is_outlier = if is_front_view {
@@ -323,7 +323,7 @@ fn filter_outliers(
             let layer_outliers_count = outliers_coords.len() as u64;
             if layer_outliers_count > 0 {
                 for &(r, c) in &outliers_coords {
-                    ocp_slice[[r, c]] = 0.0f32;
+                    ocp_slice[[r, c]] = 0.0;
                     for chan in 0..channels {
                         image_slice[[r, c, chan]] = initial_color_val;
                     }
@@ -363,15 +363,16 @@ pub fn compute_mesh_projections(
     let cols = max_bound_u;
     let texture_data = TextureData::new(texture);
     let channels = texture_data.channels;
-    let num_images: usize = 6;
+    const NUM_IMAGES: usize = 6;
+    const BACKGROUND_BRIGHTNESS: u8 = 255;
     if points.is_empty() || triangles.is_empty() || texture.is_empty() || triangle_uvs.is_empty() {
         conditional_log!(
             logging_enabled,
             warn,
             "Empty input detected (points, triangles, texture, or uvs)."
         );
-        let shape4d = Ix4(num_images, rows, cols, channels);
-        let shape3d = Ix3(num_images, rows, cols);
+        let shape4d = Ix4(NUM_IMAGES, rows, cols, channels);
+        let shape3d = Ix3(NUM_IMAGES, rows, cols);
         return (
             Array4::from_elem(shape4d, 255),
             Array3::zeros(shape3d),
@@ -388,7 +389,7 @@ pub fn compute_mesh_projections(
     conditional_log!(logging_enabled, info, "Precomputing triangle normals");
     let triangle_normals = precompute_triangle_normals(points, triangles);
     conditional_log!(logging_enabled, info, "Normal precomputation finished");
-    let mut buffers = Buffers::new(num_images, rows, cols, channels);
+    let mut buffers = Buffers::new(NUM_IMAGES, rows, cols, channels);
     conditional_log!(logging_enabled, info, "Starting rasterization loop");
     let mut z_buffer_views: Vec<_> = buffers.z_buffers.axis_iter_mut(Axis(0)).collect();
     let mut image_views: Vec<_> = buffers.images.axis_iter_mut(Axis(0)).collect();
@@ -424,7 +425,7 @@ pub fn compute_mesh_projections(
         cols,
         max_bound_f32,
         channels,
-        255,
+        BACKGROUND_BRIGHTNESS,
         logging_enabled,
     );
     (buffers.images, buffers.ocp_maps, freqs)
