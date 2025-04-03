@@ -16,8 +16,7 @@ use geometry::precompute_triangle_normals;
 use nd::{Array3, Array4, ArrayView2, ArrayView3, Axis, Ix3, Ix4};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
-use std::f32;
-use texture::TextureData; // Import f32, though direct use might be minimal here now
+use texture::TextureData;
 
 /// Computes 6 orthographic projections (front/back for X/Y/Z) of a textured mesh.
 ///
