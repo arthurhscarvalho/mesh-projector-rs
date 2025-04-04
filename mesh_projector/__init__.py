@@ -100,38 +100,27 @@ def read_mesh(
 
     # Use the first texture associated with the mesh
     texture_o3d = mesh.textures[0]
-    texture_np = np.asarray(
-        texture_o3d
-    )  # Convert to NumPy array (H, W, C) usually uint8
+    texture_np = np.asarray(texture_o3d)
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
-        # Handle grayscale images - potentially convert them to RGB if needed by Rust
-        # Or raise error if color is expected. For now, just warn.
+        # Handle grayscale images
         logger.warning(
-            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
+            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB). Trying manual conversion..."
         )
-        # Example: Convert grayscale to RGB if necessary downstream
-        # if texture_np.ndim == 2:
-        #     texture_np = np.stack((texture_np,) * 3, axis=-1)
-        # elif texture_np.shape[2] == 1:
-        #      texture_np = np.concatenate((texture_np,) * 3, axis=2)
+        if texture_np.ndim == 2:
+            texture_np = np.stack((texture_np,) * 3, axis=-1)
+        elif texture_np.shape[2] == 1:
+            texture_np = np.concatenate((texture_np,) * 3, axis=2)
 
     tex_height, tex_width, tex_channels = texture_np.shape
     logger.info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
 
-    # Get per-triangle UVs. Open3D stores them flattened: (t1_v0_u, t1_v0_v, t1_v1_u, t1_v1_v, ...)
-    # Reshape them to (num_triangles * 3, 2) for easier processing
-    # Note: Open3D 0.15+ returns (N, 2) directly. Ensure your version does.
-    # If using older Open3D, you might need:
-    # uvs_flat = np.asarray(mesh.triangle_uvs)
-    # triangle_uvs = uvs_flat.reshape(-1, 2)
-    # Assuming modern Open3D:
+    # Get per-triangle UVs. Open3D (0.15+) stores them flattened:
+    # (t1_v0_u, t1_v0_v, t1_v1_u, t1_v1_v, ...)
     triangle_uvs = np.asarray(mesh.triangle_uvs)  # Shape: (num_triangles * 3, 2)
-
     if triangle_uvs.shape[1] != 2:
         raise ValueError(
             f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
         )
-
     logger.info(f"Raw triangle UVs shape: {triangle_uvs.shape}")
     # Clamp UVs to [0, 1] range to avoid issues with sampling outside bounds
     triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
@@ -145,12 +134,9 @@ def read_mesh(
 
     # --- Vertex Data ---
     vertices = np.asarray(mesh.vertices)  # XYZ positions
-    # Using uint32 for indices - adjust to uint64 if necessary for huge meshes
     triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
-
     logger.info(f"Original vertices shape: {vertices.shape}")
     logger.info(f"Triangle indices shape: {triangle_indices.shape}")
-
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
     if triangle_uvs.shape[0] != triangle_indices.size:
@@ -176,17 +162,12 @@ def read_mesh(
         logger.info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
 
     bbox_size = max_bound - min_bound  # Size along each axis
-
-    # Handle zero size dimensions if any (e.g., flat mesh)
     bbox_size[bbox_size == 0] = 1e-6  # Avoid division by zero, set a tiny size
-
     # Uniform scaling based on the *largest* dimension
     max_dim = np.max(bbox_size)
     # Target maximum coordinate value (e.g., 65535.0 for precision=16)
     target_max_val = (1 << precision) - 1.0
     scale_factor = target_max_val / max_dim
-    # Apply scaling slightly less than full range to potentially avoid edge cases if clamping downstream
-    # scale_factor *= (1.0 - 1e-6 / (1 << precision)) # Optional: slightly smaller scale
 
     logger.info(
         f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}"
@@ -198,11 +179,7 @@ def read_mesh(
     max_bound_scaled = vertices.max(axis=0)
     logger.info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
 
-    # Optional: Clamp vertices to ensure they are within [0, target_max_val]
-    # This can be useful if floating point inaccuracies push values slightly out
-    # vertices = np.clip(vertices, 0.0, target_max_val)
-    # print("Clamped scaled vertices to [0, target_max_val]")
-
+    # Log processed data information
     final_info = dedent(f"""
         Final Data Shapes:
             Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}
