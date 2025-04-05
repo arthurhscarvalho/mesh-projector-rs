@@ -29,7 +29,7 @@ if __name__ == "__main__":
     # Generate projections
     t0 = time.time()
     images, ocp_maps = mesh_projector.generate_projections(
-        *mesh, precision, filtering, verbose=verbose
+        mesh, precision, filtering, verbose
     )
     t1 = time.time()
     print(f"Done. Time taken: {(t1 - t0):.2f} s")
