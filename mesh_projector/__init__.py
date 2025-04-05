@@ -1,6 +1,6 @@
-import os
 from textwrap import dedent
 
+import cv2
 import numpy as np
 import open3d as o3d
 from loguru import logger
@@ -10,7 +10,7 @@ from .mesh_projector import (
 )
 
 
-def read_mesh(obj_location, texture_file, enable_post_processing=True, verbose=False):
+def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=False):
     """
     Loads a mesh and attempts to load its texture (embedded or external).
 
@@ -31,29 +31,21 @@ def read_mesh(obj_location, texture_file, enable_post_processing=True, verbose=F
     logger.info(f"Loading mesh: {obj_location}")
     logger.info(f"Post-processing enabled: {enable_post_processing}")
     mesh = o3d.io.read_triangle_mesh(
-        obj_location, enable_post_processing=enable_post_processing
+        obj_location,
+        enable_post_processing=enable_post_processing,
     )
     if not mesh.has_vertices():
         raise ValueError(f"Mesh '{obj_location}' has no vertices!")
-    if not mesh.has_textures() or not mesh.textures or mesh.textures[0].is_empty():
-        logger.info("No embedded texture found. Attempting to load explicitly.")
-        if not os.path.exists(texture_file):
-            raise FileNotFoundError(f"Texture file not found: {texture_file}")
-        texture_img = o3d.io.read_image(texture_file)
-        if texture_img.is_empty():
-            raise ValueError("Loaded texture image is empty.")
-        mesh.textures = [texture_img]
-        logger.info(f"Explicit texture load successful: {texture_file}")
-    else:
-        logger.info("Texture found embedded or via MTL.")
     if not mesh.has_triangle_uvs():
-        raise ValueError(
-            f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
-        )
+        uv_err = f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
+        raise ValueError(uv_err)
+    texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
+    mesh.textures = [o3d.geometry.Image(texture)]
+    logger.info(f"Explicit texture load successful: {texture_file}")
     return mesh
 
 
-def preprocess_mesh(mesh, precision, flip_v_coordinate=True, verbose=False):
+def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     """
     Processes a mesh by scaling vertices and adjusting UVs for use with texture.
 
