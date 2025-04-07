@@ -8,7 +8,13 @@ version = "1.0.0"
 description = "Generate orthographic projections from a mesh."
 readme = "README.md"
 requires-python = "==3.12.9"
-dependencies = ["numpy>=2.2", "open3d==0.19.0", "toml>=0.10.2", "loguru>=0.7"]
+dependencies = [
+    "numpy>=2.2",
+    "open3d>=0.19.0",
+    "toml>=0.10.2",
+    "loguru>=0.7",
+    "opencv-python>=4.11.0.86",
+]
 classifier = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python",
