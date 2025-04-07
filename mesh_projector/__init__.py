@@ -68,7 +68,7 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     texture_np = np.asarray(mesh.textures[0])
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
         logger.warning(
-            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
+            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB). Trying manual conversion..."
         )
     tex_height, tex_width, tex_channels = texture_np.shape
     logger.info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
