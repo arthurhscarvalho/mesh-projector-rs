@@ -34,7 +34,6 @@ if __name__ == "__main__":
     mesh = mesh_projector.read_mesh(
         obj_path,
         tex_path,
-        precision,
         verbose=verbose,
     )
     print("Mesh loaded successfully.")
