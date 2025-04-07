@@ -30,19 +30,11 @@ if __name__ == "__main__":
     # Provide paths to your mesh and texture files
     obj_path = "assets/just_a_girl_C0-L5_deq_tri.obj"
     tex_path = "assets/just_a_girl_C0-L5_deq_tri_0.png"
-
-    # read_mesh prepares data for the Rust backend
-    # It handles loading, vertex scaling, and UV processing.
-    # Returns a tuple: (vertices, triangle_indices, texture_np, triangle_uvs)
     print("Loading mesh...")
-    mesh_data = mesh_projector.read_mesh(
+    mesh = mesh_projector.read_mesh(
         obj_path,
         tex_path,
         precision,
-        # Optional: enable Open3D post-processing (can break UVs)
-        # enable_post_processing=False,
-        # Optional: flip V texture coordinate if needed
-        # flip_v_coordinate=False,
         verbose=verbose,
     )
     print("Mesh loaded successfully.")
@@ -50,12 +42,8 @@ if __name__ == "__main__":
     # --- Generate Projections ---
     print("Generating projections...")
     t0 = time.time()
-    # Call the core function (which calls the Rust backend)
     images, ocp_maps = mesh_projector.generate_projections(
-        *mesh_data,  # Unpack the tuple from read_mesh
-        precision,
-        filtering,
-        verbose=verbose,
+        mesh, precision, filtering, verbose
     )
     t1 = time.time()
     print(f"Projections generated. Time taken: {(t1 - t0):.2f} s")
