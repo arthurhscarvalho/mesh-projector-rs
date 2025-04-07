@@ -122,50 +122,6 @@ if __name__ == "__main__":
     # You can now use `images` and `ocp_maps` for further processing.
 ```
 
-## API Overview
-
-* **`mesh_projector.read_mesh(obj_location, texture_file, precision, enable_post_processing=False, flip_v_coordinate=False, verbose=False)`**
-    * Loads the mesh (`.obj`) and its texture using Open3D.
-    * Processes geometry and UVs.
-    * Scales vertices uniformly based on `precision` to fit the range `[0, 2^precision - 1]`.
-    * Handles potential texture loading issues and missing UVs.
-    * Optionally flips the V texture coordinate (`flip_v_coordinate=True`).
-    * Returns a tuple containing NumPy arrays: `(vertices, triangle_indices, texture_np, triangle_uvs)` formatted for the projection function.
-
-* **`mesh_projector.generate_projections(points, triangles, texture, triangle_uvs, precision, filtering=0, verbose=False)`**
-    * Takes the processed mesh data (output of `read_mesh`).
-    * Calls the high-performance Rust backend to perform rasterization and projection.
-    * `precision`: Determines output resolution (`2^precision x 2^precision`).
-    * `filtering`: Radius for outlier removal (0 to disable).
-    * Returns a tuple: `(images, ocp_maps)`
-        * `images`: NumPy array `(6, H, W, C)` of type `uint8` containing the 6 RGB projection images.
-        * `ocp_maps`: NumPy array `(6, H, W)` of type `float32` containing the occlusion maps (1.0 for mesh pixels, 0.0 for background).
-
-## Dependencies
-
-### Python
-
-* Python == 3.12.9
-* numpy >= 2.2
-* open3d == 0.19.0
-* toml >= 0.10.2
-* loguru >= 0.7
-* opencv-python (optional, for saving images in example)
-
-### Build/Runtime
-
-* Rust toolchain (stable, 2021 edition)
-* maturin >= 1.0, < 2.0
-* patchelf (Linux only, via conda)
-
-### Rust Crates (Managed by Cargo/Maturin)
-
-* pyo3 (for Python bindings)
-* numpy (Rust crate for interacting with NumPy)
-* ndarray (for numerical operations)
-* rayon (for parallelization)
-* log, colog (for logging)
-
 ## Development
 
 1.  Set up the environment as described in the **Installation** section.
