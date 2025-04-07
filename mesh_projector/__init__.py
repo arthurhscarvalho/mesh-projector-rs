@@ -150,15 +150,7 @@ def generate_projections(
     This function calls a Rust back-end to perform the projection calculations.
 
     Args:
-        points (np.ndarray[np.float32]): Vertex coordinates as a (N, 3) array, where N is the number of vertices.
-        triangles (np.ndarray[np.uint64]): Triangle indices as an (M, 3) array, where M is the number of triangles.
-                                           Each row contains indices into the `points` array defining a triangle.
-        texture (np.ndarray[np.uint8]): Texture image data as an (H, W, C) array, where H/W are height/width,
-                                        and C is the number of color channels.
-        triangle_uvs (np.ndarray[np.float32]): UV coordinates corresponding to each vertex *within each triangle*.
-                                               This is an (M * 3, 2) array. The order must match the expanded
-                                               vertex order implicit in `triangles` (i.e., UVs for tri 0 vertex 0,
-                                               tri 0 vertex 1, tri 0 vertex 2, tri 1 vertex 0, ...).
+        mesh: (o3d.geometry.TriangleMesh): An open3d mesh with texture attached.
         precision (int): A power-of-2 exponent determining the output image resolution.
                          The output images will be `(2^precision) x (2^precision)`.
         filtering (int, optional): Radius of the square neighborhood window for outlier filtering. Defaults to 0.
