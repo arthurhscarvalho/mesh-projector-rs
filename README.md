@@ -88,7 +88,7 @@ if __name__ == "__main__":
     # It handles loading, vertex scaling, and UV processing.
     # Returns a tuple: (vertices, triangle_indices, texture_np, triangle_uvs)
     print("Loading mesh...")
-    mesh_data = mesh_projector.read_mesh(
+    mesh = mesh_projector.read_mesh(
         obj_path,
         tex_path,
         precision,
@@ -105,10 +105,7 @@ if __name__ == "__main__":
     t0 = time.time()
     # Call the core function (which calls the Rust backend)
     images, ocp_maps = mesh_projector.generate_projections(
-        *mesh_data,  # Unpack the tuple from read_mesh
-        precision,
-        filtering,
-        verbose=verbose,
+        mesh, precision, filtering, verbose
     )
     t1 = time.time()
     print(f"Projections generated. Time taken: {(t1 - t0):.2f} s")
