@@ -16,11 +16,11 @@ def info(msg):
 
 def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=False):
     """
-    Loads a mesh and attempts to load its texture (embedded or external).
+    Loads a mesh and its texture (external).
 
     Args:
         obj_location (str): Path to the OBJ mesh file.
-        texture_file (str): Path to the texture image file (used if embedded one is missing).
+        texture_file (str): Path to the texture image file.
         enable_post_processing (bool): Enables Open3D post-processing (e.g., vertex merging).
         verbose (bool): Enables detailed logging output.
 
@@ -45,7 +45,7 @@ def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=
         raise ValueError(err)
     texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
     mesh.textures = [o3d.geometry.Image(texture)]
-    info(f"Explicit texture load successful: {texture_file}")
+    info(f"Texture load successful: {texture_file}")
     return mesh
 
 
@@ -71,8 +71,8 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         logger.remove()
     texture_np = np.asarray(mesh.textures[0])
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
-        err = f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB). Trying manual conversion..."
-        logger.warning(err)
+        err = f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
+        raise ValueError(err)
     tex_height, tex_width, tex_channels = texture_np.shape
     info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
     triangle_uvs = np.asarray(mesh.triangle_uvs)
@@ -86,7 +86,7 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         info("Flipping V coordinate (1.0 - v)")
         triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
     else:
-        info("Using original V coordinate")
+        info("Using original V coordinates")
     # --- Vertex Data ---
     vertices = np.asarray(mesh.vertices)
     triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
