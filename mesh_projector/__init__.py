@@ -10,6 +10,10 @@ from .mesh_projector import (
 )
 
 
+def info(msg):
+    logger.info(msg)
+
+
 def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=False):
     """
     Loads a mesh and attempts to load its texture (embedded or external).
@@ -28,8 +32,8 @@ def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=
     """
     if verbose is not True:
         logger.remove()
-    logger.info(f"Loading mesh: {obj_location}")
-    logger.info(f"Post-processing enabled: {enable_post_processing}")
+    info(f"Loading mesh: {obj_location}")
+    info(f"Post-processing enabled: {enable_post_processing}")
     mesh = o3d.io.read_triangle_mesh(
         obj_location,
         enable_post_processing=enable_post_processing,
@@ -37,11 +41,11 @@ def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=
     if not mesh.has_vertices():
         raise ValueError(f"Mesh '{obj_location}' has no vertices!")
     if not mesh.has_triangle_uvs():
-        uv_err = f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
-        raise ValueError(uv_err)
+        err = f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
+        raise ValueError(err)
     texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
     mesh.textures = [o3d.geometry.Image(texture)]
-    logger.info(f"Explicit texture load successful: {texture_file}")
+    info(f"Explicit texture load successful: {texture_file}")
     return mesh
 
 
@@ -67,45 +71,42 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         logger.remove()
     texture_np = np.asarray(mesh.textures[0])
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
-        logger.warning(
-            f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB). Trying manual conversion..."
-        )
+        err = f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB). Trying manual conversion..."
+        logger.warning(err)
     tex_height, tex_width, tex_channels = texture_np.shape
-    logger.info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
+    info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
     triangle_uvs = np.asarray(mesh.triangle_uvs)
     if triangle_uvs.shape[1] != 2:
-        raise ValueError(
-            f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
-        )
+        err = f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
+        raise ValueError(err)
     # Clamp UVs to [0, 1] range to avoid issues with sampling outside bounds
     triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
     # IMPORTANT: Optionally flip the V (vertical) coordinate.
     if flip_v_coordinate:
-        logger.info("Flipping V coordinate (1.0 - v)")
+        info("Flipping V coordinate (1.0 - v)")
         triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
     else:
-        logger.info("Using original V coordinate")
+        info("Using original V coordinate")
     # --- Vertex Data ---
     vertices = np.asarray(mesh.vertices)
     triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
     if triangle_uvs.shape[0] != triangle_indices.size:
-        raise ValueError(
-            f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size})"
-        )
+        err = f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size})"
+        raise ValueError(err)
     # --- Vertex Scaling ---
     min_bound = vertices.min(axis=0)
     max_bound = vertices.max(axis=0)
-    logger.info(f"Original BBox Min: {min_bound}, Max: {max_bound}")
+    info(f"Original BBox Min: {min_bound}, Max: {max_bound}")
     # Shift if necessary to make min bound >= 0
     shift = np.maximum(0, -min_bound)
     if np.any(shift > 0):
-        logger.info(f"Shifting vertices by: {shift}")
+        info(f"Shifting vertices by: {shift}")
         vertices += shift
         min_bound = vertices.min(axis=0)
         max_bound = vertices.max(axis=0)
-        logger.info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
+        info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
     bbox_size = max_bound - min_bound
     # Handle zero size dimensions if any (e.g., flat mesh)
     bbox_size[bbox_size == 0] = 1e-6  # Avoid division by zero, set a tiny size
@@ -114,22 +115,20 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     # Target maximum coordinate value (e.g., 65535.0 for precision=16)
     target_max_val = (1 << precision) - 1.0
     scale_factor = target_max_val / max_dim
-    logger.info(
-        f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}"
-    )
+    info(f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}")
     vertices *= scale_factor
     # Update bounds after scaling
     min_bound_scaled = vertices.min(axis=0)
     max_bound_scaled = vertices.max(axis=0)
-    logger.info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
-    final_info = dedent(f"""
+    info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
+    final_msg = dedent(f"""
         Final Data Shapes:
             Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}
             Triangle Indices: {triangle_indices.shape}, dtype={triangle_indices.dtype}
             Texture: {texture_np.shape}, dtype={texture_np.dtype}
             Triangle UVs (processed): {triangle_uvs.shape}, dtype={triangle_uvs.dtype}
     """).strip()
-    logger.info(final_info)
+    info(final_msg)
     # Return data needed by Rust
     return (
         vertices.astype(np.float32),
@@ -174,12 +173,12 @@ def generate_projections(
     """
     if verbose is not True:
         logger.remove()
-    logger.info("Preprocessing mesh")
+    info("Preprocessing mesh")
     mesh_data = preprocess_mesh(mesh, precision)
-    logger.info("Sending data to Rust back-end")
+    info("Sending data to Rust back-end")
     images, ocp_maps = _internal_generate_projections(
         *mesh_data, precision, filtering, verbose
     )
     images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
-    logger.info("Projections successfully generated!")
+    info("Projections successfully generated!")
     return images, ocp_maps
