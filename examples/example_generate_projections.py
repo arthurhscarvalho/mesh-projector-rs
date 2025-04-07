@@ -30,16 +30,13 @@ if __name__ == "__main__":
     # Provide paths to your mesh and texture files
     obj_path = "assets/just_a_girl_C0-L5_deq_tri.obj"
     tex_path = "assets/just_a_girl_C0-L5_deq_tri_0.png"
-    print("Loading mesh...")
     mesh = mesh_projector.read_mesh(
         obj_path,
         tex_path,
         verbose=verbose,
     )
-    print("Mesh loaded successfully.")
 
     # --- Generate Projections ---
-    print("Generating projections...")
     t0 = time.time()
     images, ocp_maps = mesh_projector.generate_projections(
         mesh, precision, filtering, verbose
