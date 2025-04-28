@@ -9,6 +9,7 @@ extern crate rayon;
 use numpy::{PyArray3, PyArray4};
 use numpy::{PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
+use pyo3::types::{PyList, PyTuple};
 use pyo3::wrap_pyfunction;
 
 mod logging;
@@ -16,6 +17,21 @@ mod projector;
 mod utils;
 
 #[pyfunction]
+#[pyo3(signature = (
+    points,
+    triangles,
+    texture,
+    triangle_uvs,
+    precision,
+    ka,
+    kd,
+    ks,
+    ns,
+    opacity,
+    illum,
+    filtering,
+    logging_enabled
+))]
 fn generate_projections<'py>(
     py: Python<'py>,
     points: PyReadonlyArray2<f32>,
@@ -23,13 +39,34 @@ fn generate_projections<'py>(
     texture: PyReadonlyArray3<u8>,
     triangle_uvs: PyReadonlyArray2<f32>,
     precision: u32,
+    ka: &Bound<'py, PyList>,
+    kd: &Bound<'py, PyList>,
+    ks: &Bound<'py, PyList>,
+    ns: f32,
+    opacity: f32,
+    illum: u32,
     filtering: u32,
     logging_enabled: bool,
-) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f32>>) {
+) -> PyResult<(Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f32>>)> {
     if logging_enabled {
         colog::init();
     }
     conditional_log!(logging_enabled, info, "Back-end projector starting");
+
+    let ka_vec: Vec<f32> = ka.extract()?;
+    let kd_vec: Vec<f32> = kd.extract()?;
+    let ks_vec: Vec<f32> = ks.extract()?;
+
+    if ka_vec.len() != 3 || kd_vec.len() != 3 || ks_vec.len() != 3 {
+        return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            "Material colors (ka, kd, ks) must have 3 elements each",
+        ));
+    }
+
+    let ka_arr: [f32; 3] = [ka_vec[0], ka_vec[1], ka_vec[2]];
+    let kd_arr: [f32; 3] = [kd_vec[0], kd_vec[1], kd_vec[2]];
+    let ks_arr: [f32; 3] = [ks_vec[0], ks_vec[1], ks_vec[2]];
+
     let points = utils::to_ndarray2(&points).unwrap();
     let triangles = utils::to_ndarray2(&triangles).unwrap().map(|&v| v as usize);
     let texture = utils::to_ndarray3(&texture).unwrap().map(|&v| v as u8);
@@ -40,6 +77,12 @@ fn generate_projections<'py>(
         texture.view(),
         triangle_uvs.view(),
         precision,
+        ka_arr,
+        kd_arr,
+        ks_arr,
+        ns,
+        opacity,
+        illum,
         filtering,
         logging_enabled,
     );
@@ -51,7 +94,7 @@ fn generate_projections<'py>(
     let images = PyArray4::from_owned_array(py, images);
     let ocp_maps = PyArray3::from_owned_array(py, ocp_maps);
     log_removed_points!(logging_enabled && filtering > 0, freqs);
-    (images, ocp_maps)
+    Ok((images, ocp_maps))
 }
 
 #[pymodule]

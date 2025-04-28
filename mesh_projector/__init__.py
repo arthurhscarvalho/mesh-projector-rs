@@ -1,5 +1,5 @@
 from textwrap import dedent
-
+import os
 import cv2
 import numpy as np
 import open3d as o3d
@@ -14,13 +14,90 @@ def info(msg):
     logger.info(msg)
 
 
-def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=False):
+def _parse_mtl(mtl_path):
+    """Parses relevant properties from an MTL file."""
+    if not mtl_path or not os.path.exists(mtl_path):
+        logger.warning(
+            f"MTL file not provided or not found: {mtl_path}. Using default material values."
+        )
+        # Default PBR-like values (neutral)
+        return {
+            "ka": [0.1, 0.1, 0.1],
+            "kd": [0.8, 0.8, 0.8],
+            "ks": [0.1, 0.1, 0.1],
+            "ns": 10.0,
+            "opacity": 1.0,
+            "illum": 2,  # Default illumination model
+        }
+
+    material = {
+        "ka": [0.1, 0.1, 0.1],  # Default Ambient
+        "kd": [0.8, 0.8, 0.8],  # Default Diffuse
+        "ks": [0.1, 0.1, 0.1],  # Default Specular
+        "ns": 10.0,  # Default Shininess
+        "opacity": 1.0,  # Default Opacity (from d or Tr)
+        "illum": 2,  # Default Illumination model
+    }
+
+    try:
+        with open(mtl_path, "r") as f:
+            for line in f:
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                key = parts[0].lower()
+                values = parts[1:]
+
+                if key == "ka" and len(values) == 3:
+                    material["ka"] = [float(v) for v in values]
+                elif key == "kd" and len(values) == 3:
+                    material["kd"] = [float(v) for v in values]
+                elif key == "ks" and len(values) == 3:
+                    material["ks"] = [float(v) for v in values]
+                elif key == "ns" and len(values) == 1:
+                    material["ns"] = float(values[0])
+                elif key == "tr" and len(values) == 1:  # Transparency (1 - opacity)
+                    material["opacity"] = 1.0 - float(values[0])
+                elif key == "d" and len(values) == 1:  # Dissolve (opacity)
+                    material["opacity"] = float(values[0])
+                elif key == "illum" and len(values) == 1:
+                    material["illum"] = int(values[0])
+                # map_Kd is ignored here as the texture data is passed separately
+                # Add other MTL properties if needed
+
+        # Clamp opacity
+        material["opacity"] = max(0.0, min(1.0, material["opacity"]))
+        info(f"Parsed material properties from {mtl_path}: {material}")
+
+    except Exception as e:
+        logger.error(f"Error parsing MTL file {mtl_path}: {e}. Using default values.")
+        # Reset to defaults on error
+        material = {
+            "ka": [0.1, 0.1, 0.1],
+            "kd": [0.8, 0.8, 0.8],
+            "ks": [0.1, 0.1, 0.1],
+            "ns": 10.0,
+            "opacity": 1.0,
+            "illum": 2,
+        }
+
+    return material
+
+
+def read_mesh(
+    obj_location,
+    texture_file,
+    mtl_location=None,
+    enable_post_processing=False,
+    verbose=False,
+):
     """
     Loads a mesh and its texture (external).
 
     Args:
         obj_location (str): Path to the OBJ mesh file.
         texture_file (str): Path to the texture image file.
+        mtl_location (str, optional): Path to the MTL material file. Defaults to None.
         enable_post_processing (bool): Enables Open3D post-processing (e.g., vertex merging).
         verbose (bool): Enables detailed logging output.
 
@@ -46,6 +123,8 @@ def read_mesh(obj_location, texture_file, enable_post_processing=False, verbose=
     texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
     mesh.textures = [o3d.geometry.Image(texture)]
     info(f"Texture load successful: {texture_file}")
+    # Note: We load the MTL separately if needed, Open3D doesn't directly apply it here
+    # in a way that's easily transferable to our custom renderer.
     return mesh
 
 
@@ -141,6 +220,7 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
 def generate_projections(
     mesh,
     precision,
+    mtl_location=None,
     filtering=0,
     verbose=False,
 ):
@@ -153,6 +233,7 @@ def generate_projections(
         mesh: (o3d.geometry.TriangleMesh): An open3d mesh with texture attached.
         precision (int): A power-of-2 exponent determining the output image resolution.
                          The output images will be `(2^precision) x (2^precision)`.
+        mtl_location (str, optional): Path to the MTL file for material properties. Defaults to None.
         filtering (int, optional): Radius of the square neighborhood window for outlier filtering. Defaults to 0.
                                    A value of 0 disables the filtering step.
         verbose (bool, optional): Flag to enable or disable logging messages. Defaults to False.
@@ -165,11 +246,32 @@ def generate_projections(
     """
     if verbose is not True:
         logger.remove()
+
+    info("Parsing MTL file (if provided)")
+    material_props = _parse_mtl(mtl_location)
+
     info("Preprocessing mesh")
-    mesh_data = preprocess_mesh(mesh, precision)
+    mesh_data = preprocess_mesh(mesh, precision, verbose=verbose)
     info("Sending data to Rust back-end")
+
+    # Unpack mesh data
+    vertices, triangle_indices, texture_np, triangle_uvs = mesh_data
+
+    # Call the Rust backend with material properties
     images, ocp_maps = _internal_generate_projections(
-        *mesh_data, precision, filtering, verbose
+        vertices,
+        triangle_indices,
+        texture_np,
+        triangle_uvs,
+        precision,
+        material_props["ka"],  # Ambient color (list/tuple)
+        material_props["kd"],  # Diffuse color (list/tuple)
+        material_props["ks"],  # Specular color (list/tuple)
+        material_props["ns"],  # Shininess (float)
+        material_props["opacity"],  # Opacity (float)
+        material_props["illum"],  # Illumination model (int)
+        filtering,
+        verbose,
     )
     images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
     info("Projections successfully generated!")

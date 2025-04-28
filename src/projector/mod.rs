@@ -14,8 +14,9 @@ use constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
 use nd::{Array3, Array4, ArrayView2, ArrayView3, Axis, Ix3, Ix4};
-use rasterization::rasterize_triangle;
+use rasterization::{rasterize_triangle, MaterialProperties};
 use rayon::prelude::*;
+use rayon::scope;
 use texture::TextureData;
 
 /// Computes 6 orthographic projections (front/back for X/Y/Z) of a textured mesh.
@@ -32,6 +33,12 @@ use texture::TextureData;
 ///                   tri 0 vertex 1, tri 0 vertex 2, tri 1 vertex 0, ...).
 /// * `precision`: A power-of-2 exponent determining the output image resolution.
 ///                The output images will be `(2^precision) x (2^precision)`.
+/// * `ka`: Ambient color.
+/// * `kd`: Diffuse color.
+/// * `ks`: Specular color.
+/// * `ns`: Shininess (specular exponent).
+/// * `opacity`: Opacity (0.0=transparent, 1.0=opaque).
+/// * `illum`: Illumination model.
 /// * `filtering_window_radius`: Radius of the square neighborhood window for outlier filtering.
 ///                              A value of 0 disables the filtering step.
 /// * `logging_enabled`: Flag to enable or disable conditional logging messages.
@@ -49,6 +56,12 @@ pub fn compute_mesh_projections(
     texture: ArrayView3<u8>,       // Texture data (H, W, C)
     triangle_uvs: ArrayView2<f32>, // UV coords per face-vertex (M*3, 2)
     precision: u32,                // Log2 of output image dimensions
+    ka: [f32; 3],                  // Ambient color
+    kd: [f32; 3],                  // Diffuse color
+    ks: [f32; 3],                  // Specular color
+    ns: f32,                       // Shininess (specular exponent)
+    opacity: f32,                  // Opacity (0.0=transparent, 1.0=opaque)
+    illum: u32,                    // Illumination model
     filtering_window_radius: u32,  // Radius for outlier filter (0=disabled)
     logging_enabled: bool,         // Enable/disable logging
 ) -> (Array4<u8>, Array3<f32>, [u64; NUM_IMAGES]) {
@@ -102,19 +115,27 @@ pub fn compute_mesh_projections(
         );
     }
 
+    // --- Create Material Properties Struct ---
+    let material = MaterialProperties {
+        ka,
+        kd,
+        ks,
+        ns,
+        opacity,
+        illum,
+    }; // Use passed values
+
     // --- Precomputation ---
     conditional_log!(logging_enabled, info, "Precomputing triangle normals...");
-    // Calculate geometric normals for all triangles once upfront.
     let triangle_normals = precompute_triangle_normals(points, triangles);
     conditional_log!(logging_enabled, info, "...Normal precomputation finished.");
 
     // --- Buffer Initialization ---
     conditional_log!(logging_enabled, info, "Initializing output buffers...");
-    // Create the Buffers struct containing initialized images, z-buffers, and occlusion maps.
     let mut buffers = Buffers::new(NUM_IMAGES, rows, cols, channels);
     conditional_log!(logging_enabled, info, "...Buffer initialization finished.");
 
-    // --- Rasterization (Parallel over Views) ---
+    // --- Rasterization (Parallel over Views within rayon::scope) ---
     conditional_log!(
         logging_enabled,
         info,
@@ -122,40 +143,39 @@ pub fn compute_mesh_projections(
         NUM_IMAGES
     );
 
-    // Prepare mutable views into the buffer arrays for parallel processing.
-    // Collecting views into Vecs allows using `par_iter_mut` provided by Rayon.
     let mut z_buffer_views: Vec<_> = buffers.z_buffers.axis_iter_mut(Axis(0)).collect();
     let mut image_views: Vec<_> = buffers.images.axis_iter_mut(Axis(0)).collect();
     let mut ocp_map_views: Vec<_> = buffers.ocp_maps.axis_iter_mut(Axis(0)).collect();
 
-    // Use Rayon's parallel iterators to process each projection view (image layer) concurrently.
-    z_buffer_views
-        .par_iter_mut() // Parallel mutable iterator over Z-buffer views
-        .zip(image_views.par_iter_mut()) // Combine with parallel iterator over image views
-        .zip(ocp_map_views.par_iter_mut()) // Combine with parallel iterator over occlusion map views
-        .enumerate() // Add index `img_layer` (0 to NUM_IMAGES - 1)
-        .for_each(|(img_layer, ((z_slice, image_slice), ocp_slice))| {
-            // For each view/layer:
-            // 1. Create the specific ProjectionConfig for this view.
-            let projection_config = ProjectionConfig::new(img_layer);
-            let num_faces = triangles.nrows();
+    // Use rayon::scope
+    scope(|_| {
+        z_buffer_views
+            .par_iter_mut()
+            .zip(image_views.par_iter_mut())
+            .zip(ocp_map_views.par_iter_mut())
+            .enumerate()
+            .for_each(|(img_layer, ((z_slice, image_slice), ocp_slice))| {
+                let projection_config = ProjectionConfig::new(img_layer);
+                let num_faces = triangles.nrows();
 
-            // 2. Rasterize all triangles onto this view's buffers.
-            for t_idx in 0..num_faces {
-                rasterize_triangle(
-                    t_idx,              // Current triangle index
-                    points,             // All vertex positions
-                    triangles,          // All triangle indices
-                    triangle_uvs,       // All UV coordinates
-                    &triangle_normals,  // Precomputed normals
-                    &texture_data,      // Texture info
-                    &projection_config, // View-specific config
-                    z_slice,            // Mutable Z-buffer slice for this view
-                    image_slice,        // Mutable image slice for this view
-                    ocp_slice,          // Mutable occlusion map slice for this view
-                );
-            }
-        });
+                for t_idx in 0..num_faces {
+                    rasterize_triangle(
+                        t_idx,
+                        points,
+                        triangles,
+                        triangle_uvs,
+                        &triangle_normals,
+                        &material,
+                        Some(&texture_data),
+                        &projection_config,
+                        z_slice,
+                        image_slice,
+                        ocp_slice,
+                    );
+                }
+            });
+    }); // End of rayon::scope
+
     conditional_log!(logging_enabled, info, "...Rasterization finished.");
 
     // --- Post-processing (Outlier Filtering) ---
