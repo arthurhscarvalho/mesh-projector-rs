@@ -1,14 +1,15 @@
 // src/projector/rasterization.rs
 use crate::projector::config::ProjectionConfig;
 use crate::projector::geometry::{
-    barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
+    barycentric, calculate_bounding_box, dot_product, is_inside_triangle, is_triangle_visible,
+    reflect, vec_scale_ret,
 };
 use crate::projector::texture::TextureData;
 use nd::{Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
 use std::f32;
 
 /// Interpolates texture coordinates using barycentric coordinates and samples the texture color
-/// using bilinear filtering. Returns the sampled color as [f32; channels].
+/// using bilinear filtering. Returns the sampled color as a `Vec<f32>` in [0, 1] range.
 /// Assumes standard UV mapping where (0,0) is top-left and (1,1) is bottom-right.
 /// Handles clamping coordinates to the texture boundaries.
 #[inline]
@@ -17,31 +18,27 @@ fn sample_texture_color_bilinear(
     interp_v_coord: f32, // Perspective-correct interpolated V coordinate [0, 1]
     texture_data: &TextureData, // Contains texture view and dimensions
 ) -> Vec<f32> {
-    // Return type changed
-    // --- Bilinear Filtering Implementation ---
-
-    // Calculate floating-point texture coordinates (px, py)
     let tex_xf = interp_u_coord * texture_data.width_f32;
+    // Flip V coordinate for standard UV mapping (0,0 at top-left)
     let tex_yf = (1.0 - interp_v_coord) * texture_data.height_f32;
 
-    // Calculate the integer coordinates of the top-left texel (x0, y0)
+    // Clamp coordinates to valid texture range, accounting for potential floating point inaccuracies
     let x0f = tex_xf.max(0.0).min(texture_data.width_f32 - 1.0001);
     let y0f = tex_yf.max(0.0).min(texture_data.height_f32 - 1.0001);
     let x0 = x0f as usize;
     let y0 = y0f as usize;
 
-    // Calculate the integer coordinates of the bottom-right texel (x1, y1)
-    let x1 = x0 + 1;
-    let y1 = y0 + 1;
+    // Ensure bottom-right texel coordinates are within bounds
+    let x1 = (x0 + 1).min((texture_data.width_f32 - 1.0) as usize);
+    let y1 = (y0 + 1).min((texture_data.height_f32 - 1.0) as usize);
 
-    // Calculate the fractional parts (weights) for interpolation
+    // Calculate interpolation weights
     let wx = x0f - x0 as f32;
     let wy = y0f - y0 as f32;
 
-    // Sample the four neighboring texels
     let tex = &texture_data.texture;
     let c = texture_data.channels;
-    let mut sampled_color = vec![0.0f32; c]; // Allocate vector for result
+    let mut sampled_color = vec![0.0f32; c];
 
     for chan in 0..c {
         let c00 = tex[[y0, x0, chan]] as f32; // Top-left
@@ -49,15 +46,129 @@ fn sample_texture_color_bilinear(
         let c01 = tex[[y1, x0, chan]] as f32; // Bottom-left
         let c11 = tex[[y1, x1, chan]] as f32; // Bottom-right
 
-        // Perform bilinear interpolation
-        let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy) // Top-left influence
-                               + c10 * wx * (1.0 - wy)         // Top-right influence
-                               + c01 * (1.0 - wx) * wy         // Bottom-left influence
-                               + c11 * wx * wy; // Bottom-right influence
+        let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy)
+            + c10 * wx * (1.0 - wy)
+            + c01 * (1.0 - wx) * wy
+            + c11 * wx * wy;
 
-        sampled_color[chan] = interpolated_channel / 255.0; // Normalize to [0, 1] range
+        sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f32 [0, 1]
     }
-    sampled_color // Return the vec
+    sampled_color
+}
+
+/// Calculates the final color of a fragment based on material, lighting, and texture.
+/// Assumes inputs (material colors, texture) are sRGB and performs calculations in linear space.
+#[inline]
+fn calculate_fragment_color(
+    material: &MaterialProperties,
+    map_kd: Option<&TextureData>,
+    interp_u_coord: f32,
+    interp_v_coord: f32,
+    normal: &[f32; 3],
+    light_dir: &[f32; 3],
+    view_dir: &[f32; 3],
+    light_color: &[f32; 3],
+) -> [f32; 3] {
+    // Returns final *linear* color before alpha blending
+    // --- Linearize Material Colors (assuming input Ka/Kd/Ks are sRGB) ---
+    let linear_ka = [
+        material.ka[0].powf(2.2),
+        material.ka[1].powf(2.2),
+        material.ka[2].powf(2.2),
+    ];
+    let linear_kd = [
+        material.kd[0].powf(2.2),
+        material.kd[1].powf(2.2),
+        material.kd[2].powf(2.2),
+    ];
+    let linear_ks = [
+        material.ks[0].powf(2.2),
+        material.ks[1].powf(2.2),
+        material.ks[2].powf(2.2),
+    ];
+
+    // --- Calculate Effective Diffuse Color (in linear space) ---
+    let effective_diffuse_linear = if let Some(tex_data) = map_kd {
+        let sampled_rgb = sample_texture_color_bilinear(interp_u_coord, interp_v_coord, tex_data);
+        let mut modulated_color = [0.0f32; 3];
+        if sampled_rgb.len() >= 3 {
+            for i in 0..3 {
+                let linear_sampled = sampled_rgb[i].powf(2.2); // Linearize texture sample
+                modulated_color[i] = linear_sampled * linear_kd[i]; // Modulate by linear Kd
+            }
+        } else if sampled_rgb.len() == 1 {
+            // Handle grayscale texture
+            let linear_sampled = sampled_rgb[0].powf(2.2);
+            for i in 0..3 {
+                modulated_color[i] = linear_sampled * linear_kd[i];
+            }
+        } else {
+            modulated_color = linear_kd; // Fallback to linear Kd if texture is invalid
+        }
+        modulated_color
+    } else {
+        // If no texture, use linearized material diffuse color directly
+        linear_kd
+    };
+
+    // --- Illumination Model Logic (Using LINEAR colors) ---
+    let mut final_color_linear = [0.0f32; 3];
+    match material.illum {
+        0 => {
+            // Color on and Ambient off
+            final_color_linear = effective_diffuse_linear;
+        }
+        1 => {
+            // Color on and Ambient on
+            for i in 0..3 {
+                final_color_linear[i] = linear_ka[i] + effective_diffuse_linear[i];
+            }
+        }
+        2 => {
+            // Highlight on (Phong)
+
+            // Ambient Component
+            let global_ambient_light = [0.25, 0.25, 0.25]; // Standard ambient factor
+            let ambient_term = [
+                global_ambient_light[0] * linear_ka[0],
+                global_ambient_light[1] * linear_ka[1],
+                global_ambient_light[2] * linear_ka[2],
+            ];
+
+            // Diffuse Component
+            let dot_nl = dot_product(normal, light_dir).max(0.0);
+            let diffuse_term = vec_scale_ret(&effective_diffuse_linear, dot_nl * light_color[0]);
+
+            // Specular Component
+            let mut reflected_light_dir = [0.0; 3];
+            let neg_light_dir = [-light_dir[0], -light_dir[1], -light_dir[2]];
+            reflect(&neg_light_dir, normal, &mut reflected_light_dir);
+            let dot_rv = dot_product(&reflected_light_dir, view_dir).max(0.0);
+            let specular_intensity = if material.ns > 0.0 {
+                dot_rv.powf(material.ns)
+            } else {
+                0.0
+            };
+            let specular_term = vec_scale_ret(&linear_ks, specular_intensity * light_color[0]);
+
+            // Combine components
+            for i in 0..3 {
+                final_color_linear[i] = ambient_term[i] + diffuse_term[i] + specular_term[i];
+            }
+        }
+        _ => {
+            // Default/Unsupported: Use effective_diffuse color only
+            final_color_linear = effective_diffuse_linear;
+        }
+    }
+
+    // --- Reinhard Tone Mapping --- Apply tone mapping to the linear color
+    let mut tonemapped_color = [0.0f32; 3];
+    for i in 0..3 {
+        tonemapped_color[i] = final_color_linear[i] / (1.0 + final_color_linear[i]);
+    }
+
+    tonemapped_color // Return the tone-mapped linear color
 }
 
 /// Rasterizes a single triangle onto the specified image slices (color, depth, occlusion).
@@ -78,19 +189,19 @@ pub fn rasterize_triangle(
 ) {
     // 1. Back-face Culling: Check if the triangle is visible from the current view direction.
     let normal_view = triangle_normals.row(t_idx);
-    let mut normal: [f32; 3] = [normal_view[0], normal_view[1], normal_view[2]];
+    let mut normal_f32: [f32; 3] = [normal_view[0], normal_view[1], normal_view[2]];
     // --- Normalize the normal vector for lighting calculations ---
-    let mag_sq = normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2];
+    let mag_sq = dot_product(&normal_f32, &normal_f32);
     if mag_sq > 1e-9 {
         // Avoid division by zero or near-zero for degenerate triangles
         let inv_mag = 1.0 / mag_sq.sqrt();
-        normal[0] *= inv_mag;
-        normal[1] *= inv_mag;
-        normal[2] *= inv_mag;
+        for i in 0..3 {
+            normal_f32[i] *= inv_mag;
+        }
     } else {
         // Handle degenerate triangle normal (e.g., set to a default like [0,0,1] or skip lighting)
         // For now, let it be [0,0,0], which will result in zero diffuse/specular
-        normal = [0.0, 0.0, 0.0];
+        normal_f32 = [0.0, 0.0, 0.0];
     }
     // -----------------------------------------------------------
 
@@ -151,7 +262,8 @@ pub fn rasterize_triangle(
     };
 
     // --- Lighting Setup (Simple) ---
-    // Use a fixed diagonal light source instead of view direction
+    // Use a fixed diagonal light source instead of view direction -> Change to use view direction
+    /*
     let fixed_light_dir = [1.0f32, 1.0f32, 1.0f32];
     let light_mag_sq = fixed_light_dir[0] * fixed_light_dir[0]
         + fixed_light_dir[1] * fixed_light_dir[1]
@@ -162,18 +274,18 @@ pub fn rasterize_triangle(
         fixed_light_dir[1] * inv_light_mag,
         fixed_light_dir[2] * inv_light_mag,
     ]; // Normalized fixed light direction
-       // let light_dir_tuple = projection_config.view_dir; // Old: Use view direction as light direction
-       // let light_dir = [light_dir_tuple.0, light_dir_tuple.1, light_dir_tuple.2]; // Old: Already normalized
-    let light_color = [1.0, 1.0, 1.0]; // White light
-                                       // View direction (vector FROM surface point TO camera/eye)
-                                       // Note: For orthographic, this is constant, opposite of the projection direction.
-    let view_dir_tuple = (
+    */
+    // Light direction L should point FROM surface point TO light source.
+    // If light source is at the viewpoint, L is opposite of projection_config.view_dir.
+    let light_dir_tuple = (
         -projection_config.view_dir.0,
         -projection_config.view_dir.1,
         -projection_config.view_dir.2,
     );
-    let view_dir = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2]; // Already normalized
-                                                                           // --- End Lighting Setup ---
+    let light_dir = [light_dir_tuple.0, light_dir_tuple.1, light_dir_tuple.2]; // Already normalized
+    let light_color = [1.0, 1.0, 1.0]; // Reverted light intensity back to 1.0 (white light)
+                                       // View direction (vector FROM surface point TO camera/eye)
+                                       // Note: For orthographic, this is constant, opposite of the projection direction.
 
     // 5. Iterate Pixels in Bounding Box: Loop through each pixel potentially covered by the triangle.
     for r in min_row..=max_row {
@@ -233,128 +345,32 @@ pub fn rasterize_triangle(
                         // NOTE: Even partially transparent objects contribute to occlusion map here.
                         ocp_slice[[r, c]] = 1.0;
 
-                        // --- Restore Original Shading Logic ---
-
-                        // 10. Shading Calculation (Based on Illumination Model)
-                        let mut final_color_f32 = [0.0f32; 3]; // Use f32 for calculations
-
-                        // Calculate effective diffuse color: Texture * Kd (if texture), or just Kd.
-                        let effective_diffuse = if let Some(tex_data) = map_kd {
-                            let sampled_rgb = sample_texture_color_bilinear(
-                                interp_u_coord,
-                                interp_v_coord,
-                                tex_data,
-                            );
-
-                            // --- DEBUG LOGGING for Texture Sampling ---
-                            if r % 100 == 0 && c % 100 == 0 {
-                                // Log occasionally
-                                log::debug!(
-                                    "t_idx: {}, r: {}, c: {}, uv_in: ({:.3}, {:.3}), sampled_rgb: {:?}",
-                                    t_idx, r, c, interp_u_coord, interp_v_coord, sampled_rgb
-                                );
-                            }
-                            // --- END DEBUG LOGGING ---
-
-                            // Modulate texture color by Kd
-                            let mut modulated_color = [0.0f32; 3];
-                            if sampled_rgb.len() >= 3 {
-                                for i in 0..3 {
-                                    modulated_color[i] = sampled_rgb[i] * material.kd[i];
-                                }
-                            } else if sampled_rgb.len() == 1 {
-                                // Handle grayscale texture
-                                for i in 0..3 {
-                                    modulated_color[i] = sampled_rgb[0] * material.kd[i];
-                                }
-                            } else {
-                                // Fallback
-                                modulated_color = material.kd; // Use Kd if texture is invalid
-                            }
-                            modulated_color // This is Texture * Kd
-                        } else {
-                            // If no texture, use material diffuse color directly
-                            material.kd
-                        };
-
-                        // --- Illumination Model Logic (Using effective_diffuse) ---
-                        match material.illum {
-                            0 => {
-                                // Color on and Ambient off
-                                final_color_f32 = effective_diffuse;
-                            }
-                            1 => {
-                                // Color on and Ambient on
-                                // final_color = Ka + effective_diffuse
-                                for i in 0..3 {
-                                    final_color_f32[i] = material.ka[i] + effective_diffuse[i];
-                                }
-                            }
-                            2 => {
-                                // Highlight on (Phong)
-                                // FinalColor = GlobalAmbient*Ka + LightColor*(Diffuse + Specular)
-
-                                // Ambient Component (using Ka and a global ambient factor)
-                                let global_ambient_light = [0.25, 0.25, 0.25]; // Increased ambient factor
-                                let ambient_term = [
-                                    global_ambient_light[0] * material.ka[0],
-                                    global_ambient_light[1] * material.ka[1],
-                                    global_ambient_light[2] * material.ka[2],
-                                ];
-
-                                // Diffuse Component (use effective_diffuse, apply lighting)
-                                let dot_nl = dot_product(&normal, &light_dir).max(0.0);
-                                let diffuse_term =
-                                    vec_scale_ret(&effective_diffuse, dot_nl * light_color[0]); // Use effective_diffuse
-
-                                // Specular Component (LightColor * Ks * pow(max(0, R.V), Ns))
-                                let mut reflected_light_dir = [0.0; 3];
-                                reflect(
-                                    &vec_scale_ret(&light_dir, -1.0),
-                                    &normal,
-                                    &mut reflected_light_dir,
-                                ); // Use NORMALIZED normal for reflection
-                                let dot_rv = dot_product(&reflected_light_dir, &view_dir).max(0.0);
-                                let specular_intensity = if material.ns > 0.0 {
-                                    dot_rv.powf(material.ns)
-                                } else {
-                                    0.0
-                                }; // Handle Ns=0
-                                let specular_term = vec_scale_ret(
-                                    &material.ks,
-                                    specular_intensity * light_color[0],
-                                ); // Assuming white light [1,1,1]
-
-                                // Combine components (Ambient + Diffuse + Specular)
-                                for i in 0..3 {
-                                    final_color_f32[i] = ambient_term[i]  // Ambient term
-                                                      + diffuse_term[i] // Diffuse term
-                                                      + specular_term[i]; // Specular term
-                                }
-                            }
-                            _ => {
-                                // Default/Unsupported: Use effective_diffuse color only
-                                final_color_f32 = effective_diffuse;
-                            }
-                        }
+                        // Calculate Fragment Color using the dedicated function
+                        let tonemapped_linear_color = calculate_fragment_color(
+                            material,
+                            map_kd,
+                            interp_u_coord,
+                            interp_v_coord,
+                            &normal_f32,
+                            &light_dir,
+                            &light_dir, // Use light_dir for view_dir (orthographic, light at camera)
+                            &light_color,
+                        );
 
                         // --- Alpha Blending ---
-                        // SrcColor = final_color_f32 (calculated color before opacity scaling)
-                        // SrcAlpha = material.opacity
-                        // DstColor = [1.0, 1.0, 1.0] (white background)
-                        // FinalColor = SrcColor * SrcAlpha + DstColor * (1 - SrcAlpha)
-
+                        // Use the result from calculate_fragment_color for blending
                         let src_alpha = material.opacity;
                         let one_minus_src_alpha = 1.0 - src_alpha;
                         let background_color = [1.0f32, 1.0f32, 1.0f32]; // Assuming white background
 
                         let mut blended_color_f32 = [0.0f32; 3];
                         for i in 0..3 {
-                            blended_color_f32[i] = (final_color_f32[i] * src_alpha)
+                            blended_color_f32[i] = (tonemapped_linear_color[i] * src_alpha)
                                 + (background_color[i] * one_minus_src_alpha);
                         }
 
                         // Clamp final blended color before converting to u8
+                        // (Clamping might still be needed if alpha blending produces values slightly outside [0,1])
                         for i in 0..3 {
                             blended_color_f32[i] = blended_color_f32[i].clamp(0.0, 1.0);
                         }
@@ -363,13 +379,16 @@ pub fn rasterize_triangle(
                         let image_channels = image_slice.shape()[2];
                         for chan in 0..image_channels.min(3) {
                             // Write R, G, B from blended color
-                            image_slice[[r, c, chan]] = (blended_color_f32[chan] * 255.0) as u8;
+                            // Convert linear color back to sRGB before storing as u8
+                            let srgb_val = blended_color_f32[chan].powf(1.0 / 2.2);
+                            // Write the linear, blended, clamped value directly
+                            image_slice[[r, c, chan]] = (srgb_val * 255.0) as u8;
                         }
                         // Handle Alpha channel if present - Write the original fragment opacity
+                        // Alpha is typically linear, no need to convert.
                         if image_channels == 4 {
                             image_slice[[r, c, 3]] = (src_alpha * 255.0) as u8;
                         }
-                        // --- END ORIGINAL SHADING LOGIC (but removed opacity scaling) ---
                     }
                 }
             }
@@ -377,45 +396,8 @@ pub fn rasterize_triangle(
     }
 }
 
-// Helper function needed for reflect call above (ndarray doesn't have simple vec scale returning new vec)
-#[inline]
-fn vec_scale_ret(a: &[f32], s: f32) -> Vec<f32> {
-    a.iter().map(|x| x * s).collect()
-}
-
-// --- Helper functions for basic vector math ---
-#[inline]
-fn dot_product(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
-#[inline]
-fn vec_sub(a: &[f32], b: &[f32], out: &mut [f32]) {
-    for i in 0..out.len() {
-        out[i] = a[i] - b[i];
-    }
-}
-
-#[inline]
-fn vec_scale(a: &[f32], s: f32, out: &mut [f32]) {
-    // Re-added original vec_scale if needed elsewhere
-    for i in 0..out.len() {
-        out[i] = a[i] * s;
-    }
-}
-
-#[inline]
-fn reflect(neg_l: &[f32], n: &[f32], out: &mut [f32]) {
-    let dot_nl = dot_product(n, neg_l);
-    // Use a temporary variable to avoid mutable borrow conflict
-    let mut temp = [0.0f32; 3]; // Assuming 3D vectors
-                                // Use vec_scale since vec_scale_inplace was removed
-    vec_scale(n, 2.0 * dot_nl, &mut temp); // temp = 2 * dot(N, -L) * N
-    vec_sub(neg_l, &temp, out); // out = neg_l - temp
-}
-
-// Simple struct to hold material properties (replace with proper MTL parsing later)
-#[derive(Debug, Clone, Copy)] // Add derive traits for easier use
+// Simple struct to hold material properties
+#[derive(Debug, Clone, Copy)]
 pub struct MaterialProperties {
     pub ka: [f32; 3], // Ambient color
     pub kd: [f32; 3], // Diffuse color
