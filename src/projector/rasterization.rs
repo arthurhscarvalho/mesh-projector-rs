@@ -171,63 +171,53 @@ fn calculate_fragment_color(
     tonemapped_color // Return the tone-mapped linear color
 }
 
-/// Rasterizes a single triangle onto the specified image slices (color, depth, occlusion).
-/// Performs back-face culling, projects vertices, iterates pixels within the bounding box,
-/// performs depth testing, Phong shading, and updates buffers for visible fragments.
+/// Rasterizes a single triangle using vertex normal interpolation for smooth shading.
 pub fn rasterize_triangle(
-    t_idx: usize,                         // Index of the current triangle being processed
+    t_idx: usize,                         // Index of the current triangle
     points: ArrayView2<f32>,              // All vertex 3D positions (N, 3)
-    triangles: ArrayView2<usize>,         // Triangle vertex indices (M, 3) defining faces
+    triangles: ArrayView2<usize>,         // Triangle vertex indices (M, 3)
     triangle_uvs: ArrayView2<f32>,        // UV coordinates per triangle vertex (M*3, 2)
-    triangle_normals: &Array2<f32>,       // Precomputed geometric normals per triangle (M, 3)
-    material: &MaterialProperties,        // Material properties for this triangle
-    map_kd: Option<&TextureData>,         // Optional diffuse texture map
+    triangle_normals: &Array2<f32>, // Precomputed geometric normals per triangle (M, 3) -> For Culling
+    vertex_normals: ArrayView2<f32>, // Vertex normals (N, 3) -> For Shading // ADDED
+    material: &MaterialProperties,  // Material properties
+    map_kd: Option<&TextureData>,   // Optional diffuse texture map
     projection_config: &ProjectionConfig, // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f32>,     // Mutable view to the Z-buffer for this view
-    image_slice: &mut ArrayViewMut3<u8>,  // Mutable view to the color image buffer for this view
-    ocp_slice: &mut ArrayViewMut2<f32>,   // Mutable view to the occlusion map for this view
+    z_slice: &mut ArrayViewMut2<f32>, // Mutable view to the Z-buffer
+    image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer
+    ocp_slice: &mut ArrayViewMut2<f32>, // Mutable view to the occlusion map
 ) {
-    // 1. Back-face Culling: Check if the triangle is visible from the current view direction.
-    let normal_view = triangle_normals.row(t_idx);
-    let mut normal_f32: [f32; 3] = [normal_view[0], normal_view[1], normal_view[2]];
-    // --- Normalize the normal vector for lighting calculations ---
-    let mag_sq = dot_product(&normal_f32, &normal_f32);
-    if mag_sq > 1e-9 {
-        // Avoid division by zero or near-zero for degenerate triangles
-        let inv_mag = 1.0 / mag_sq.sqrt();
-        for i in 0..3 {
-            normal_f32[i] *= inv_mag;
-        }
-    } else {
-        // Handle degenerate triangle normal (e.g., set to a default like [0,0,1] or skip lighting)
-        // For now, let it be [0,0,0], which will result in zero diffuse/specular
-        normal_f32 = [0.0, 0.0, 0.0];
-    }
-    // -----------------------------------------------------------
-
-    // Use the *unnormalized* normal for back-face culling (magnitude doesn't affect sign)
+    // 1. Back-face Culling: Use the precomputed *geometric* normal for this.
+    let geometric_normal_view = triangle_normals.row(t_idx);
     if !is_triangle_visible(
-        normal_view[0],
-        normal_view[1],
-        normal_view[2],
+        geometric_normal_view[0],
+        geometric_normal_view[1],
+        geometric_normal_view[2],
         projection_config.view_dir,
     ) {
-        return; // Cull the triangle if it's facing away from the view.
+        return; // Cull the triangle if it's facing away.
     }
 
-    // 2. Get Vertex Data: Retrieve 3D positions and UV coordinates for the triangle's vertices.
+    // 2. Get Vertex Data Indices
     let tri_indices = triangles.row(t_idx);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
 
-    let p0 = points.row(i0); // 3D position of vertex 0
-    let p1 = points.row(i1); // 3D position of vertex 1
-    let p2 = points.row(i2); // 3D position of vertex 2
+    // Get 3D positions
+    let p0 = points.row(i0);
+    let p1 = points.row(i1);
+    let p2 = points.row(i2);
 
-    // --- Perspective Correct Interpolation Setup ---
-    // Extract depth (z) coordinates and compute 1/z for perspective correction.
-    // Add a small epsilon to avoid division by zero or issues very close to the projection plane.
+    // Get vertex normals (for interpolation)
+    let n0_view = vertex_normals.row(i0);
+    let n1_view = vertex_normals.row(i1);
+    let n2_view = vertex_normals.row(i2);
+    // Convert ArrayView rows to [f32; 3] arrays for easier handling
+    let n0 = [n0_view[0], n0_view[1], n0_view[2]];
+    let n1 = [n1_view[0], n1_view[1], n1_view[2]];
+    let n2 = [n2_view[0], n2_view[1], n2_view[2]];
+
+    // --- Perspective Correct Interpolation Setup (Depth and UVs) ---
     let z0 = p0[projection_config.depth_axis];
     let z1 = p1[projection_config.depth_axis];
     let z2 = p2[projection_config.depth_axis];
@@ -235,130 +225,102 @@ pub fn rasterize_triangle(
     let inv_z1 = 1.0 / (z1 + 1e-6);
     let inv_z2 = 1.0 / (z2 + 1e-6);
 
-    // UV coordinates are often stored per-face-vertex, so index calculation is t_idx * 3 + vertex_index.
     let uv_idx_base = t_idx * 3;
-    let uv0 = triangle_uvs.row(uv_idx_base); // UV coords for vertex 0 of this triangle instance
-    let uv1 = triangle_uvs.row(uv_idx_base + 1); // UV coords for vertex 1
-    let uv2 = triangle_uvs.row(uv_idx_base + 2); // UV coords for vertex 2
+    let uv0 = triangle_uvs.row(uv_idx_base);
+    let uv1 = triangle_uvs.row(uv_idx_base + 1);
+    let uv2 = triangle_uvs.row(uv_idx_base + 2);
 
-    // Pre-calculate UV coordinates divided by Z for perspective-correct interpolation.
     let uv0_over_z = (uv0[0] * inv_z0, uv0[1] * inv_z0);
     let uv1_over_z = (uv1[0] * inv_z1, uv1[1] * inv_z1);
     let uv2_over_z = (uv2[0] * inv_z2, uv2[1] * inv_z2);
     // --- End Perspective Correct Interpolation Setup ---
 
-    // 3. Project Vertices to 2D Plane: Extract the P and Q axis coordinates based on the projection config.
-    // These correspond to the (column, row) coordinates in the output image buffer.
+    // 3. Project Vertices to 2D Plane
     let p0_proj = (p0[projection_config.p_axis], p0[projection_config.q_axis]);
     let p1_proj = (p1[projection_config.p_axis], p1[projection_config.q_axis]);
     let p2_proj = (p2[projection_config.p_axis], p2[projection_config.q_axis]);
 
-    // 4. Calculate Bounding Box: Determine the min/max pixel coordinates covering the projected triangle.
+    // 4. Calculate Bounding Box
     let (rows, cols) = (z_slice.shape()[0], z_slice.shape()[1]);
     let Some((min_row, max_row, min_col, max_col)) =
         calculate_bounding_box(p0_proj, p1_proj, p2_proj, rows, cols)
     else {
-        return; // Triangle is completely off-screen or projects to zero area on screen.
+        return;
     };
 
-    // --- Lighting Setup (Simple) ---
-    // Use a fixed diagonal light source instead of view direction -> Change to use view direction
-    /*
-    let fixed_light_dir = [1.0f32, 1.0f32, 1.0f32];
-    let light_mag_sq = fixed_light_dir[0] * fixed_light_dir[0]
-        + fixed_light_dir[1] * fixed_light_dir[1]
-        + fixed_light_dir[2] * fixed_light_dir[2];
-    let inv_light_mag = 1.0 / light_mag_sq.sqrt();
-    let light_dir = [
-        fixed_light_dir[0] * inv_light_mag,
-        fixed_light_dir[1] * inv_light_mag,
-        fixed_light_dir[2] * inv_light_mag,
-    ]; // Normalized fixed light direction
-    */
-    // Light direction L should point FROM surface point TO light source.
-    // If light source is at the viewpoint, L is opposite of projection_config.view_dir.
+    // --- Lighting Setup ---
     let light_dir_tuple = (
         -projection_config.view_dir.0,
         -projection_config.view_dir.1,
         -projection_config.view_dir.2,
     );
-    let light_dir = [light_dir_tuple.0, light_dir_tuple.1, light_dir_tuple.2]; // Already normalized
-    let light_color = [1.0, 1.0, 1.0]; // Reverted light intensity back to 1.0 (white light)
-                                       // View direction (vector FROM surface point TO camera/eye)
-                                       // Note: For orthographic, this is constant, opposite of the projection direction.
+    let light_dir = [light_dir_tuple.0, light_dir_tuple.1, light_dir_tuple.2];
+    let light_color = [1.0, 1.0, 1.0];
+    // View direction V is constant for ortho, points from surface towards camera
+    let view_dir = light_dir; // Light at camera position
 
-    // 5. Iterate Pixels in Bounding Box: Loop through each pixel potentially covered by the triangle.
+    // 5. Iterate Pixels in Bounding Box
     for r in min_row..=max_row {
-        // Iterate through rows (q_axis)
         for c in min_col..=max_col {
-            // Iterate through columns (p_axis)
-            // Use pixel center coordinates for barycentric calculation for better accuracy.
-            let px = c as f32 + 0.5; // Center x-coordinate (p_axis)
-            let py = r as f32 + 0.5; // Center y-coordinate (q_axis)
+            let px = c as f32 + 0.5;
+            let py = r as f32 + 0.5;
 
-            // 6. Calculate Barycentric Coordinates: Determine if the pixel center (px, py) lies inside the projected triangle.
+            // 6. Calculate Barycentric Coordinates
             if let Some((u, v, w)) = barycentric(p0_proj, p1_proj, p2_proj, (px, py)) {
-                // Check if the coordinates are valid (all >= 0, handling floating point tolerance).
                 if is_inside_triangle(u, v, w) {
-                    // --- Perspective Correct Interpolation ---
-                    // Interpolate 1/z across the triangle.
+                    // --- Perspective Correct Interpolation (Depth & UV) ---
                     let interpolated_inv_z = u * inv_z0 + v * inv_z1 + w * inv_z2;
-                    // Calculate the perspective-correct depth Z.
                     let interpolated_depth = 1.0 / interpolated_inv_z;
 
-                    // Interpolate uv/z across the triangle.
                     let interpolated_u_over_z =
                         u * uv0_over_z.0 + v * uv1_over_z.0 + w * uv2_over_z.0;
                     let interpolated_v_over_z =
                         u * uv0_over_z.1 + v * uv1_over_z.1 + w * uv2_over_z.1;
-
-                    // Calculate the perspective-correct UV coordinates.
                     let interp_u_coord = interpolated_u_over_z * interpolated_depth;
                     let interp_v_coord = interpolated_v_over_z * interpolated_depth;
-                    // --- End Perspective Correct Interpolation ---
 
-                    // 8. Depth Test: Compare the interpolated depth with the value currently in the Z-buffer.
+                    // 8. Depth Test
                     let current_z = z_slice[[r, c]];
                     let depth_test_passed = if projection_config.is_front_view {
-                        // For front views, smaller depth values are closer.
-                        // Initial Z is +Infinity.
                         interpolated_depth < current_z
                     } else {
-                        // For back views, larger depth values (less negative or more positive if crossing origin) are closer.
-                        // Initial Z is -Infinity.
                         interpolated_depth > current_z
                     };
 
                     if depth_test_passed {
-                        // --- ADDED: Check for full transparency ---
-                        // If opacity is effectively zero, skip shading and writing for this fragment
                         if material.opacity < 1e-6 {
-                            // Use a small epsilon
-                            return; // Don't draw anything for this fragment
-                        }
-                        // --- END CHECK ---
+                            continue;
+                        } // Skip transparent fragments
 
-                        // 9. Update Buffers: If the depth test passes AND fragment is not fully transparent.
-                        // Update the Z-buffer with the new closer depth.
+                        // --- Interpolate Vertex Normals ---
+                        // Use non-perspective correct barycentric coords (u, v, w) for normals
+                        let mut interp_normal = [
+                            u * n0[0] + v * n1[0] + w * n2[0],
+                            u * n0[1] + v * n1[1] + w * n2[1],
+                            u * n0[2] + v * n1[2] + w * n2[2],
+                        ];
+                        // --- Normalize the interpolated normal --- crucial step!
+                        normalize_vec3(&mut interp_normal);
+                        // ----------------------------------------
+
+                        // 9. Update Buffers
                         z_slice[[r, c]] = interpolated_depth;
-                        // Mark this pixel as covered by the mesh in the occlusion map.
-                        // NOTE: Even partially transparent objects contribute to occlusion map here.
-                        ocp_slice[[r, c]] = 1.0;
+                        ocp_slice[[r, c]] = 1.0; // Mark occlusion
 
-                        // Calculate Fragment Color using the dedicated function
+                        // Calculate Fragment Color using the interpolated normal
                         let tonemapped_linear_color = calculate_fragment_color(
                             material,
                             map_kd,
                             interp_u_coord,
                             interp_v_coord,
-                            &normal_f32,
+                            &interp_normal, // Pass interpolated normal
                             &light_dir,
-                            &light_dir, // Use light_dir for view_dir (orthographic, light at camera)
+                            &view_dir, // Use view_dir (same as light_dir here)
                             &light_color,
                         );
 
                         // --- Alpha Blending ---
-                        // Use the result from calculate_fragment_color for blending
+                        // ... existing alpha blending ...
                         let src_alpha = material.opacity;
                         let one_minus_src_alpha = 1.0 - src_alpha;
                         let background_color = [1.0f32, 1.0f32, 1.0f32]; // Assuming white background
@@ -369,23 +331,17 @@ pub fn rasterize_triangle(
                                 + (background_color[i] * one_minus_src_alpha);
                         }
 
-                        // Clamp final blended color before converting to u8
-                        // (Clamping might still be needed if alpha blending produces values slightly outside [0,1])
+                        // Clamp final blended color just in case
                         for i in 0..3 {
                             blended_color_f32[i] = blended_color_f32[i].clamp(0.0, 1.0);
                         }
 
-                        // Convert final blended f32 color [0, 1] back to u8 [0, 255] for image buffer
+                        // Convert final blended linear color back to sRGB u8
                         let image_channels = image_slice.shape()[2];
                         for chan in 0..image_channels.min(3) {
-                            // Write R, G, B from blended color
-                            // Convert linear color back to sRGB before storing as u8
                             let srgb_val = blended_color_f32[chan].powf(1.0 / 2.2);
-                            // Write the linear, blended, clamped value directly
                             image_slice[[r, c, chan]] = (srgb_val * 255.0) as u8;
                         }
-                        // Handle Alpha channel if present - Write the original fragment opacity
-                        // Alpha is typically linear, no need to convert.
                         if image_channels == 4 {
                             image_slice[[r, c, 3]] = (src_alpha * 255.0) as u8;
                         }
@@ -393,6 +349,24 @@ pub fn rasterize_triangle(
                 }
             }
         }
+    }
+}
+
+// Helper to normalize a 3-element array/slice in-place
+#[inline]
+fn normalize_vec3(v: &mut [f32; 3]) {
+    let mag_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if mag_sq > 1e-9 {
+        // Avoid division by zero/sqrt of zero
+        let inv_mag = 1.0 / mag_sq.sqrt();
+        v[0] *= inv_mag;
+        v[1] *= inv_mag;
+        v[2] *= inv_mag;
+    } else {
+        // Handle zero vector case if necessary, e.g., set to a default
+        v[0] = 0.0;
+        v[1] = 0.0;
+        v[2] = 1.0; // Example fallback
     }
 }
 

@@ -114,9 +114,23 @@ def read_mesh(
     mesh = o3d.io.read_triangle_mesh(
         obj_location,
         enable_post_processing=enable_post_processing,
+        print_progress=verbose,
     )
     if not mesh.has_vertices():
         raise ValueError(f"Mesh '{obj_location}' has no vertices!")
+    if not mesh.has_vertex_normals():
+        logger.warning(
+            f"Mesh '{obj_location}' does not have vertex normals. "
+            "Attempting to compute vertex normals."
+        )
+        mesh.compute_vertex_normals()
+        if not mesh.has_vertex_normals():
+            raise ValueError(
+                f"Failed to compute vertex normals for mesh '{obj_location}'. "
+                "Cannot proceed with smooth shading."
+            )
+        logger.info("Successfully computed vertex normals.")
+
     if not mesh.has_triangle_uvs():
         err = f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
         raise ValueError(err)
@@ -133,7 +147,7 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     Processes a mesh by scaling vertices and adjusting UVs for use with texture.
 
     Args:
-        mesh (o3d.geometry.TriangleMesh): Mesh with texture and UVs.
+        mesh (o3d.geometry.TriangleMesh): Mesh with texture, UVs, and vertex normals.
         precision (int): A power-of-2 exponent determining the output image resolution.
                          The output images will be `(2^precision) x (2^precision)`.
         flip_v_coordinate (bool): Whether to flip the V coordinate (1.0 - v).
@@ -143,11 +157,16 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         tuple:
             - vertices (np.ndarray[float32]): Scaled vertex positions (N, 3).
             - triangle_indices (np.ndarray[uint64]): Triangle vertex indices (M, 3).
+            - vertex_normals (np.ndarray[float32]): Vertex normal vectors (N, 3).
             - texture_np (np.ndarray[uint8]): Texture image data (H, W, C).
             - triangle_uvs (np.ndarray[float32]): Per-triangle UV coordinates (M*3, 2).
     """
     if verbose is not True:
         logger.remove()
+
+    if not mesh.has_vertex_normals():
+        raise ValueError("Mesh lacks vertex normals required for preprocessing.")
+
     texture_np = np.asarray(mesh.textures[0])
     if texture_np.ndim != 3 or texture_np.shape[2] < 3:
         err = f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
@@ -168,11 +187,15 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         info("Using original V coordinates")
     # --- Vertex Data ---
     vertices = np.asarray(mesh.vertices)
+    vertex_normals = np.asarray(mesh.vertex_normals)
     triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
     if triangle_uvs.shape[0] != triangle_indices.size:
-        err = f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size})"
+        err = f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size}) pixels"
+        raise ValueError(err)
+    if vertices.shape[0] != vertex_normals.shape[0]:
+        err = f"Vertex count mismatch: Vertices ({vertices.shape[0]}) vs. Normals ({vertex_normals.shape[0]})"
         raise ValueError(err)
     # --- Vertex Scaling ---
     min_bound = vertices.min(axis=0)
@@ -200,10 +223,29 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     min_bound_scaled = vertices.min(axis=0)
     max_bound_scaled = vertices.max(axis=0)
     info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
+
+    # Important: Do not scale normals. They are direction vectors.
+    # Ensure normals are normalized (Open3D usually returns normalized normals, but good to check/force)
+    norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
+    # Avoid division by zero for zero-length normals
+    zero_norms_mask = norm_norms.flatten() < 1e-9
+    if np.any(zero_norms_mask):
+        logger.warning(
+            f"Found {np.sum(zero_norms_mask)} zero-length normals. Setting them to [0, 0, 1]."
+        )
+        vertex_normals[zero_norms_mask] = [0.0, 0.0, 1.0]  # Assign a default normal
+        # Recalculate norms for the updated normals
+        norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
+        # Avoid division by zero again for the (now non-zero) default normals
+        norm_norms[norm_norms < 1e-9] = 1.0
+
+    vertex_normals = vertex_normals / norm_norms
+
     final_msg = dedent(f"""
         Final Data Shapes:
             Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}
             Triangle Indices: {triangle_indices.shape}, dtype={triangle_indices.dtype}
+            Vertex Normals: {vertex_normals.shape}, dtype={vertex_normals.dtype}
             Texture: {texture_np.shape}, dtype={texture_np.dtype}
             Triangle UVs (processed): {triangle_uvs.shape}, dtype={triangle_uvs.dtype}
     """).strip()
@@ -212,6 +254,7 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
     return (
         vertices.astype(np.float32),
         triangle_indices.astype(np.uint64),
+        vertex_normals.astype(np.float32),
         texture_np.astype(np.uint8),
         triangle_uvs.astype(np.float32),
     )
@@ -230,7 +273,7 @@ def generate_projections(
     This function calls a Rust back-end to perform the projection calculations.
 
     Args:
-        mesh: (o3d.geometry.TriangleMesh): An open3d mesh with texture attached.
+        mesh: (o3d.geometry.TriangleMesh): An open3d mesh with texture, UVs, and vertex normals attached.
         precision (int): A power-of-2 exponent determining the output image resolution.
                          The output images will be `(2^precision) x (2^precision)`.
         mtl_location (str, optional): Path to the MTL file for material properties. Defaults to None.
@@ -255,12 +298,13 @@ def generate_projections(
     info("Sending data to Rust back-end")
 
     # Unpack mesh data
-    vertices, triangle_indices, texture_np, triangle_uvs = mesh_data
+    vertices, triangle_indices, vertex_normals, texture_np, triangle_uvs = mesh_data
 
-    # Call the Rust backend with material properties
+    # Call the Rust backend with material properties and vertex normals
     images, ocp_maps = _internal_generate_projections(
         vertices,
         triangle_indices,
+        vertex_normals,
         texture_np,
         triangle_uvs,
         precision,
