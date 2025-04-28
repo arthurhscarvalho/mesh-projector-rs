@@ -4,48 +4,60 @@ use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::texture::TextureData;
-use nd::{s, Array2, ArrayView, ArrayView2, ArrayViewMut, ArrayViewMut2, ArrayViewMut3};
+use nd::{s, Array2, ArrayView2, ArrayViewMut, ArrayViewMut2, ArrayViewMut3};
 use std::f32;
 
-/// Interpolates texture coordinates using barycentric coordinates and samples the texture color.
+/// Interpolates texture coordinates using barycentric coordinates and samples the texture color
+/// using bilinear filtering.
 /// Assumes standard UV mapping where (0,0) is top-left and (1,1) is bottom-right.
 /// Handles clamping coordinates to the texture boundaries.
 #[inline]
-fn sample_texture_color(
-    u: f32,                                       // Barycentric coordinate corresponding to uv0
-    v: f32,                                       // Barycentric coordinate corresponding to uv1
-    w: f32,                                       // Barycentric coordinate corresponding to uv2
-    uv0: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the first vertex of the triangle
-    uv1: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the second vertex
-    uv2: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the third vertex
-    texture_data: &TextureData,   // Contains texture view and dimensions
+fn sample_texture_color_bilinear(
+    interp_u_coord: f32, // Perspective-correct interpolated U coordinate [0, 1]
+    interp_v_coord: f32, // Perspective-correct interpolated V coordinate [0, 1]
+    texture_data: &TextureData, // Contains texture view and dimensions
     target_color: &mut ArrayViewMut<u8, nd::Ix1>, // Mutable slice to write the sampled color (length = channels)
 ) {
-    // Linearly interpolate the UV coordinates using the barycentric coordinates.
-    let interp_u_coord = u * uv0[0] + v * uv1[0] + w * uv2[0];
-    let interp_v_coord = u * uv0[1] + v * uv1[1] + w * uv2[1];
+    // --- Bilinear Filtering Implementation ---
 
-    // Convert interpolated UV coordinates [0, 1] to texture pixel coordinates [0, width-1], [0, height-1].
-    // We sample at the nearest pixel center using round().
-    // Clamp coordinates to ensure they stay within the valid texture bounds [0, dim-1].
-    let tex_x = (interp_u_coord * texture_data.width_f32) // Scale U to texture width
-        .round() // Find nearest pixel center
-        .max(0.0) // Clamp minimum to 0
-        .min(texture_data.width_f32 - 1.0) // Clamp maximum to width-1
-        as usize; // Convert to integer index
+    // Calculate floating-point texture coordinates (px, py)
+    // Flip V coordinate: (0,0) in UV is top-left, (0,0) in image array is top-left.
+    let tex_xf = interp_u_coord * texture_data.width_f32;
+    let tex_yf = (1.0 - interp_v_coord) * texture_data.height_f32;
 
-    // The V texture coordinate is often inverted (0 is top, 1 is bottom in UV, but 0 is top row in image array).
-    // We apply (1.0 - V) to flip it before scaling and clamping.
-    let tex_y = ((1.0 - interp_v_coord) * texture_data.height_f32) // Scale flipped V to texture height
-        .round() // Find nearest pixel center
-        .max(0.0) // Clamp minimum to 0
-        .min(texture_data.height_f32 - 1.0) // Clamp maximum to height-1
-        as usize; // Convert to integer index
+    // Calculate the integer coordinates of the top-left texel (x0, y0)
+    // Ensure coordinates stay within valid sampling range [0, dim - 1.0001] to avoid issues at the boundary
+    let x0f = tex_xf.max(0.0).min(texture_data.width_f32 - 1.0001);
+    let y0f = tex_yf.max(0.0).min(texture_data.height_f32 - 1.0001);
+    let x0 = x0f as usize;
+    let y0 = y0f as usize;
 
-    // Sample the color from the texture at the calculated (tex_y, tex_x) coordinates
-    // for all channels and write it to the target color buffer slice.
-    for chan in 0..texture_data.channels {
-        target_color[chan] = texture_data.texture[[tex_y, tex_x, chan]];
+    // Calculate the integer coordinates of the bottom-right texel (x1, y1)
+    // x1 and y1 are guaranteed to be within bounds [0, width/height - 1] because x0/y0 are clamped <= dim - 1.0001
+    let x1 = x0 + 1;
+    let y1 = y0 + 1;
+
+    // Calculate the fractional parts (weights) for interpolation
+    let wx = x0f - x0 as f32; // Weight for interpolation between x0 and x1
+    let wy = y0f - y0 as f32; // Weight for interpolation between y0 and y1
+
+    // Sample the four neighboring texels
+    let tex = &texture_data.texture;
+    let c = texture_data.channels;
+    for chan in 0..c {
+        let c00 = tex[[y0, x0, chan]] as f32; // Top-left
+        let c10 = tex[[y0, x1, chan]] as f32; // Top-right
+        let c01 = tex[[y1, x0, chan]] as f32; // Bottom-left
+        let c11 = tex[[y1, x1, chan]] as f32; // Bottom-right
+
+        // Perform bilinear interpolation
+        let interpolated_color = c00 * (1.0 - wx) * (1.0 - wy) // Top-left influence
+                               + c10 * wx * (1.0 - wy)         // Top-right influence
+                               + c01 * (1.0 - wx) * wy         // Bottom-left influence
+                               + c11 * wx * wy; // Bottom-right influence
+
+        // Clamp the result to [0, 255] and convert back to u8
+        target_color[chan] = interpolated_color.round().max(0.0).min(255.0) as u8;
     }
 }
 
@@ -80,11 +92,27 @@ pub fn rasterize_triangle(
     let p1 = points.row(i1); // 3D position of vertex 1
     let p2 = points.row(i2); // 3D position of vertex 2
 
+    // --- Perspective Correct Interpolation Setup ---
+    // Extract depth (z) coordinates and compute 1/z for perspective correction.
+    // Add a small epsilon to avoid division by zero or issues very close to the projection plane.
+    let z0 = p0[projection_config.depth_axis];
+    let z1 = p1[projection_config.depth_axis];
+    let z2 = p2[projection_config.depth_axis];
+    let inv_z0 = 1.0 / (z0 + 1e-6);
+    let inv_z1 = 1.0 / (z1 + 1e-6);
+    let inv_z2 = 1.0 / (z2 + 1e-6);
+
     // UV coordinates are often stored per-face-vertex, so index calculation is t_idx * 3 + vertex_index.
     let uv_idx_base = t_idx * 3;
     let uv0 = triangle_uvs.row(uv_idx_base); // UV coords for vertex 0 of this triangle instance
     let uv1 = triangle_uvs.row(uv_idx_base + 1); // UV coords for vertex 1
     let uv2 = triangle_uvs.row(uv_idx_base + 2); // UV coords for vertex 2
+
+    // Pre-calculate UV coordinates divided by Z for perspective-correct interpolation.
+    let uv0_over_z = (uv0[0] * inv_z0, uv0[1] * inv_z0);
+    let uv1_over_z = (uv1[0] * inv_z1, uv1[1] * inv_z1);
+    let uv2_over_z = (uv2[0] * inv_z2, uv2[1] * inv_z2);
+    // --- End Perspective Correct Interpolation Setup ---
 
     // 3. Project Vertices to 2D Plane: Extract the P and Q axis coordinates based on the projection config.
     // These correspond to the (column, row) coordinates in the output image buffer.
@@ -113,10 +141,22 @@ pub fn rasterize_triangle(
             if let Some((u, v, w)) = barycentric(p0_proj, p1_proj, p2_proj, (px, py)) {
                 // Check if the coordinates are valid (all >= 0, handling floating point tolerance).
                 if is_inside_triangle(u, v, w) {
-                    // 7. Interpolate Depth: Calculate the depth value at this pixel using barycentric coordinates.
-                    let interpolated_depth = u * p0[projection_config.depth_axis]
-                        + v * p1[projection_config.depth_axis]
-                        + w * p2[projection_config.depth_axis];
+                    // --- Perspective Correct Interpolation ---
+                    // Interpolate 1/z across the triangle.
+                    let interpolated_inv_z = u * inv_z0 + v * inv_z1 + w * inv_z2;
+                    // Calculate the perspective-correct depth Z.
+                    let interpolated_depth = 1.0 / interpolated_inv_z;
+
+                    // Interpolate uv/z across the triangle.
+                    let interpolated_u_over_z =
+                        u * uv0_over_z.0 + v * uv1_over_z.0 + w * uv2_over_z.0;
+                    let interpolated_v_over_z =
+                        u * uv0_over_z.1 + v * uv1_over_z.1 + w * uv2_over_z.1;
+
+                    // Calculate the perspective-correct UV coordinates.
+                    let interp_u_coord = interpolated_u_over_z * interpolated_depth;
+                    let interp_v_coord = interpolated_v_over_z * interpolated_depth;
+                    // --- End Perspective Correct Interpolation ---
 
                     // 8. Depth Test: Compare the interpolated depth with the value currently in the Z-buffer.
                     let current_z = z_slice[[r, c]];
@@ -140,14 +180,10 @@ pub fn rasterize_triangle(
                         // 10. Sample Texture and Update Color Buffer:
                         // Get a mutable slice for the color channels of the current pixel.
                         let mut color_pixel_slice = image_slice.slice_mut(s![r, c, ..]);
-                        // Interpolate UVs and sample the texture color.
-                        sample_texture_color(
-                            u,
-                            v,
-                            w,
-                            uv0,
-                            uv1,
-                            uv2,
+                        // Interpolate UVs and sample the texture color using bilinear filtering.
+                        sample_texture_color_bilinear(
+                            interp_u_coord,
+                            interp_v_coord,
                             texture_data,
                             &mut color_pixel_slice,
                         );
