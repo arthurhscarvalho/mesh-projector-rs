@@ -13,7 +13,7 @@ use config::ProjectionConfig;
 use constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
-use nd::{Array2, Array3, Array4, ArrayView2, ArrayView3, Axis, Ix3, Ix4};
+use nd::{Array3, Array4, ArrayView2, ArrayView3, Axis, Ix3, Ix4};
 use rasterization::{rasterize_triangle, MaterialProperties};
 use rayon::prelude::*;
 use rayon::scope;
@@ -162,7 +162,7 @@ pub fn compute_mesh_projections(
     let mut ocp_map_views: Vec<_> = buffers.ocp_maps.axis_iter_mut(Axis(0)).collect();
 
     // Use rayon::scope
-    scope(|s| {
+    scope(|_| {
         z_buffer_views
             .par_iter_mut()
             .zip(image_views.par_iter_mut())
