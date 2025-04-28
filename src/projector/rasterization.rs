@@ -4,7 +4,7 @@ use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::texture::TextureData;
-use nd::{s, Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
+use nd::{Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
 use std::f32;
 
 /// Interpolates texture coordinates using barycentric coordinates and samples the texture color

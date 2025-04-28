@@ -9,7 +9,7 @@ extern crate rayon;
 use numpy::{PyArray3, PyArray4};
 use numpy::{PyReadonlyArray2, PyReadonlyArray3};
 use pyo3::prelude::*;
-use pyo3::types::{PyList, PyTuple};
+use pyo3::types::PyList;
 use pyo3::wrap_pyfunction;
 
 mod logging;
