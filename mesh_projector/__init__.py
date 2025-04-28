@@ -16,18 +16,19 @@ def info(msg):
 
 def _parse_mtl(mtl_path):
     """Parses relevant properties from an MTL file."""
+
     if not mtl_path or not os.path.exists(mtl_path):
         logger.warning(
             f"MTL file not provided or not found: {mtl_path}. Using default material values."
         )
-        # Default PBR-like values (neutral)
+        # Raw texture applied directly to the surface
         return {
-            "ka": [0.1, 0.1, 0.1],
-            "kd": [0.8, 0.8, 0.8],
-            "ks": [0.1, 0.1, 0.1],
-            "ns": 10.0,
-            "opacity": 1.0,
-            "illum": 2,  # Default illumination model
+            "ka": [0.0, 0.0, 0.0],  # Default Ambient
+            "kd": [1.0, 1.0, 1.0],  # Default Diffuse
+            "ks": [0.0, 0.0, 0.0],  # Default Specular
+            "ns": 10.0,  # Default Shininess
+            "opacity": 1.0,  # Default Opacity (from d or Tr)
+            "illum": 1,  # Default Illumination model
         }
 
     material = {
@@ -63,7 +64,6 @@ def _parse_mtl(mtl_path):
                 elif key == "illum" and len(values) == 1:
                     material["illum"] = int(values[0])
                 # map_Kd is ignored here as the texture data is passed separately
-                # Add other MTL properties if needed
 
         # Clamp opacity
         material["opacity"] = max(0.0, min(1.0, material["opacity"]))
@@ -71,14 +71,14 @@ def _parse_mtl(mtl_path):
 
     except Exception as e:
         logger.error(f"Error parsing MTL file {mtl_path}: {e}. Using default values.")
-        # Reset to defaults on error
-        material = {
-            "ka": [0.1, 0.1, 0.1],
-            "kd": [0.8, 0.8, 0.8],
-            "ks": [0.1, 0.1, 0.1],
-            "ns": 10.0,
-            "opacity": 1.0,
-            "illum": 2,
+        # Raw texture applied directly to the surface
+        return {
+            "ka": [0.0, 0.0, 0.0],  # Default Ambient
+            "kd": [1.0, 1.0, 1.0],  # Default Diffuse
+            "ks": [0.0, 0.0, 0.0],  # Default Specular
+            "ns": 10.0,  # Default Shininess
+            "opacity": 1.0,  # Default Opacity (from d or Tr)
+            "illum": 1,  # Default Illumination model
         }
 
     return material

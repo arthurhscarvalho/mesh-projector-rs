@@ -218,10 +218,19 @@ pub fn rasterize_triangle(
                     };
 
                     if depth_test_passed {
-                        // 9. Update Buffers: If the depth test passes, this fragment is visible.
+                        // --- ADDED: Check for full transparency ---
+                        // If opacity is effectively zero, skip shading and writing for this fragment
+                        if material.opacity < 1e-6 {
+                            // Use a small epsilon
+                            return; // Don't draw anything for this fragment
+                        }
+                        // --- END CHECK ---
+
+                        // 9. Update Buffers: If the depth test passes AND fragment is not fully transparent.
                         // Update the Z-buffer with the new closer depth.
                         z_slice[[r, c]] = interpolated_depth;
                         // Mark this pixel as covered by the mesh in the occlusion map.
+                        // NOTE: Even partially transparent objects contribute to occlusion map here.
                         ocp_slice[[r, c]] = 1.0;
 
                         // --- Restore Original Shading Logic ---
@@ -329,25 +338,38 @@ pub fn rasterize_triangle(
                             }
                         }
 
-                        // Apply Opacity (Modulate final color by opacity)
-                        vec_scale_inplace(&mut final_color_f32, material.opacity);
+                        // --- Alpha Blending ---
+                        // SrcColor = final_color_f32 (calculated color before opacity scaling)
+                        // SrcAlpha = material.opacity
+                        // DstColor = [1.0, 1.0, 1.0] (white background)
+                        // FinalColor = SrcColor * SrcAlpha + DstColor * (1 - SrcAlpha)
 
-                        // Clamp final color *after* opacity modulation and before converting to u8
+                        let src_alpha = material.opacity;
+                        let one_minus_src_alpha = 1.0 - src_alpha;
+                        let background_color = [1.0f32, 1.0f32, 1.0f32]; // Assuming white background
+
+                        let mut blended_color_f32 = [0.0f32; 3];
                         for i in 0..3 {
-                            final_color_f32[i] = final_color_f32[i].clamp(0.0, 1.0);
+                            blended_color_f32[i] = (final_color_f32[i] * src_alpha)
+                                + (background_color[i] * one_minus_src_alpha);
                         }
 
-                        // Convert final f32 color [0, 1] back to u8 [0, 255] for image buffer
+                        // Clamp final blended color before converting to u8
+                        for i in 0..3 {
+                            blended_color_f32[i] = blended_color_f32[i].clamp(0.0, 1.0);
+                        }
+
+                        // Convert final blended f32 color [0, 1] back to u8 [0, 255] for image buffer
                         let image_channels = image_slice.shape()[2];
                         for chan in 0..image_channels.min(3) {
-                            // Write R, G, B
-                            image_slice[[r, c, chan]] = (final_color_f32[chan] * 255.0) as u8;
+                            // Write R, G, B from blended color
+                            image_slice[[r, c, chan]] = (blended_color_f32[chan] * 255.0) as u8;
                         }
-                        // Handle Alpha channel if present
+                        // Handle Alpha channel if present - Write the original fragment opacity
                         if image_channels == 4 {
-                            image_slice[[r, c, 3]] = (material.opacity * 255.0) as u8;
+                            image_slice[[r, c, 3]] = (src_alpha * 255.0) as u8;
                         }
-                        // --- END ORIGINAL SHADING LOGIC ---
+                        // --- END ORIGINAL SHADING LOGIC (but removed opacity scaling) ---
                     }
                 }
             }
@@ -375,10 +397,10 @@ fn vec_sub(a: &[f32], b: &[f32], out: &mut [f32]) {
 }
 
 #[inline]
-fn vec_scale_inplace(a: &mut [f32], s: f32) {
-    // New inplace scaling function
-    for i in 0..a.len() {
-        a[i] *= s;
+fn vec_scale(a: &[f32], s: f32, out: &mut [f32]) {
+    // Re-added original vec_scale if needed elsewhere
+    for i in 0..out.len() {
+        out[i] = a[i] * s;
     }
 }
 
@@ -387,7 +409,8 @@ fn reflect(neg_l: &[f32], n: &[f32], out: &mut [f32]) {
     let dot_nl = dot_product(n, neg_l);
     // Use a temporary variable to avoid mutable borrow conflict
     let mut temp = [0.0f32; 3]; // Assuming 3D vectors
-    vec_scale_inplace(&mut temp, 2.0 * dot_nl); // temp = 2 * dot(N, -L) * N
+                                // Use vec_scale since vec_scale_inplace was removed
+    vec_scale(n, 2.0 * dot_nl, &mut temp); // temp = 2 * dot(N, -L) * N
     vec_sub(neg_l, &temp, out); // out = neg_l - temp
 }
 
