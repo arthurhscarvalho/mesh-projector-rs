@@ -42,7 +42,6 @@ def main():
     parser.add_argument(
         "--obj", type=str, required=True, help="Path to the input OBJ file."
     )
-    # Texture is optional depending on mode
     parser.add_argument(
         "--texture",
         type=str,
@@ -57,7 +56,6 @@ def main():
         default=None,
         help="Path to the input MTL file (required for full mode).",
     )
-    # Add mode argument
     parser.add_argument(
         "--mode",
         type=str,
@@ -66,10 +64,14 @@ def main():
         help="Rendering mode: obj_only, obj_texture, or full. If not set, inferred from provided files.",
     )
     parser.add_argument(
-        "--out", type=str, required=True, help="Directory to save projection images."
+        "--out",
+        type=str,
+        default="projections",
+        required=True,
+        help="Directory to save projection images.",
     )
     parser.add_argument(
-        "--precision", type=int, default=8, help="Precision P (image size 2^P x 2^P)."
+        "--precision", type=int, default=12, help="Precision P (image size 2^P x 2^P)."
     )
     parser.add_argument(
         "--filtering", type=int, default=0, help="Filtering window radius (0=disabled)."

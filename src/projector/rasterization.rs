@@ -123,7 +123,7 @@ fn calculate_lighting(
         2 | _ => {
             // Illum 2+ (Revised Phong model variation)
             // Ambient term: Modulate Ka by a global ambient factor
-            let global_ambient = [0.2, 0.2, 0.2]; // Example low global ambient light
+            let global_ambient = [0.1, 0.1, 0.1];
             let ambient_term = [
                 linear_ka[0] * global_ambient[0],
                 linear_ka[1] * global_ambient[1],
