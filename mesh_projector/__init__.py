@@ -427,10 +427,10 @@ def generate_projections(
     elif mode == ProjectionMode.OBJ_ONLY:
         if vertex_colors is None:
             logger.warning(
-                "Vertex colors are missing for OBJ_ONLY mode. Using default white."
+                "Vertex colors are missing for OBJ_ONLY mode. Using default black."
             )
-            # Create default white vertex colors if none exist
-            vertex_colors = np.ones_like(vertices, dtype=np.float32)
+            # Create default black vertex colors if none exist
+            vertex_colors = np.zeros_like(vertices, dtype=np.float32)
 
     # Convert mode enum to string for Rust FFI
     mode_str = mode.value
@@ -493,4 +493,131 @@ def generate_projections(
         logger.warning(f"Expected 6 projections, but received {len(projection_images)}")
 
     info(f"Generated {len(projection_images)} projections.")
+    return projection_images
+
+
+def project_mesh(
+    obj_location,
+    precision,
+    texture_file=None,
+    mtl_location=None,
+    mode=None,  # If None, will be inferred
+    filtering=0,
+    flip_uv=True,
+    verbose=False,
+    enable_post_processing=True,
+):
+    """
+    High-level function to load, preprocess, and generate projections for a mesh.
+
+    Args:
+        obj_location (str): Path to the OBJ mesh file.
+        precision (int): Output image resolution exponent (2^precision).
+        texture_file (str, optional): Path to the texture image file. Defaults to None.
+        mtl_location (str, optional): Path to the MTL material file. Defaults to None.
+        mode (ProjectionMode or str, optional): The processing mode ('obj_only', 'obj_texture', 'full').
+                                                If None, it will be inferred based on provided files.
+                                                Defaults to None.
+        filtering (int, optional): Radius for outlier filtering. Defaults to 0 (disabled).
+        flip_uv (bool): Whether to flip the V coordinate (1.0 - v) during preprocessing.
+                        Defaults to True.
+        verbose (bool): Enables detailed logging. Defaults to False.
+        enable_post_processing (bool): Enables Open3D post-processing during mesh loading.
+                                      Defaults to False.
+
+    Returns:
+        List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
+                          Returns None if any step fails.
+
+    Raises:
+        FileNotFoundError: If required files (OBJ, or Texture/MTL based on mode) are not found.
+        ValueError: If the mesh data is invalid or required components are missing for the mode.
+        RuntimeError: If the Rust backend fails during projection generation.
+    """
+    if verbose is not True:
+        logger.remove()
+
+    # --- Determine Mode ---
+    if mode:
+        if isinstance(mode, str):
+            try:
+                resolved_mode = ProjectionMode(mode)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid mode string specified: {mode}. Choices are: {[e.value for e in ProjectionMode]}"
+                )
+        elif isinstance(mode, ProjectionMode):
+            resolved_mode = mode
+        else:
+            raise ValueError(
+                f"Invalid type for mode: {type(mode)}. Must be str or ProjectionMode."
+            )
+        logger.info(f"Using specified mode: {resolved_mode.value}")
+    else:
+        # Infer mode if not explicitly set
+        if texture_file and mtl_location:
+            resolved_mode = ProjectionMode.FULL
+            logger.info("Inferred mode: FULL (OBJ, Texture, MTL provided)")
+        elif texture_file:
+            resolved_mode = ProjectionMode.OBJ_TEXTURE
+            logger.info("Inferred mode: OBJ_TEXTURE (OBJ, Texture provided)")
+        else:
+            resolved_mode = ProjectionMode.OBJ_ONLY
+            logger.info("Inferred mode: OBJ_ONLY (Only OBJ provided)")
+
+    # --- Validate required files for chosen mode ---
+    if not os.path.exists(obj_location):
+        raise FileNotFoundError(f"OBJ file not found: {obj_location}")
+    if resolved_mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL]:
+        if not texture_file:
+            raise FileNotFoundError(
+                f"Mode '{resolved_mode.value}' requires a texture file, but none was provided."
+            )
+        if not os.path.exists(texture_file):
+            raise FileNotFoundError(f"Texture file not found: {texture_file}")
+    if resolved_mode == ProjectionMode.FULL:
+        if not mtl_location:
+            raise FileNotFoundError(
+                f"Mode '{resolved_mode.value}' requires an MTL file, but none was provided."
+            )
+        if not os.path.exists(mtl_location):
+            logger.warning(
+                f"MTL file not found: {mtl_location}. Proceeding with default material properties."
+            )
+            # Don't raise error, _parse_mtl handles missing file with defaults
+
+    # --- Load Mesh ---
+    # Errors (FileNotFoundError, ValueError) will propagate up
+    mesh = read_mesh(
+        obj_location=obj_location,
+        texture_file=texture_file,
+        mtl_location=mtl_location,  # Pass it even if None/missing, read_mesh handles it
+        mode=resolved_mode,
+        enable_post_processing=enable_post_processing,
+        verbose=verbose,
+    )
+
+    # --- Preprocess Mesh ---
+    # Errors (ValueError) will propagate up
+    processed_data = preprocess_mesh(
+        mesh,
+        precision=precision,
+        mode=resolved_mode,
+        flip_v_coordinate=flip_uv,
+        verbose=verbose,
+    )
+
+    # --- Generate Projections ---
+    # Errors (ValueError, RuntimeError) will propagate up
+    projection_images = generate_projections(
+        processed_data=processed_data,
+        precision=precision,
+        mtl_location=mtl_location
+        if resolved_mode == ProjectionMode.FULL
+        else None,  # Only pass MTL for FULL mode
+        mode=resolved_mode,
+        filtering=filtering,
+        verbose=verbose,
+    )
+
     return projection_images

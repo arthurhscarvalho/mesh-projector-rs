@@ -92,77 +92,32 @@ def main():
     # Configure logging
     if not args.verbose:
         logger.remove()
-        # logger.add(lambda _: None) # No need for null sink, just remove default
 
-    # --- Determine Mode ---
-    if args.mode:
-        try:
-            mode = ProjectionMode(args.mode)
-        except ValueError:
-            logger.error(
-                f"Invalid mode specified: {args.mode}. Choices are: {[e.value for e in ProjectionMode]}"
-            )
-            return
-    else:
-        # Infer mode if not explicitly set
-        if args.texture and args.mtl:
-            mode = ProjectionMode.FULL
-            logger.info("Inferred mode: FULL (OBJ, Texture, MTL provided)")
-        elif args.texture:
-            mode = ProjectionMode.OBJ_TEXTURE
-            logger.info("Inferred mode: OBJ_TEXTURE (OBJ, Texture provided)")
-        else:
-            mode = ProjectionMode.OBJ_ONLY
-            logger.info("Inferred mode: OBJ_ONLY (Only OBJ provided)")
-
-    # --- Validate required files for chosen mode ---
-    if mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL] and not args.texture:
-        logger.error(f"Mode '{mode.value}' requires the --texture argument.")
-        return
-    if mode == ProjectionMode.FULL and not args.mtl:
-        logger.error(f"Mode '{mode.value}' requires the --mtl argument.")
-        return
-
-    # --- Load Mesh ---
+    # --- Generate Projections using the combined function ---
     try:
-        mesh = mp.read_mesh(
+        # The project_mesh function now handles mode inference and validation internally
+        projection_images = mp.project_mesh(
             obj_location=args.obj,
-            texture_file=args.texture,  # Pass None if not provided
-            mtl_location=args.mtl,  # Pass None if not provided
-            mode=mode,  # Pass the determined mode
-            verbose=args.verbose,
-        )
-    except (ValueError, FileNotFoundError) as e:
-        logger.error(f"Failed to load mesh: {e}")
-        return
-
-    # --- Preprocess Mesh ---
-    try:
-        processed_data = mp.preprocess_mesh(
-            mesh,
             precision=args.precision,
-            mode=mode,
-            flip_v_coordinate=args.flip_uv,
-            verbose=args.verbose,
-        )
-    except Exception as e:
-        logger.error(f"Failed to preprocess mesh: {e}")
-        return
-
-    # --- Generate Projections ---
-    try:
-        # generate_projections now takes processed_data and mode
-        # It returns only the images list
-        projection_images = mp.generate_projections(
-            processed_data=processed_data,
-            precision=args.precision,
-            mtl_location=args.mtl,  # Still needed for FULL mode's material parsing
-            mode=mode,  # Pass the mode
+            texture_file=args.texture,
+            mtl_location=args.mtl,
+            mode=args.mode,  # Pass the mode arg directly (can be None)
             filtering=args.filtering,
+            flip_uv=args.flip_uv,
             verbose=args.verbose,
+            # enable_post_processing could be added as an arg if needed
         )
-    except Exception as e:
+        if (
+            projection_images is None
+        ):  # Should not happen if exceptions are raised correctly
+            logger.error("Projection generation failed, but no exception was raised.")
+            return
+
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
         logger.error(f"Failed to generate projections: {e}")
+        return
+    except Exception as e:  # Catch any unexpected errors
+        logger.error(f"An unexpected error occurred: {e}")
         return
 
     # --- Save Output ---
