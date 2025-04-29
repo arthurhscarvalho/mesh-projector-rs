@@ -2,7 +2,6 @@ import argparse
 import os
 
 import cv2
-import numpy as np
 from loguru import logger
 
 import mesh_projector as mp

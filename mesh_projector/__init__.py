@@ -1,9 +1,10 @@
 import os
+from enum import Enum
+
 import cv2
 import numpy as np
 import open3d as o3d
 from loguru import logger
-from enum import Enum
 
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
@@ -435,14 +436,14 @@ def generate_projections(
     mode_str = mode.value
 
     # <<< --- Log final properties before Rust call --- >>>
-    logger.info(f"--- Calling Rust Backend ---")
+    logger.info("--- Calling Rust Backend ---")
     logger.info(f"Mode: {mode_str}")
     logger.info(f"Material Properties Sent: {material_props}")
     logger.info(f"Texture provided: {texture_np is not None}")
     logger.info(f"UVs provided: {triangle_uvs is not None}")
     logger.info(f"Vertex Normals provided: {vertex_normals is not None}")
     logger.info(f"Vertex Colors provided: {vertex_colors is not None}")
-    logger.info(f"--------------------------")
+    logger.info("--------------------------")
     # <<< --- End logging --- >>>
 
     try:
