@@ -123,7 +123,7 @@ fn calculate_lighting(
         2 | _ => {
             // Illum 2+ (Revised Phong model variation)
             // Ambient term: Modulate Ka by a global ambient factor
-            let global_ambient = [0.1, 0.1, 0.1];
+            let global_ambient = [0.2, 0.2, 0.2];
             let ambient_term = [
                 linear_ka[0] * global_ambient[0],
                 linear_ka[1] * global_ambient[1],
@@ -398,14 +398,55 @@ pub fn rasterize_triangle(
                         light_color,
                     );
 
+                    // --- Alpha Blending ---
+                    let final_color_to_write_linear = if material.opacity < 0.999 {
+                        // Use a tolerance for floating point comparison
+                        // Blend needed
+                        let alpha = material.opacity;
+
+                        // Read existing color from buffer (sRGB u8)
+                        let old_r_u8 = image_slice[[row, col, 0]];
+                        let old_g_u8 = image_slice[[row, col, 1]];
+                        let old_b_u8 = image_slice[[row, col, 2]];
+
+                        // Convert existing color to linear f32
+                        let old_r_linear = (old_r_u8 as f32 / 255.0).powf(2.2);
+                        let old_g_linear = (old_g_u8 as f32 / 255.0).powf(2.2);
+                        let old_b_linear = (old_b_u8 as f32 / 255.0).powf(2.2);
+
+                        // Perform alpha blending in linear space
+                        let blended_r =
+                            final_linear_color[0] * alpha + old_r_linear * (1.0 - alpha);
+                        let blended_g =
+                            final_linear_color[1] * alpha + old_g_linear * (1.0 - alpha);
+                        let blended_b =
+                            final_linear_color[2] * alpha + old_b_linear * (1.0 - alpha);
+
+                        [blended_r, blended_g, blended_b]
+                    } else {
+                        // Opaque, use calculated color directly
+                        final_linear_color
+                    };
+
                     // --- Gamma Correction (Linear -> sRGB) & Clamping ---
                     let final_color_srgb = [
-                        final_linear_color[0].powf(1.0 / 2.2).max(0.0).min(1.0),
-                        final_linear_color[1].powf(1.0 / 2.2).max(0.0).min(1.0),
-                        final_linear_color[2].powf(1.0 / 2.2).max(0.0).min(1.0),
+                        final_color_to_write_linear[0]
+                            .powf(1.0 / 2.2)
+                            .max(0.0)
+                            .min(1.0),
+                        final_color_to_write_linear[1]
+                            .powf(1.0 / 2.2)
+                            .max(0.0)
+                            .min(1.0),
+                        final_color_to_write_linear[2]
+                            .powf(1.0 / 2.2)
+                            .max(0.0)
+                            .min(1.0),
                     ];
 
                     // 9. Update Buffers
+                    // Note: Depth buffer is still updated even for transparent fragments.
+                    // This might need adjustment depending on desired transparency behavior.
                     z_slice[[row, col]] = interpolated_z;
                     image_slice[[row, col, 0]] = (final_color_srgb[0] * 255.0) as u8;
                     image_slice[[row, col, 1]] = (final_color_srgb[1] * 255.0) as u8;
@@ -441,7 +482,6 @@ pub struct MaterialProperties {
     pub kd: [f32; 3], // Diffuse color
     pub ks: [f32; 3], // Specular color
     pub ns: f32,      // Specular exponent
-    #[allow(dead_code)]
     pub opacity: f32, // Opacity (0.0=transparent, 1.0=opaque) - Currently unused in shader
     pub illum: i32,   // Illumination model
 }

@@ -173,7 +173,6 @@ pub fn is_inside_triangle(u: f32, v: f32, w: f32) -> bool {
 
 /// Scales a vector slice `a` by a scalar `s` and returns a new `Vec<f32>`.
 #[inline]
-#[allow(dead_code)]
 pub fn vec_scale_ret(a: &[f32], s: f32) -> Vec<f32> {
     a.iter().map(|x| x * s).collect()
 }
@@ -186,7 +185,6 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
 
 /// Subtracts vector slice `b` from `a` and stores the result in `out`.
 #[inline]
-#[allow(dead_code)]
 pub fn vec_sub(a: &[f32], b: &[f32], out: &mut [f32]) {
     for i in 0..out.len().min(a.len()).min(b.len()) {
         out[i] = a[i] - b[i];
@@ -195,7 +193,6 @@ pub fn vec_sub(a: &[f32], b: &[f32], out: &mut [f32]) {
 
 /// Scales a vector slice `a` by a scalar `s` and stores the result in `out`.
 #[inline]
-#[allow(dead_code)]
 pub fn vec_scale(a: &[f32], s: f32, out: &mut [f32]) {
     for i in 0..out.len().min(a.len()) {
         out[i] = a[i] * s;

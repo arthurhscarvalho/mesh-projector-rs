@@ -3,7 +3,6 @@ use num::ToPrimitive;
 use numpy::{PyReadonlyArray2, PyReadonlyArray3, PyUntypedArrayMethods};
 use pyo3::PyErr;
 
-#[allow(dead_code)]
 pub fn to_ndarray2<T>(pyarray: &PyReadonlyArray2<T>) -> Result<Array2<f32>, PyErr>
 where
     T: numpy::Element + ToPrimitive,
@@ -18,7 +17,6 @@ where
         .map_err(|_| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid shape"))
 }
 
-#[allow(dead_code)]
 pub fn to_ndarray3<T>(pyarray: &PyReadonlyArray3<T>) -> Result<Array3<f32>, PyErr>
 where
     T: numpy::Element + ToPrimitive,
