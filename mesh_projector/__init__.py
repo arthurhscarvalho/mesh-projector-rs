@@ -211,16 +211,16 @@ def preprocess_mesh(
     processed_data = {}
 
     # --- Vertex Data (Common) ---
-    vertices = np.asarray(mesh.vertices)
+    vertices = np.asarray(mesh.vertices, dtype=np.float32)
     triangle_indices = np.asarray(
         mesh.triangles, dtype=np.uint32
-    )  # Changed to uint32 based on previous check
+    )  # Already correctly specified
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
 
     # --- Normals (Common, if available) ---
     if mesh.has_vertex_normals():
-        vertex_normals = np.asarray(mesh.vertex_normals)
+        vertex_normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
         if vertices.shape[0] != vertex_normals.shape[0]:
             raise ValueError(
                 f"Vertex count mismatch: Vertices ({vertices.shape[0]}) vs. Normals ({vertex_normals.shape[0]})"
@@ -239,13 +239,11 @@ def preprocess_mesh(
                 1.0  # Avoid division by zero for default normals
             )
 
+        # Normalize the normals (result is still float32)
         processed_data["vertex_normals"] = vertex_normals / norm_norms
     else:
         # Handle case where normals couldn't be computed/loaded
         logger.warning("Mesh lacks vertex normals. Proceeding without them.")
-        # Create placeholder normals if needed by Rust, or handle absence there
-        # For now, just don't include them in the dict
-        # processed_data['vertex_normals'] = np.zeros_like(vertices, dtype=np.float32) # Example placeholder
         processed_data["vertex_normals"] = None  # Indicate absence
 
     # --- Mode-Specific Data ---
@@ -259,7 +257,7 @@ def preprocess_mesh(
                 f"Mode '{mode.value}' requires UVs, but none are found on the mesh."
             )
 
-        texture_np = np.asarray(mesh.textures[0])
+        texture_np = np.asarray(mesh.textures[0], dtype=np.uint8)
         if texture_np.ndim != 3 or texture_np.shape[2] < 3:
             raise ValueError(
                 f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
@@ -268,7 +266,7 @@ def preprocess_mesh(
         info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
         processed_data["texture_np"] = texture_np
 
-        triangle_uvs = np.asarray(mesh.triangle_uvs)
+        triangle_uvs = np.asarray(mesh.triangle_uvs, dtype=np.float32)
         if triangle_uvs.shape[1] != 2:
             raise ValueError(
                 f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
@@ -284,20 +282,16 @@ def preprocess_mesh(
             triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
         else:
             info("Using original V coordinates [Flipping Disabled]")
-        processed_data["triangle_uvs"] = triangle_uvs.astype(
-            np.float32
-        )  # Ensure float32
+        processed_data["triangle_uvs"] = triangle_uvs
 
     elif mode == ProjectionMode.OBJ_ONLY:
         if mesh.has_vertex_colors():
-            vertex_colors = np.asarray(mesh.vertex_colors)
+            vertex_colors = np.asarray(mesh.vertex_colors, dtype=np.float32)
             if vertex_colors.shape[0] != vertices.shape[0]:
                 raise ValueError(
                     f"Vertex color mismatch: Vertices ({vertices.shape[0]}) vs. Colors ({vertex_colors.shape[0]})"
                 )
-            processed_data["vertex_colors"] = vertex_colors.astype(
-                np.float32
-            )  # Ensure float32
+            processed_data["vertex_colors"] = vertex_colors
             info(f"Vertex colors shape: {vertex_colors.shape}")
         else:
             processed_data["vertex_colors"] = None  # Indicate absence
@@ -328,8 +322,8 @@ def preprocess_mesh(
     max_bound_scaled = vertices.max(axis=0)
     info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
 
-    processed_data["vertices"] = vertices.astype(np.float32)  # Ensure float32
-    processed_data["triangle_indices"] = triangle_indices  # Already uint32
+    processed_data["vertices"] = vertices
+    processed_data["triangle_indices"] = triangle_indices
 
     # Final Logging
     final_shapes = {
@@ -413,6 +407,41 @@ def generate_projections(
     # --- Validate Data Requirements per Mode ---
     if vertices is None or triangle_indices is None:
         raise ValueError("Vertices and triangle_indices are always required.")
+
+    # Validate array shapes for the Rust backend
+    if vertices.ndim != 2 or vertices.shape[1] != 3:
+        raise ValueError(
+            f"Vertices must be a 2D array with shape (N, 3), got {vertices.shape}"
+        )
+    if triangle_indices.ndim != 2 or triangle_indices.shape[1] != 3:
+        raise ValueError(
+            f"Triangle indices must be a 2D array with shape (M, 3), got {triangle_indices.shape}"
+        )
+
+    # Validate optional arrays if they exist
+    if vertex_normals is not None and (
+        vertex_normals.ndim != 2 or vertex_normals.shape[1] != 3
+    ):
+        raise ValueError(
+            f"Vertex normals must be a 2D array with shape (N, 3), got {vertex_normals.shape}"
+        )
+    if vertex_colors is not None and (
+        vertex_colors.ndim != 2 or vertex_colors.shape[1] != 3
+    ):
+        raise ValueError(
+            f"Vertex colors must be a 2D array with shape (N, 3), got {vertex_colors.shape}"
+        )
+    if triangle_uvs is not None and (
+        triangle_uvs.ndim != 2 or triangle_uvs.shape[1] != 2
+    ):
+        raise ValueError(
+            f"Triangle UVs must be a 2D array with shape (K, 2), got {triangle_uvs.shape}"
+        )
+    if texture_np is not None and texture_np.ndim != 3:
+        raise ValueError(
+            f"Texture must be a 3D array with shape (H, W, C), got {texture_np.shape}"
+        )
+
     # Normals are preferred for lighting, but might be optional depending on Rust impl.
     if (
         vertex_normals is None
@@ -422,9 +451,6 @@ def generate_projections(
         logger.warning(
             "Vertex normals are missing. Lighting/Shading might be incorrect."
         )
-        # Consider generating default normals if Rust requires them:
-        # vertex_normals = np.zeros_like(vertices, dtype=np.float32)
-        # vertex_normals[:, 2] = 1.0 # Point up Z-axis
 
     if mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL]:
         if texture_np is None or triangle_uvs is None:
@@ -436,7 +462,7 @@ def generate_projections(
             logger.warning(
                 "Vertex colors are missing for OBJ_ONLY mode. Using default black."
             )
-            # Create default black vertex colors if none exist
+            # Create default black vertex colors if none exist and ensure float32 type
             vertex_colors = np.zeros_like(vertices, dtype=np.float32)
 
     # Convert mode enum to string for Rust FFI
@@ -454,18 +480,18 @@ def generate_projections(
     # <<< --- End logging --- >>>
 
     try:
-        results = _internal_generate_projections(
-            vertices.flatten().tolist(),  # Flattened vertex coords
-            triangle_indices.flatten().tolist(),  # Flattened triangle indices
-            vertex_normals.flatten().tolist() if vertex_normals is not None else None,
-            vertex_colors.flatten().tolist() if vertex_colors is not None else None,
-            texture_np.flatten().tolist() if texture_np is not None else None,
-            texture_np.shape[0] if texture_np is not None else 0,
-            texture_np.shape[1] if texture_np is not None else 0,
-            triangle_uvs.flatten().tolist() if triangle_uvs is not None else None,
-            material_props["ka"],
-            material_props["kd"],
-            material_props["ks"],
+        # Call the Rust backend with the data directly from processed_data
+        # preprocess_mesh already ensures the correct types and shapes
+        projection_array = _internal_generate_projections(
+            vertices,  # Already np.float32 from preprocess_mesh
+            triangle_indices,  # Already np.uint32 from preprocess_mesh
+            vertex_normals,  # Already normalized and np.float32 or None
+            vertex_colors,  # Already np.float32 or None
+            texture_np,  # Already correct format from preprocess_mesh
+            triangle_uvs,  # Already np.float32 from preprocess_mesh
+            material_props["ka"],  # ka_list
+            material_props["kd"],  # kd_list
+            material_props["ks"],  # ks_list
             material_props["ns"],
             material_props["opacity"],
             material_props["illum"],
@@ -473,28 +499,17 @@ def generate_projections(
             filtering,
             mode_str,
         )
+
+        # Convert the 4D array to list of images
+        # The result is now a 4D numpy array with shape (6, height, width, 3)
+        projection_images = [
+            projection_array[i] for i in range(projection_array.shape[0])
+        ]
+
     except Exception as e:
         # Log the specific error from the Rust backend if possible
         logger.error(f"Error calling Rust backend: {e}")
         raise RuntimeError(f"Rust backend failed during projection generation: {e}")
-
-    # Process results (assuming Rust returns list of numpy arrays or similar)
-    projection_images = []
-    img_size = 1 << precision
-    expected_shape = (img_size, img_size, 3)  # Assuming RGB output
-
-    for i, res_bytes in enumerate(results):
-        try:
-            # Assuming res_bytes is bytes data for a numpy array
-            img = np.frombuffer(res_bytes, dtype=np.uint8).reshape(expected_shape)
-            projection_images.append(img)
-        except Exception as e:
-            logger.error(
-                f"Error processing result {i}: {e}. Data length: {len(res_bytes)}, Expected shape: {expected_shape}"
-            )
-            # Handle error, maybe append a placeholder image or re-raise
-            placeholder = np.zeros(expected_shape, dtype=np.uint8)
-            projection_images.append(placeholder)
 
     if len(projection_images) != 6:
         logger.warning(f"Expected 6 projections, but received {len(projection_images)}")

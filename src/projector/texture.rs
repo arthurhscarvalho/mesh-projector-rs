@@ -17,7 +17,6 @@ pub struct TextureData<'a> {
 impl<'a> TextureData<'a> {
     /// Creates a new `TextureData` instance from a texture view.
     /// Calculates and stores dimensions for quick access.
-    #[inline]
     pub fn new(texture: ArrayView3<'a, u8>) -> Self {
         let shape = texture.shape();
         let height = shape[0];

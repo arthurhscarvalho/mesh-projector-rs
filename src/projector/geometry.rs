@@ -7,7 +7,6 @@ use std::f32;
 ///
 /// Returns `Some((u, v, w))` such that P = uA + vB + wC, where u+v+w = 1.
 /// Returns `None` if the triangle is degenerate (vertices are collinear, denominator is close to zero).
-#[inline]
 pub fn barycentric(
     a: (f32, f32), // Projected coordinates of vertex A
     b: (f32, f32), // Projected coordinates of vertex B
@@ -99,7 +98,6 @@ pub fn precompute_triangle_normals(
 /// Compares the triangle's geometric normal with the view direction. If the angle between them
 /// is less than 90 degrees (dot product > 0), the triangle is facing the viewer and is culled.
 /// We render triangles whose normal points *away* from the view direction (dot product < 0).
-#[inline]
 pub fn is_triangle_visible(
     normal_x: f32,             // X component of the triangle's normal
     normal_y: f32,             // Y component of the triangle's normal
@@ -122,7 +120,6 @@ pub fn is_triangle_visible(
 ///
 /// Returns `Some((min_row, max_row, min_col, max_col))` if the box is valid and at least
 /// partially on-screen, otherwise returns `None`.
-#[inline]
 pub fn calculate_bounding_box(
     p0_proj: (f32, f32), // Projected point 0 (p_axis_val, q_axis_val) -> (col, row)
     p1_proj: (f32, f32), // Projected point 1
@@ -162,56 +159,8 @@ pub fn calculate_bounding_box(
 
 /// Checks if a point defined by barycentric coordinates is inside the triangle.
 /// Uses a small tolerance `BARYCENTRIC_COORD_EPSILON` to account for floating-point inaccuracies.
-#[inline]
 pub fn is_inside_triangle(u: f32, v: f32, w: f32) -> bool {
     u >= BARYCENTRIC_COORD_EPSILON
         && v >= BARYCENTRIC_COORD_EPSILON
         && w >= BARYCENTRIC_COORD_EPSILON
-}
-
-// --- Vector Math Helpers ---
-
-/// Scales a vector slice `a` by a scalar `s` and returns a new `Vec<f32>`.
-#[inline]
-pub fn vec_scale_ret(a: &[f32], s: f32) -> Vec<f32> {
-    a.iter().map(|x| x * s).collect()
-}
-
-/// Calculates the dot product of two vector slices.
-#[inline]
-pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
-/// Subtracts vector slice `b` from `a` and stores the result in `out`.
-#[inline]
-pub fn vec_sub(a: &[f32], b: &[f32], out: &mut [f32]) {
-    for i in 0..out.len().min(a.len()).min(b.len()) {
-        out[i] = a[i] - b[i];
-    }
-}
-
-/// Scales a vector slice `a` by a scalar `s` and stores the result in `out`.
-#[inline]
-pub fn vec_scale(a: &[f32], s: f32, out: &mut [f32]) {
-    for i in 0..out.len().min(a.len()) {
-        out[i] = a[i] * s;
-    }
-}
-
-/// Calculates the reflection of vector `neg_l` (pointing away from surface) about normal `n`.
-/// Result is stored in `out`.
-#[inline]
-pub fn reflect(neg_l: &[f32], n: &[f32], out: &mut [f32]) {
-    // Assumes neg_l, n, out are 3D vectors
-    if out.len() != 3 || neg_l.len() != 3 || n.len() != 3 {
-        // Handle error or return early if dimensions mismatch
-        return;
-    }
-    let dot_nl_neg = dot_product(n, neg_l);
-    // R = L - 2 * dot(N, L) * N => Using neg_l = -L => R = -neg_l - 2 * dot(N, -neg_l) * N
-    // Simplified R = 2 * dot(N, neg_l) * N - neg_l, which points away from the surface
-    let mut temp = [0.0f32; 3];
-    vec_scale(n, 2.0 * dot_nl_neg, &mut temp);
-    vec_sub(&temp, neg_l, out);
 }

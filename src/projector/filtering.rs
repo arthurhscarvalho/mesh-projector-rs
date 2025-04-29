@@ -1,7 +1,8 @@
 // src/projector/filtering.rs
-use crate::projector::buffers::Buffers;
-use crate::projector::constants::{FILTERING_NEIGHBORHOOD_FACTOR, NUM_IMAGES};
-use nd::{ArrayView2, ArrayViewMut3, Axis};
+use crate::projector::constants::{
+    BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_IMAGES,
+};
+use nd::{Array3, Array4, ArrayView2, ArrayViewMut3, Axis};
 use rayon::prelude::*;
 use std::f32;
 
@@ -115,13 +116,10 @@ fn apply_outlier_filter(
 
 /// Filters outlier pixels for all image layers. Returns counts of filtered pixels per layer.
 pub fn filter_outliers(
-    buffers: &mut Buffers,        // Mutable buffers (images, z_buffers)
+    z_buffers: &mut Array3<f32>,  // Mutable z buffers to check
+    images: &mut Array4<u8>,      // Mutable images to update
     filtering_window_radius: u32, // Radius 'w' (0 disables)
-    rows: usize,                  // Image rows
-    cols: usize,                  // Image columns
     max_bound_f32: f32,           // Max dimension for threshold calc
-    channels: usize,              // Image channels
-    background_color: u8,         // Background color value
 ) -> [u64; NUM_IMAGES] {
     // Return outlier counts array
     let mut outlier_counts: [u64; NUM_IMAGES] = [0; NUM_IMAGES];
@@ -131,6 +129,9 @@ pub fn filter_outliers(
     }
 
     let w = filtering_window_radius as usize;
+    let rows = z_buffers.shape()[1];
+    let cols = z_buffers.shape()[2];
+    let channels = images.shape()[3];
 
     if rows <= 2 * w || cols <= 2 * w {
         return outlier_counts;
@@ -139,15 +140,20 @@ pub fn filter_outliers(
     let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f32;
 
     for k in 0..NUM_IMAGES {
-        let z_slice = buffers.z_buffers.index_axis(Axis(0), k);
+        let z_slice = z_buffers.index_axis(Axis(0), k);
         let is_front_view = k % 2 == 0;
 
         let outlier_coords =
             find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold, is_front_view);
 
-        let image_slice = buffers.images.index_axis_mut(Axis(0), k);
+        let image_slice = images.index_axis_mut(Axis(0), k);
 
-        apply_outlier_filter(&outlier_coords, image_slice, channels, background_color);
+        apply_outlier_filter(
+            &outlier_coords,
+            image_slice,
+            channels,
+            BACKGROUND_BRIGHTNESS,
+        );
 
         outlier_counts[k] = outlier_coords.len() as u64;
     }

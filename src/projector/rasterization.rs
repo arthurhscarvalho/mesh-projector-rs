@@ -1,169 +1,19 @@
 // src/projector/rasterization.rs
 use crate::projector::config::ProjectionConfig;
-use crate::projector::geometry::{
-    barycentric, calculate_bounding_box, dot_product, is_inside_triangle, is_triangle_visible,
-    reflect,
+use crate::projector::constants::{
+    DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR,
 };
+use crate::projector::geometry::{
+    barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
+};
+use crate::projector::lighting::calculate_lighting;
+use crate::projector::material::MaterialProperties;
+use crate::projector::math::normalize_vec3;
+use crate::projector::sampling::sample_texture_color_bilinear;
+use crate::projector::texture::TextureData;
 use crate::ProjectionMode;
-use nd::{Array2, ArrayView2, ArrayView3, ArrayViewMut2, ArrayViewMut3};
+use nd::{Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
 use std::f32;
-
-/// Samples the texture color using bilinear filtering.
-/// Assumes texture view is valid.
-#[inline]
-fn sample_texture_color_bilinear(
-    interp_u_coord: f32,
-    interp_v_coord: f32,
-    texture: ArrayView3<u8>, // Pass texture view directly
-) -> [f32; 3] {
-    // Return fixed-size array [R, G, B] in [0,1] range
-    let tex_height = texture.shape()[0];
-    let tex_width = texture.shape()[1];
-    let channels = texture.shape()[2]; // Should typically be 3
-
-    let width_f32 = tex_width as f32;
-    let height_f32 = tex_height as f32;
-
-    let tex_xf = interp_u_coord * width_f32;
-    // Assuming V=0 is bottom in input UVs based on Python preprocessing flip logic
-    let tex_yf = interp_v_coord * height_f32;
-
-    let x0f = tex_xf.max(0.0).min(width_f32 - 1.0001);
-    let y0f = tex_yf.max(0.0).min(height_f32 - 1.0001);
-    let x0 = x0f as usize;
-    let y0 = y0f as usize;
-
-    let x1 = (x0 + 1).min(tex_width - 1);
-    let y1 = (y0 + 1).min(tex_height - 1);
-
-    let wx = x0f - x0 as f32;
-    let wy = y0f - y0 as f32;
-
-    let mut sampled_color = [0.0f32; 3];
-
-    // Assume 3 channels (RGB)
-    if channels >= 3 {
-        for chan in 0..3 {
-            let c00 = texture[[y0, x0, chan]] as f32; // Bottom-left in texture space
-            let c10 = texture[[y0, x1, chan]] as f32; // Bottom-right
-            let c01 = texture[[y1, x0, chan]] as f32; // Top-left
-            let c11 = texture[[y1, x1, chan]] as f32; // Top-right
-
-            // Bilinear interpolation formula might need checking based on coord system
-            let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy)
-                + c10 * wx * (1.0 - wy)
-                + c01 * (1.0 - wx) * wy
-                + c11 * wx * wy;
-
-            sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f32 [0, 1]
-        }
-    } else {
-        // Fallback for grayscale or unexpected channel count? Default to gray.
-        let gray_val = if channels == 1 {
-            texture[[y0, x0, 0]] as f32 / 255.0
-        } else {
-            0.5
-        };
-        sampled_color = [gray_val; 3];
-    }
-    sampled_color
-}
-
-/// Calculates the final linear color based on base color, material, lighting, and normal.
-#[inline]
-fn calculate_lighting(
-    material: &MaterialProperties,
-    linear_base_color: [f32; 3],
-    normal: [f32; 3],
-    light_dir: [f32; 3],
-    view_dir: [f32; 3],
-    light_color: [f32; 3],
-) -> [f32; 3] {
-    let linear_ka = [
-        material.ka[0].powf(2.2),
-        material.ka[1].powf(2.2),
-        material.ka[2].powf(2.2),
-    ];
-    let linear_kd = [
-        material.kd[0].powf(2.2),
-        material.kd[1].powf(2.2),
-        material.kd[2].powf(2.2),
-    ];
-    let linear_ks = [
-        material.ks[0].powf(2.2),
-        material.ks[1].powf(2.2),
-        material.ks[2].powf(2.2),
-    ];
-
-    let effective_diffuse_linear = [
-        linear_base_color[0] * linear_kd[0],
-        linear_base_color[1] * linear_kd[1],
-        linear_base_color[2] * linear_kd[2],
-    ];
-
-    let mut final_color_linear = [0.0f32; 3];
-    match material.illum {
-        0 => {
-            // Base color only
-            final_color_linear = linear_base_color;
-        }
-        1 => {
-            // Ambient + Diffuse (Original simple model)
-            let ambient_term = linear_ka;
-            let dot_nl = dot_product(&normal, &light_dir).max(0.0);
-            let diffuse_term = [
-                effective_diffuse_linear[0] * dot_nl * light_color[0],
-                effective_diffuse_linear[1] * dot_nl * light_color[1],
-                effective_diffuse_linear[2] * dot_nl * light_color[2],
-            ];
-            for i in 0..3 {
-                final_color_linear[i] = ambient_term[i] + diffuse_term[i];
-            }
-        }
-        2 | _ => {
-            // Illum 2+ (Revised Phong model variation)
-            // Ambient term: Modulate Ka by a global ambient factor
-            let global_ambient = [0.2, 0.2, 0.2];
-            let ambient_term = [
-                linear_ka[0] * global_ambient[0],
-                linear_ka[1] * global_ambient[1],
-                linear_ka[2] * global_ambient[2],
-            ];
-
-            // Diffuse term (without light color initially)
-            let dot_nl = dot_product(&normal, &light_dir).max(0.0);
-            let diffuse_term = [
-                effective_diffuse_linear[0] * dot_nl,
-                effective_diffuse_linear[1] * dot_nl,
-                effective_diffuse_linear[2] * dot_nl,
-            ];
-
-            // Specular term (without light color initially)
-            let mut reflected_light_dir = [0.0; 3];
-            let neg_light_dir = [-light_dir[0], -light_dir[1], -light_dir[2]];
-            reflect(&neg_light_dir, &normal, &mut reflected_light_dir);
-            normalize_vec3(&mut reflected_light_dir);
-            let dot_rv = dot_product(&reflected_light_dir, &view_dir).max(0.0);
-            let specular_intensity = if material.ns > 0.0 {
-                dot_rv.powf(material.ns)
-            } else {
-                0.0
-            };
-            let specular_term = [
-                linear_ks[0] * specular_intensity,
-                linear_ks[1] * specular_intensity,
-                linear_ks[2] * specular_intensity,
-            ];
-
-            // Combine: Final = Ambient + LightColor * (Diffuse + Specular)
-            for i in 0..3 {
-                final_color_linear[i] =
-                    ambient_term[i] + light_color[i] * (diffuse_term[i] + specular_term[i]);
-            }
-        }
-    }
-    final_color_linear
-}
 
 /// Rasterizes a single triangle based on the projection mode.
 #[allow(clippy::too_many_arguments)]
@@ -176,7 +26,7 @@ pub fn rasterize_triangle(
     vertex_normals: Option<ArrayView2<f32>>, // Optional vertex normals (N, 3) -> For Shading
     vertex_colors: Option<ArrayView2<f32>>,  // Optional vertex colors (N, 3) -> For Shading
     material: &MaterialProperties,           // Material properties
-    texture: Option<ArrayView3<u8>>,         // Optional diffuse texture map view
+    texture_data: Option<&TextureData<'_>>,  // Optional diffuse texture data
     projection_config: &ProjectionConfig,    // Configuration for the current projection view
     z_slice: &mut ArrayViewMut2<f32>,        // Mutable view to the Z-buffer slice
     image_slice: &mut ArrayViewMut3<u8>,     // Mutable view to the color image buffer slice
@@ -365,7 +215,7 @@ pub fn rasterize_triangle(
                             [r.max(0.0), g.max(0.0), b.max(0.0)]
                         }
                         ProjectionMode::ObjTexture | ProjectionMode::Full => {
-                            if let Some(tex) = texture {
+                            if let Some(tex) = texture_data {
                                 let sampled_srgb = sample_texture_color_bilinear(
                                     interpolated_u,
                                     interpolated_v,
@@ -377,7 +227,7 @@ pub fn rasterize_triangle(
                                     sampled_srgb[2].powf(2.2),
                                 ]
                             } else {
-                                [1.0, 0.0, 1.0]
+                                DEFAULT_MISSING_TEXTURE_COLOR
                             }
                         }
                     };
@@ -387,7 +237,7 @@ pub fn rasterize_triangle(
                     let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
                     let light_dir_array =
                         [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
-                    let light_color = [1.0, 1.0, 1.0];
+                    let light_color = DEFAULT_LIGHT_COLOR;
 
                     let final_linear_color = calculate_lighting(
                         material,
@@ -455,33 +305,4 @@ pub fn rasterize_triangle(
             }
         }
     }
-}
-
-/// Normalizes a 3D vector in place. Handles zero vector case.
-#[inline]
-fn normalize_vec3(v: &mut [f32; 3]) {
-    let norm_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-    if norm_sq > 1e-9 {
-        // Use a threshold slightly larger than 0 for robustness
-        let norm = norm_sq.sqrt();
-        v[0] /= norm;
-        v[1] /= norm;
-        v[2] /= norm;
-    } else {
-        // Handle zero vector case (e.g., set to a default direction or leave as zero)
-        v[0] = 0.0;
-        v[1] = 0.0;
-        v[2] = 1.0; // Example: Default to pointing up Z-axis
-    }
-}
-
-/// Material properties matching typical MTL definitions.
-#[derive(Debug, Clone)]
-pub struct MaterialProperties {
-    pub ka: [f32; 3], // Ambient color
-    pub kd: [f32; 3], // Diffuse color
-    pub ks: [f32; 3], // Specular color
-    pub ns: f32,      // Specular exponent
-    pub opacity: f32, // Opacity (0.0=transparent, 1.0=opaque) - Currently unused in shader
-    pub illum: i32,   // Illumination model
 }

@@ -4,71 +4,48 @@ mod config;
 mod constants;
 mod filtering;
 mod geometry;
+mod lighting;
+pub mod material;
+mod math;
+pub mod mesh;
+pub mod projection;
 mod rasterization;
-mod texture;
+mod sampling;
+pub mod texture;
 
 use crate::ProjectionMode;
-// Removed unused HashMap
-// use std::collections::HashMap;
-
-// Removed unused conditional_log
-// use crate::conditional_log;
 use buffers::Buffers;
 use config::ProjectionConfig;
 use constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
-// Removed unused Array3, Ix3
-use nd::{Array4, ArrayView2, ArrayView3, Axis, Ix4};
-use rasterization::{rasterize_triangle, MaterialProperties};
+use material::MaterialProperties;
+use mesh::{Mesh, MeshAttributes};
+use nd::{Array4, Axis, Ix4};
+use projection::ProjectionSettings;
+use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 use rayon::scope;
-use texture::TextureData;
-
-// Removed unused ArrayView, CowArray
-// use ndarray::{ArrayView, CowArray};
 
 /// Computes 6 orthographic projections based on the specified mode.
-/// Args:
-/// * `points`: Vertex coordinates (N, 3).
-/// * `triangles`: Triangle indices (M, 3) using usize.
-/// * `vertex_normals`: Optional vertex normal vectors (N, 3).
-/// * `vertex_colors`: Optional vertex colors (N, 3).
-/// * `texture`: Optional texture image data (H, W, C).
-/// * `triangle_uvs`: Optional UV coordinates per face-vertex (M * 3, 2).
-/// * `precision`: Log2 of output image dimensions.
-/// * `ka`, `kd`, `ks`, `ns`, `opacity`, `illum`: Material properties.
-/// * `filtering_window_radius`: Radius for outlier filter (0=disabled).
-/// * `mode`: The ProjectionMode enum indicating how to render.
 ///
 /// Returns:
 /// Tuple: (images: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
-pub fn compute_mesh_projections(
-    points: ArrayView2<'_, f32>,                 // Vertex positions (N, 3)
-    triangles: ArrayView2<'_, usize>,            // Triangle indices (M, 3) -> usize
-    vertex_normals: Option<ArrayView2<'_, f32>>, // Optional Vertex normals (N, 3)
-    vertex_colors: Option<ArrayView2<'_, f32>>,  // Optional Vertex colors (N, 3)
-    texture: Option<ArrayView3<'_, u8>>,         // Optional Texture data (H, W, C)
-    triangle_uvs: Option<ArrayView2<'_, f32>>,   // Optional UV coords per face-vertex (M*3, 2)
-    precision: u32,                              // Log2 of output image dimensions
-    ka: [f32; 3],                                // Ambient color
-    kd: [f32; 3],                                // Diffuse color
-    ks: [f32; 3],                                // Specular color
-    ns: f32,                                     // Shininess (specular exponent)
-    opacity: f32,                                // Opacity (0.0=transparent, 1.0=opaque)
-    illum: i32,                                  // Illumination model (i32)
-    filtering_window_radius: u32,                // Radius for outlier filter (0=disabled)
-    mode: ProjectionMode,                        // Rendering mode enum
+pub fn compute_mesh_projections<'a>(
+    mesh: &Mesh<'a>,                 // Core mesh data
+    attributes: &MeshAttributes<'a>, // Optional mesh attributes
+    material: &MaterialProperties,   // Material properties
+    settings: &ProjectionSettings,   // Projection settings
 ) -> (Array4<u8>, [u64; NUM_IMAGES]) {
     log::info!(
         "Initializing projector backend. Mode: {:?}, Precision: {}, Filtering: {}",
-        mode,
-        precision,
-        filtering_window_radius
+        settings.mode,
+        settings.precision,
+        settings.filtering_window_radius
     );
 
     // --- Setup & Validation ---
-    let max_bound: u64 = 1 << precision;
+    let max_bound: u64 = 1 << settings.precision;
     let max_bound_f32: f32 = max_bound as f32;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
@@ -76,7 +53,7 @@ pub fn compute_mesh_projections(
     let channels = 3; // Assuming RGB output for now
 
     // Handle potential empty inputs
-    if points.is_empty() || triangles.is_empty() {
+    if mesh.vertices.is_empty() || mesh.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
         let shape4d = Ix4(NUM_IMAGES, rows, cols, channels);
         return (
@@ -85,47 +62,47 @@ pub fn compute_mesh_projections(
         );
     }
 
-    // Validate data required by the mode *if provided*
-    if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
-        if texture.is_none() {
+    // Validate data required by the mode
+    if settings.mode == ProjectionMode::Full || settings.mode == ProjectionMode::ObjTexture {
+        if attributes.texture.is_none() {
             // This should ideally be caught by Python checks, but panic defensively
             panic!(
                 "Texture is required for mode {:?} but was not provided.",
-                mode
+                settings.mode
             );
         }
-        if triangle_uvs.is_none() {
+        if attributes.triangle_uvs.is_none() {
             panic!(
                 "Triangle UVs are required for mode {:?} but were not provided.",
-                mode
+                settings.mode
             );
         }
         // Validate UV shape if Some
-        if let Some(uvs) = triangle_uvs {
-            let expected_uv_rows = triangles.nrows() * 3;
+        if let Some(uvs) = attributes.triangle_uvs {
+            let expected_uv_rows = mesh.triangles.nrows() * 3;
             if expected_uv_rows != uvs.nrows() {
                 panic!(
                     "Inconsistent input: Triangles ({}) * 3 != UVs ({}). Expected {}.",
-                    triangles.nrows(),
+                    mesh.triangles.nrows(),
                     uvs.nrows(),
                     expected_uv_rows
                 );
             }
         }
-        // Create TextureData only if texture is present
-        // TextureData::new might need adjustment if it doesn't already handle ArrayView
-        let texture_data = TextureData::new(texture.expect("Texture checked above"));
-        log::info!(
-            "Texture loaded: {}x{}x{}",
-            texture_data.height_f32,
-            texture_data.width_f32,
-            texture_data.channels
-        );
+        // Log texture info if available
+        if let Some(ref texture_data) = attributes.texture {
+            log::info!(
+                "Texture loaded: {}x{}x{}",
+                texture_data.height_f32,
+                texture_data.width_f32,
+                texture_data.channels
+            );
+        }
     } else {
         // ProjectionMode::ObjOnly
         // We don't need texture or UVs.
         // Check for vertex colors (rasterizer handles default if None)
-        if vertex_colors.is_none() {
+        if attributes.vertex_colors.is_none() {
             log::warn!(
                 "OBJ_ONLY mode: Vertex colors not provided. Defaulting to white in rasterizer."
             );
@@ -133,36 +110,26 @@ pub fn compute_mesh_projections(
     }
 
     // Validate normals shape if Some
-    if let Some(normals) = vertex_normals {
-        if points.nrows() != normals.nrows() {
+    if let Some(normals) = attributes.vertex_normals {
+        if mesh.vertices.nrows() != normals.nrows() {
             panic!(
-                "Inconsistent input: Points ({}) != Vertex Normals ({}).",
-                points.nrows(),
+                "Inconsistent input: Vertices ({}) != Vertex Normals ({}).",
+                mesh.vertices.nrows(),
                 normals.nrows()
             );
         }
-    } else if mode != ProjectionMode::ObjOnly && illum > 0 {
+    } else if settings.mode != ProjectionMode::ObjOnly && material.illum > 0 {
         // Warn if normals are missing but lighting is expected
         log::warn!(
              "Vertex normals not provided for lighting mode {:?} (illum={}). Shading may be flat or incorrect.",
-             mode, illum
+             settings.mode, material.illum
          );
         // We will proceed and let the rasterizer handle None normals (e.g., skip lighting or use default normal)
     }
 
-    // --- Create Material Properties Struct ---
-    let material = MaterialProperties {
-        ka,
-        kd,
-        ks,
-        ns,
-        opacity,
-        illum,
-    };
-
     // --- Precomputation ---
     log::info!("Precomputing triangle normals...");
-    let triangle_normals = precompute_triangle_normals(points, triangles);
+    let triangle_normals = precompute_triangle_normals(mesh.vertices, mesh.triangles);
     log::info!("...Triangle normal precomputation finished.");
 
     // --- Buffer Initialization ---
@@ -186,44 +153,46 @@ pub fn compute_mesh_projections(
             .enumerate()
             .for_each(|(img_layer, (z_slice, image_slice))| {
                 let projection_config = ProjectionConfig::new(img_layer);
-                let num_faces = triangles.nrows();
+                let num_faces = mesh.triangles.nrows();
 
                 for t_idx in 0..num_faces {
                     rasterize_triangle(
                         t_idx,
-                        points,
-                        triangles,
-                        triangle_uvs,
+                        mesh.vertices,
+                        mesh.triangles,
+                        attributes.triangle_uvs,
                         &triangle_normals,
-                        vertex_normals,
-                        vertex_colors,
-                        &material,
-                        texture,
+                        attributes.vertex_normals,
+                        attributes.vertex_colors,
+                        material,
+                        attributes.texture.as_ref(),
                         &projection_config,
-                        z_slice,
-                        image_slice,
-                        mode,
+                        &mut z_slice.view_mut(),
+                        &mut image_slice.view_mut(),
+                        settings.mode,
                     );
                 }
             });
     });
-
     log::info!("...Rasterization finished.");
 
-    // --- Post-processing (Outlier Filtering) ---
-    log::info!("Starting outlier filtering...");
-    let outlier_counts = filter_outliers(
-        &mut buffers,
-        filtering_window_radius,
-        rows,
-        cols,
-        max_bound_f32,
-        channels,
-        BACKGROUND_BRIGHTNESS,
-    );
-    log::info!("...Filtering finished.");
+    // Apply outlier filtering if enabled
+    let outlier_counts = if settings.filtering_window_radius > 0 {
+        log::info!(
+            "Filtering outliers with window radius {}...",
+            settings.filtering_window_radius
+        );
+        filter_outliers(
+            &mut buffers.z_buffers,
+            &mut buffers.images,
+            settings.filtering_window_radius,
+            max_bound_f32,
+        )
+    } else {
+        log::info!("Outlier filtering disabled.");
+        [0; NUM_IMAGES]
+    };
+    log::info!("...Processing complete.");
 
-    // --- Return Results ---
-    log::info!("Projection computation complete.");
     (buffers.images, outlier_counts)
 }

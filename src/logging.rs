@@ -1,19 +1,10 @@
-#[macro_export]
-macro_rules! conditional_log {
-    ($condition:expr, $level:ident, $($arg:tt)+) => {
-        if $condition {
-            log::$level!($($arg)+);
-        }
-    };
-}
+use log::LevelFilter;
+use std::io;
 
-#[macro_export]
-macro_rules! log_removed_points {
-    ($logging_enabled:expr, $freqs:expr) => {
-        if $logging_enabled {
-            for i in 0..6 {
-                log::info!("{} points removed from projection {}", $freqs[i], i);
-            }
-        }
-    };
+/// Initialize the logger for the Rust library.
+/// This sets up colog for console logging.
+pub fn init_logger() -> Result<(), io::Error> {
+    colog::init();
+    log::set_max_level(LevelFilter::Info);
+    Ok(())
 }

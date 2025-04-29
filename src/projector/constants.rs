@@ -12,3 +12,11 @@ pub const BARYCENTRIC_EPSILON: f32 = 1e-7;
 pub const BARYCENTRIC_COORD_EPSILON: f32 = -1e-7;
 /// Factor applied to the maximum dimension (`max_bound`) to determine the depth threshold for outlier filtering.
 pub const FILTERING_NEIGHBORHOOD_FACTOR: f32 = 0.1;
+
+// --- Lighting Constants ---
+/// Global ambient lighting factor used in illumination model 2+
+pub const GLOBAL_AMBIENT: [f32; 3] = [0.2, 0.2, 0.2];
+/// Default light color used for all lighting calculations
+pub const DEFAULT_LIGHT_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
+/// Default color for missing textures (magenta for visibility)
+pub const DEFAULT_MISSING_TEXTURE_COLOR: [f32; 3] = [1.0, 0.0, 1.0];
