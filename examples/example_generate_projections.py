@@ -86,7 +86,11 @@ def main():
         help="Disable flipping the V texture coordinate (use if texture V=0 is bottom).",
     )
     parser.set_defaults(flip_uv=True)
-
+    parser.add_argument(
+        "--ignore-opacity",
+        action="store_true",
+        help="Ignore opacity from MTL file and force it to 1.0.",
+    )
     args = parser.parse_args()
 
     # Configure logging
@@ -105,6 +109,7 @@ def main():
             filtering=args.filtering,
             flip_uv=args.flip_uv,
             verbose=args.verbose,
+            ignore_opacity=args.ignore_opacity,
             # enable_post_processing could be added as an arg if needed
         )
         if (

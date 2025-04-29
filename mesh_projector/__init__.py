@@ -22,7 +22,7 @@ def info(msg):
     logger.info(msg)
 
 
-def _parse_mtl(mtl_path):
+def _parse_mtl(mtl_path, ignore_opacity: bool = False):
     """Parses relevant properties from an MTL file."""
     logger.debug(f"Attempting to parse MTL: {mtl_path}")
 
@@ -78,6 +78,11 @@ def _parse_mtl(mtl_path):
 
         material["opacity"] = max(0.0, min(1.0, material["opacity"]))
         parsed_successfully = True
+
+        # Override opacity if requested
+        if ignore_opacity:
+            logger.info("Ignoring MTL opacity and setting it to 1.0.")
+            material["opacity"] = 1.0
 
     except Exception as e:
         logger.error(f"Error parsing MTL file {mtl_path}: {e}. Using default values.")
@@ -344,6 +349,7 @@ def generate_projections(
     mode=ProjectionMode.FULL,
     filtering=0,
     verbose=False,
+    ignore_opacity: bool = False,
 ):
     """
     Generates 6 orthogonal projections of a mesh using the Rust backend.
@@ -356,6 +362,7 @@ def generate_projections(
         mode (ProjectionMode): The processing mode (OBJ_ONLY, OBJ_TEXTURE, FULL).
         filtering (int, optional): Radius for outlier filtering. Defaults to 0 (disabled).
         verbose (bool): Enables detailed logging.
+        ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value.
 
     Returns:
         List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
@@ -370,7 +377,7 @@ def generate_projections(
     # --- Material Handling based on Mode ---
     if mode == ProjectionMode.FULL:
         info(f"Using FULL mode. Parsing MTL: {mtl_location}")
-        material_props = _parse_mtl(mtl_location)
+        material_props = _parse_mtl(mtl_location, ignore_opacity=ignore_opacity)
     elif mode == ProjectionMode.OBJ_TEXTURE:
         info("Using OBJ_TEXTURE mode. Applying default material for texturing.")
         material_props = {
@@ -506,6 +513,7 @@ def project_mesh(
     flip_uv=True,
     verbose=False,
     enable_post_processing=True,
+    ignore_opacity: bool = False,
 ):
     """
     High-level function to load, preprocess, and generate projections for a mesh.
@@ -524,6 +532,7 @@ def project_mesh(
         verbose (bool): Enables detailed logging. Defaults to False.
         enable_post_processing (bool): Enables Open3D post-processing during mesh loading.
                                       Defaults to False.
+        ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value. Defaults to False.
 
     Returns:
         List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
@@ -618,6 +627,7 @@ def project_mesh(
         mode=resolved_mode,
         filtering=filtering,
         verbose=verbose,
+        ignore_opacity=ignore_opacity,
     )
 
     return projection_images
