@@ -79,8 +79,12 @@ def main():
         "--verbose", action="store_true", help="Enable verbose logging."
     )
     parser.add_argument(
-        "--flip-uv", action="store_true", help="Flip the V texture coordinate (1-v)."
+        "--no-flip-uv",
+        action="store_false",
+        dest="flip_uv",
+        help="Disable flipping the V texture coordinate (use if texture V=0 is bottom).",
     )
+    parser.set_defaults(flip_uv=True)
 
     args = parser.parse_args()
 

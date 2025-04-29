@@ -177,7 +177,7 @@ def read_mesh(
 
 
 def preprocess_mesh(
-    mesh, precision, mode=ProjectionMode.FULL, flip_v_coordinate=False, verbose=False
+    mesh, precision, mode=ProjectionMode.FULL, flip_v_coordinate=True, verbose=False
 ):
     """
     Processes a mesh by scaling vertices and preparing data based on the mode.
@@ -187,6 +187,7 @@ def preprocess_mesh(
         precision (int): Output image resolution exponent (2^precision).
         mode (ProjectionMode): The processing mode.
         flip_v_coordinate (bool): Whether to flip the V coordinate (1.0 - v).
+                                Defaults to True, assuming texture V=0 is top.
         verbose (bool): Enables detailed logging.
 
     Returns:
@@ -273,10 +274,10 @@ def preprocess_mesh(
 
         triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
         if flip_v_coordinate:
-            info("Flipping V coordinate (1.0 - v)")
+            info("Flipping V coordinate (1.0 - v) [Default Behavior]")
             triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
         else:
-            info("Using original V coordinates")
+            info("Using original V coordinates [Flipping Disabled]")
         processed_data["triangle_uvs"] = triangle_uvs.astype(
             np.float32
         )  # Ensure float32
