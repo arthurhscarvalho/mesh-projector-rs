@@ -2,75 +2,83 @@
 use crate::projector::config::ProjectionConfig;
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, dot_product, is_inside_triangle, is_triangle_visible,
-    reflect, vec_scale_ret,
+    reflect,
 };
-use crate::projector::texture::TextureData;
-use nd::{Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
+use crate::ProjectionMode;
+use nd::{Array2, ArrayView2, ArrayView3, ArrayViewMut2, ArrayViewMut3};
 use std::f32;
 
-/// Interpolates texture coordinates using barycentric coordinates and samples the texture color
-/// using bilinear filtering. Returns the sampled color as a `Vec<f32>` in [0, 1] range.
-/// Assumes standard UV mapping where (0,0) is top-left and (1,1) is bottom-right.
-/// Handles clamping coordinates to the texture boundaries.
+/// Samples the texture color using bilinear filtering.
+/// Assumes texture view is valid.
 #[inline]
 fn sample_texture_color_bilinear(
-    interp_u_coord: f32, // Perspective-correct interpolated U coordinate [0, 1]
-    interp_v_coord: f32, // Perspective-correct interpolated V coordinate [0, 1]
-    texture_data: &TextureData, // Contains texture view and dimensions
-) -> Vec<f32> {
-    let tex_xf = interp_u_coord * texture_data.width_f32;
-    // Flip V coordinate for standard UV mapping (0,0 at top-left)
-    let tex_yf = (1.0 - interp_v_coord) * texture_data.height_f32;
+    interp_u_coord: f32,
+    interp_v_coord: f32,
+    texture: ArrayView3<u8>, // Pass texture view directly
+) -> [f32; 3] {
+    // Return fixed-size array [R, G, B] in [0,1] range
+    let tex_height = texture.shape()[0];
+    let tex_width = texture.shape()[1];
+    let channels = texture.shape()[2]; // Should typically be 3
 
-    // Clamp coordinates to valid texture range, accounting for potential floating point inaccuracies
-    let x0f = tex_xf.max(0.0).min(texture_data.width_f32 - 1.0001);
-    let y0f = tex_yf.max(0.0).min(texture_data.height_f32 - 1.0001);
+    let width_f32 = tex_width as f32;
+    let height_f32 = tex_height as f32;
+
+    let tex_xf = interp_u_coord * width_f32;
+    // Assuming V=0 is bottom in input UVs based on Python preprocessing flip logic
+    let tex_yf = interp_v_coord * height_f32;
+
+    let x0f = tex_xf.max(0.0).min(width_f32 - 1.0001);
+    let y0f = tex_yf.max(0.0).min(height_f32 - 1.0001);
     let x0 = x0f as usize;
     let y0 = y0f as usize;
 
-    // Ensure bottom-right texel coordinates are within bounds
-    let x1 = (x0 + 1).min((texture_data.width_f32 - 1.0) as usize);
-    let y1 = (y0 + 1).min((texture_data.height_f32 - 1.0) as usize);
+    let x1 = (x0 + 1).min(tex_width - 1);
+    let y1 = (y0 + 1).min(tex_height - 1);
 
-    // Calculate interpolation weights
     let wx = x0f - x0 as f32;
     let wy = y0f - y0 as f32;
 
-    let tex = &texture_data.texture;
-    let c = texture_data.channels;
-    let mut sampled_color = vec![0.0f32; c];
+    let mut sampled_color = [0.0f32; 3];
 
-    for chan in 0..c {
-        let c00 = tex[[y0, x0, chan]] as f32; // Top-left
-        let c10 = tex[[y0, x1, chan]] as f32; // Top-right
-        let c01 = tex[[y1, x0, chan]] as f32; // Bottom-left
-        let c11 = tex[[y1, x1, chan]] as f32; // Bottom-right
+    // Assume 3 channels (RGB)
+    if channels >= 3 {
+        for chan in 0..3 {
+            let c00 = texture[[y0, x0, chan]] as f32; // Bottom-left in texture space
+            let c10 = texture[[y0, x1, chan]] as f32; // Bottom-right
+            let c01 = texture[[y1, x0, chan]] as f32; // Top-left
+            let c11 = texture[[y1, x1, chan]] as f32; // Top-right
 
-        let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy)
-            + c10 * wx * (1.0 - wy)
-            + c01 * (1.0 - wx) * wy
-            + c11 * wx * wy;
+            // Bilinear interpolation formula might need checking based on coord system
+            let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy)
+                + c10 * wx * (1.0 - wy)
+                + c01 * (1.0 - wx) * wy
+                + c11 * wx * wy;
 
-        sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f32 [0, 1]
+            sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f32 [0, 1]
+        }
+    } else {
+        // Fallback for grayscale or unexpected channel count? Default to gray.
+        let gray_val = if channels == 1 {
+            texture[[y0, x0, 0]] as f32 / 255.0
+        } else {
+            0.5
+        };
+        sampled_color = [gray_val; 3];
     }
     sampled_color
 }
 
-/// Calculates the final color of a fragment based on material, lighting, and texture.
-/// Assumes inputs (material colors, texture) are sRGB and performs calculations in linear space.
+/// Calculates the final linear color based on base color, material, lighting, and normal.
 #[inline]
-fn calculate_fragment_color(
+fn calculate_lighting(
     material: &MaterialProperties,
-    map_kd: Option<&TextureData>,
-    interp_u_coord: f32,
-    interp_v_coord: f32,
-    normal: &[f32; 3],
-    light_dir: &[f32; 3],
-    view_dir: &[f32; 3],
-    light_color: &[f32; 3],
+    linear_base_color: [f32; 3],
+    normal: [f32; 3],
+    light_dir: [f32; 3],
+    view_dir: [f32; 3],
+    light_color: [f32; 3],
 ) -> [f32; 3] {
-    // Returns final *linear* color before alpha blending
-    // --- Linearize Material Colors (assuming input Ka/Kd/Ks are sRGB) ---
     let linear_ka = [
         material.ka[0].powf(2.2),
         material.ka[1].powf(2.2),
@@ -87,155 +95,196 @@ fn calculate_fragment_color(
         material.ks[2].powf(2.2),
     ];
 
-    // --- Calculate Effective Diffuse Color (in linear space) ---
-    let effective_diffuse_linear = if let Some(tex_data) = map_kd {
-        let sampled_rgb = sample_texture_color_bilinear(interp_u_coord, interp_v_coord, tex_data);
-        let mut modulated_color = [0.0f32; 3];
-        if sampled_rgb.len() >= 3 {
-            for i in 0..3 {
-                let linear_sampled = sampled_rgb[i].powf(2.2); // Linearize texture sample
-                modulated_color[i] = linear_sampled * linear_kd[i]; // Modulate by linear Kd
-            }
-        } else if sampled_rgb.len() == 1 {
-            // Handle grayscale texture
-            let linear_sampled = sampled_rgb[0].powf(2.2);
-            for i in 0..3 {
-                modulated_color[i] = linear_sampled * linear_kd[i];
-            }
-        } else {
-            modulated_color = linear_kd; // Fallback to linear Kd if texture is invalid
-        }
-        modulated_color
-    } else {
-        // If no texture, use linearized material diffuse color directly
-        linear_kd
-    };
+    let effective_diffuse_linear = [
+        linear_base_color[0] * linear_kd[0],
+        linear_base_color[1] * linear_kd[1],
+        linear_base_color[2] * linear_kd[2],
+    ];
 
-    // --- Illumination Model Logic (Using LINEAR colors) ---
     let mut final_color_linear = [0.0f32; 3];
     match material.illum {
         0 => {
-            // Color on and Ambient off
-            final_color_linear = effective_diffuse_linear;
+            // Base color only
+            final_color_linear = linear_base_color;
         }
         1 => {
-            // Color on and Ambient on
+            // Ambient + Diffuse (Original simple model)
+            let ambient_term = linear_ka;
+            let dot_nl = dot_product(&normal, &light_dir).max(0.0);
+            let diffuse_term = [
+                effective_diffuse_linear[0] * dot_nl * light_color[0],
+                effective_diffuse_linear[1] * dot_nl * light_color[1],
+                effective_diffuse_linear[2] * dot_nl * light_color[2],
+            ];
             for i in 0..3 {
-                final_color_linear[i] = linear_ka[i] + effective_diffuse_linear[i];
+                final_color_linear[i] = ambient_term[i] + diffuse_term[i];
             }
         }
-        2 => {
-            // Highlight on (Phong)
-
-            // Ambient Component
-            let global_ambient_light = [0.25, 0.25, 0.25]; // Standard ambient factor
+        2 | _ => {
+            // Illum 2+ (Revised Phong model variation)
+            // Ambient term: Modulate Ka by a global ambient factor
+            let global_ambient = [0.2, 0.2, 0.2]; // Example low global ambient light
             let ambient_term = [
-                global_ambient_light[0] * linear_ka[0],
-                global_ambient_light[1] * linear_ka[1],
-                global_ambient_light[2] * linear_ka[2],
+                linear_ka[0] * global_ambient[0],
+                linear_ka[1] * global_ambient[1],
+                linear_ka[2] * global_ambient[2],
             ];
 
-            // Diffuse Component
-            let dot_nl = dot_product(normal, light_dir).max(0.0);
-            let diffuse_term = vec_scale_ret(&effective_diffuse_linear, dot_nl * light_color[0]);
+            // Diffuse term (without light color initially)
+            let dot_nl = dot_product(&normal, &light_dir).max(0.0);
+            let diffuse_term = [
+                effective_diffuse_linear[0] * dot_nl,
+                effective_diffuse_linear[1] * dot_nl,
+                effective_diffuse_linear[2] * dot_nl,
+            ];
 
-            // Specular Component
+            // Specular term (without light color initially)
             let mut reflected_light_dir = [0.0; 3];
             let neg_light_dir = [-light_dir[0], -light_dir[1], -light_dir[2]];
-            reflect(&neg_light_dir, normal, &mut reflected_light_dir);
-            let dot_rv = dot_product(&reflected_light_dir, view_dir).max(0.0);
+            reflect(&neg_light_dir, &normal, &mut reflected_light_dir);
+            normalize_vec3(&mut reflected_light_dir);
+            let dot_rv = dot_product(&reflected_light_dir, &view_dir).max(0.0);
             let specular_intensity = if material.ns > 0.0 {
                 dot_rv.powf(material.ns)
             } else {
                 0.0
             };
-            let specular_term = vec_scale_ret(&linear_ks, specular_intensity * light_color[0]);
+            let specular_term = [
+                linear_ks[0] * specular_intensity,
+                linear_ks[1] * specular_intensity,
+                linear_ks[2] * specular_intensity,
+            ];
 
-            // Combine components
+            // Combine: Final = Ambient + LightColor * (Diffuse + Specular)
             for i in 0..3 {
-                final_color_linear[i] = ambient_term[i] + diffuse_term[i] + specular_term[i];
+                final_color_linear[i] =
+                    ambient_term[i] + light_color[i] * (diffuse_term[i] + specular_term[i]);
             }
         }
-        _ => {
-            // Default/Unsupported: Use effective_diffuse color only
-            final_color_linear = effective_diffuse_linear;
-        }
     }
-
-    // --- Reinhard Tone Mapping --- Apply tone mapping to the linear color
-    let mut tonemapped_color = [0.0f32; 3];
-    for i in 0..3 {
-        tonemapped_color[i] = final_color_linear[i] / (1.0 + final_color_linear[i]);
-    }
-
-    tonemapped_color // Return the tone-mapped linear color
+    final_color_linear
 }
 
-/// Rasterizes a single triangle using vertex normal interpolation for smooth shading.
+/// Rasterizes a single triangle based on the projection mode.
+#[allow(clippy::too_many_arguments)]
 pub fn rasterize_triangle(
-    t_idx: usize,                         // Index of the current triangle
-    points: ArrayView2<f32>,              // All vertex 3D positions (N, 3)
-    triangles: ArrayView2<usize>,         // Triangle vertex indices (M, 3)
-    triangle_uvs: ArrayView2<f32>,        // UV coordinates per triangle vertex (M*3, 2)
-    triangle_normals: &Array2<f32>, // Precomputed geometric normals per triangle (M, 3) -> For Culling
-    vertex_normals: ArrayView2<f32>, // Vertex normals (N, 3) -> For Shading // ADDED
-    material: &MaterialProperties,  // Material properties
-    map_kd: Option<&TextureData>,   // Optional diffuse texture map
-    projection_config: &ProjectionConfig, // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f32>, // Mutable view to the Z-buffer
-    image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer
-    ocp_slice: &mut ArrayViewMut2<f32>, // Mutable view to the occlusion map
+    t_idx: usize,                            // Index of the current triangle
+    points: ArrayView2<f32>,                 // All vertex 3D positions (N, 3)
+    triangles: ArrayView2<usize>,            // Triangle vertex indices (M, 3)
+    triangle_uvs: Option<ArrayView2<f32>>,   // Optional UV coords per tri vertex (M*3, 2)
+    triangle_normals: &Array2<f32>,          // Precomputed face normals (M, 3) -> For Culling
+    vertex_normals: Option<ArrayView2<f32>>, // Optional vertex normals (N, 3) -> For Shading
+    vertex_colors: Option<ArrayView2<f32>>,  // Optional vertex colors (N, 3) -> For Shading
+    material: &MaterialProperties,           // Material properties
+    texture: Option<ArrayView3<u8>>,         // Optional diffuse texture map view
+    projection_config: &ProjectionConfig,    // Configuration for the current projection view
+    z_slice: &mut ArrayViewMut2<f32>,        // Mutable view to the Z-buffer slice
+    image_slice: &mut ArrayViewMut3<u8>,     // Mutable view to the color image buffer slice
+    mode: ProjectionMode,                    // Rendering mode
 ) {
-    // 1. Back-face Culling: Use the precomputed *geometric* normal for this.
+    // 1. Back-face Culling
     let geometric_normal_view = triangle_normals.row(t_idx);
-    if !is_triangle_visible(
+    let face_normal = [
         geometric_normal_view[0],
         geometric_normal_view[1],
         geometric_normal_view[2],
+    ];
+    if !is_triangle_visible(
+        face_normal[0],
+        face_normal[1],
+        face_normal[2],
         projection_config.view_dir,
     ) {
-        return; // Cull the triangle if it's facing away.
+        return;
     }
 
-    // 2. Get Vertex Data Indices
+    // 2. Get Vertex Data Indices & Positions
     let tri_indices = triangles.row(t_idx);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
-
-    // Get 3D positions
     let p0 = points.row(i0);
     let p1 = points.row(i1);
     let p2 = points.row(i2);
 
-    // Get vertex normals (for interpolation)
-    let n0_view = vertex_normals.row(i0);
-    let n1_view = vertex_normals.row(i1);
-    let n2_view = vertex_normals.row(i2);
-    // Convert ArrayView rows to [f32; 3] arrays for easier handling
-    let n0 = [n0_view[0], n0_view[1], n0_view[2]];
-    let n1 = [n1_view[0], n1_view[1], n1_view[2]];
-    let n2 = [n2_view[0], n2_view[1], n2_view[2]];
-
-    // --- Perspective Correct Interpolation Setup (Depth and UVs) ---
+    // --- Setup Data for Interpolation ---
     let z0 = p0[projection_config.depth_axis];
     let z1 = p1[projection_config.depth_axis];
     let z2 = p2[projection_config.depth_axis];
-    let inv_z0 = 1.0 / (z0 + 1e-6);
-    let inv_z1 = 1.0 / (z1 + 1e-6);
-    let inv_z2 = 1.0 / (z2 + 1e-6);
+    // Add small epsilon to avoid division by zero, check if necessary
+    let inv_z0 = 1.0 / (z0.abs() + 1e-6) * z0.signum();
+    let inv_z1 = 1.0 / (z1.abs() + 1e-6) * z1.signum();
+    let inv_z2 = 1.0 / (z2.abs() + 1e-6) * z2.signum();
 
-    let uv_idx_base = t_idx * 3;
-    let uv0 = triangle_uvs.row(uv_idx_base);
-    let uv1 = triangle_uvs.row(uv_idx_base + 1);
-    let uv2 = triangle_uvs.row(uv_idx_base + 2);
+    // Perspective-correct attributes (attribute / z)
+    let mut n0_over_z = (0.0, 0.0, 0.0);
+    let mut n1_over_z = (0.0, 0.0, 0.0);
+    let mut n2_over_z = (0.0, 0.0, 0.0);
+    let mut uv0_over_z = (0.0, 0.0);
+    let mut uv1_over_z = (0.0, 0.0);
+    let mut uv2_over_z = (0.0, 0.0);
+    // Default vertex color is white
+    let mut c0_over_z = (inv_z0, inv_z0, inv_z0);
+    let mut c1_over_z = (inv_z1, inv_z1, inv_z1);
+    let mut c2_over_z = (inv_z2, inv_z2, inv_z2);
+    let mut has_normals = false;
 
-    let uv0_over_z = (uv0[0] * inv_z0, uv0[1] * inv_z0);
-    let uv1_over_z = (uv1[0] * inv_z1, uv1[1] * inv_z1);
-    let uv2_over_z = (uv2[0] * inv_z2, uv2[1] * inv_z2);
-    // --- End Perspective Correct Interpolation Setup ---
+    // Setup normals if available
+    if let Some(v_normals) = vertex_normals {
+        let n0v = v_normals.row(i0);
+        let n1v = v_normals.row(i1);
+        let n2v = v_normals.row(i2);
+        n0_over_z = (n0v[0] * inv_z0, n0v[1] * inv_z0, n0v[2] * inv_z0);
+        n1_over_z = (n1v[0] * inv_z1, n1v[1] * inv_z1, n1v[2] * inv_z1);
+        n2_over_z = (n2v[0] * inv_z2, n2v[1] * inv_z2, n2v[2] * inv_z2);
+        has_normals = true;
+    }
 
-    // 3. Project Vertices to 2D Plane
+    // Setup UVs if available (required for texture modes)
+    if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
+        if let Some(uvs) = triangle_uvs {
+            let uv_idx_base = t_idx * 3;
+            let uv0 = uvs.row(uv_idx_base);
+            let uv1 = uvs.row(uv_idx_base + 1);
+            let uv2 = uvs.row(uv_idx_base + 2);
+            uv0_over_z = (uv0[0] * inv_z0, uv0[1] * inv_z0);
+            uv1_over_z = (uv1[0] * inv_z1, uv1[1] * inv_z1);
+            uv2_over_z = (uv2[0] * inv_z2, uv2[1] * inv_z2);
+        } else {
+            // Should have been caught earlier, but default to avoid panic
+            uv0_over_z = (0.0, 0.0);
+            uv1_over_z = (0.0, 0.0);
+            uv2_over_z = (0.0, 0.0);
+        }
+    }
+
+    // Setup vertex colors if available (required for ObjOnly mode)
+    if mode == ProjectionMode::ObjOnly {
+        if let Some(v_colors) = vertex_colors {
+            let c0v = v_colors.row(i0);
+            let c1v = v_colors.row(i1);
+            let c2v = v_colors.row(i2);
+            // Assume vertex colors are sRGB [0,1], store linear/z for interpolation
+            c0_over_z = (
+                c0v[0].powf(2.2) * inv_z0,
+                c0v[1].powf(2.2) * inv_z0,
+                c0v[2].powf(2.2) * inv_z0,
+            );
+            c1_over_z = (
+                c1v[0].powf(2.2) * inv_z1,
+                c1v[1].powf(2.2) * inv_z1,
+                c1v[2].powf(2.2) * inv_z1,
+            );
+            c2_over_z = (
+                c2v[0].powf(2.2) * inv_z2,
+                c2v[1].powf(2.2) * inv_z2,
+                c2v[2].powf(2.2) * inv_z2,
+            );
+        }
+        // If None, the default white setup remains.
+    }
+
+    // 3. Project Vertices to 2D
     let p0_proj = (p0[projection_config.p_axis], p0[projection_config.q_axis]);
     let p1_proj = (p1[projection_config.p_axis], p1[projection_config.q_axis]);
     let p2_proj = (p2[projection_config.p_axis], p2[projection_config.q_axis]);
@@ -248,135 +297,150 @@ pub fn rasterize_triangle(
         return;
     };
 
-    // --- Lighting Setup ---
-    let light_dir_tuple = (
-        -projection_config.view_dir.0,
-        -projection_config.view_dir.1,
-        -projection_config.view_dir.2,
-    );
-    let light_dir = [light_dir_tuple.0, light_dir_tuple.1, light_dir_tuple.2];
-    let light_color = [1.0, 1.0, 1.0];
-    // View direction V is constant for ortho, points from surface towards camera
-    let view_dir = light_dir; // Light at camera position
+    // 5. Pixel Loop
+    for row in min_row..max_row {
+        for col in min_col..max_col {
+            let pixel_center = (col as f32 + 0.5, row as f32 + 0.5);
 
-    // 5. Iterate Pixels in Bounding Box
-    for r in min_row..=max_row {
-        for c in min_col..=max_col {
-            let px = c as f32 + 0.5;
-            let py = r as f32 + 0.5;
+            // 6. Barycentric Coordinates FIRST
+            let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
+                continue;
+            };
 
-            // 6. Calculate Barycentric Coordinates
-            if let Some((u, v, w)) = barycentric(p0_proj, p1_proj, p2_proj, (px, py)) {
-                if is_inside_triangle(u, v, w) {
-                    // --- Perspective Correct Interpolation (Depth & UV) ---
-                    let interpolated_inv_z = u * inv_z0 + v * inv_z1 + w * inv_z2;
-                    let interpolated_depth = 1.0 / interpolated_inv_z;
+            // Check if inside using Barycentric coordinates
+            if is_inside_triangle(w0, w1, w2) {
+                // 7. Perspective Correct Interpolation
+                let interpolated_inv_z = w0 * inv_z0 + w1 * inv_z1 + w2 * inv_z2;
+                if interpolated_inv_z == 0.0 {
+                    continue;
+                }
+                let interpolated_z = 1.0 / interpolated_inv_z;
 
-                    let interpolated_u_over_z =
-                        u * uv0_over_z.0 + v * uv1_over_z.0 + w * uv2_over_z.0;
-                    let interpolated_v_over_z =
-                        u * uv0_over_z.1 + v * uv1_over_z.1 + w * uv2_over_z.1;
-                    let interp_u_coord = interpolated_u_over_z * interpolated_depth;
-                    let interp_v_coord = interpolated_v_over_z * interpolated_depth;
+                // 8. Depth Test
+                let current_z = z_slice[[row, col]];
+                let depth_test_passed = if projection_config.is_front_view {
+                    interpolated_z < current_z
+                } else {
+                    interpolated_z > current_z
+                };
 
-                    // 8. Depth Test
-                    let current_z = z_slice[[r, c]];
-                    let depth_test_passed = if projection_config.is_front_view {
-                        interpolated_depth < current_z
+                if depth_test_passed {
+                    // --- Interpolate Attributes ---
+                    let interpolated_normal = if has_normals {
+                        let bw0 = w0;
+                        let bw1 = w1;
+                        let bw2 = w2;
+                        let nx = (bw0 * n0_over_z.0 + bw1 * n1_over_z.0 + bw2 * n2_over_z.0)
+                            * interpolated_z;
+                        let ny = (bw0 * n0_over_z.1 + bw1 * n1_over_z.1 + bw2 * n2_over_z.1)
+                            * interpolated_z;
+                        let nz = (bw0 * n0_over_z.2 + bw1 * n1_over_z.2 + bw2 * n2_over_z.2)
+                            * interpolated_z;
+                        let mut norm = [nx, ny, nz];
+                        normalize_vec3(&mut norm);
+                        norm
                     } else {
-                        interpolated_depth > current_z
+                        face_normal
                     };
 
-                    if depth_test_passed {
-                        if material.opacity < 1e-6 {
-                            continue;
-                        } // Skip transparent fragments
+                    let (interpolated_u, interpolated_v) =
+                        if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
+                            let u = (w0 * uv0_over_z.0 + w1 * uv1_over_z.0 + w2 * uv2_over_z.0)
+                                * interpolated_z;
+                            let v = (w0 * uv0_over_z.1 + w1 * uv1_over_z.1 + w2 * uv2_over_z.1)
+                                * interpolated_z;
+                            (u, v)
+                        } else {
+                            (0.0, 0.0)
+                        };
 
-                        // --- Interpolate Vertex Normals ---
-                        // Use non-perspective correct barycentric coords (u, v, w) for normals
-                        let mut interp_normal = [
-                            u * n0[0] + v * n1[0] + w * n2[0],
-                            u * n0[1] + v * n1[1] + w * n2[1],
-                            u * n0[2] + v * n1[2] + w * n2[2],
-                        ];
-                        // --- Normalize the interpolated normal --- crucial step!
-                        normalize_vec3(&mut interp_normal);
-                        // ----------------------------------------
-
-                        // 9. Update Buffers
-                        z_slice[[r, c]] = interpolated_depth;
-                        ocp_slice[[r, c]] = 1.0; // Mark occlusion
-
-                        // Calculate Fragment Color using the interpolated normal
-                        let tonemapped_linear_color = calculate_fragment_color(
-                            material,
-                            map_kd,
-                            interp_u_coord,
-                            interp_v_coord,
-                            &interp_normal, // Pass interpolated normal
-                            &light_dir,
-                            &view_dir, // Use view_dir (same as light_dir here)
-                            &light_color,
-                        );
-
-                        // --- Alpha Blending ---
-                        // ... existing alpha blending ...
-                        let src_alpha = material.opacity;
-                        let one_minus_src_alpha = 1.0 - src_alpha;
-                        let background_color = [1.0f32, 1.0f32, 1.0f32]; // Assuming white background
-
-                        let mut blended_color_f32 = [0.0f32; 3];
-                        for i in 0..3 {
-                            blended_color_f32[i] = (tonemapped_linear_color[i] * src_alpha)
-                                + (background_color[i] * one_minus_src_alpha);
+                    let linear_base_color = match mode {
+                        ProjectionMode::ObjOnly => {
+                            let r = (w0 * c0_over_z.0 + w1 * c1_over_z.0 + w2 * c2_over_z.0)
+                                * interpolated_z;
+                            let g = (w0 * c0_over_z.1 + w1 * c1_over_z.1 + w2 * c2_over_z.1)
+                                * interpolated_z;
+                            let b = (w0 * c0_over_z.2 + w1 * c1_over_z.2 + w2 * c2_over_z.2)
+                                * interpolated_z;
+                            [r.max(0.0), g.max(0.0), b.max(0.0)]
                         }
+                        ProjectionMode::ObjTexture | ProjectionMode::Full => {
+                            if let Some(tex) = texture {
+                                let sampled_srgb = sample_texture_color_bilinear(
+                                    interpolated_u,
+                                    interpolated_v,
+                                    tex,
+                                );
+                                [
+                                    sampled_srgb[0].powf(2.2),
+                                    sampled_srgb[1].powf(2.2),
+                                    sampled_srgb[2].powf(2.2),
+                                ]
+                            } else {
+                                [1.0, 0.0, 1.0]
+                            }
+                        }
+                    };
 
-                        // Clamp final blended color just in case
-                        for i in 0..3 {
-                            blended_color_f32[i] = blended_color_f32[i].clamp(0.0, 1.0);
-                        }
+                    // --- Calculate Final Color (Lighting) ---
+                    let light_dir = [0.577, 0.577, 0.577];
+                    let view_dir_tuple = projection_config.view_dir;
+                    let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2]; // FIXED: Convert tuple to array
+                    let light_color = [1.0, 1.0, 1.0];
 
-                        // Convert final blended linear color back to sRGB u8
-                        let image_channels = image_slice.shape()[2];
-                        for chan in 0..image_channels.min(3) {
-                            let srgb_val = blended_color_f32[chan].powf(1.0 / 2.2);
-                            image_slice[[r, c, chan]] = (srgb_val * 255.0) as u8;
-                        }
-                        if image_channels == 4 {
-                            image_slice[[r, c, 3]] = (src_alpha * 255.0) as u8;
-                        }
-                    }
+                    let final_linear_color = calculate_lighting(
+                        material,
+                        linear_base_color,
+                        interpolated_normal,
+                        light_dir,
+                        view_dir_array, // Pass array
+                        light_color,
+                    );
+
+                    // --- Gamma Correction (Linear -> sRGB) & Clamping ---
+                    let final_color_srgb = [
+                        final_linear_color[0].powf(1.0 / 2.2).max(0.0).min(1.0),
+                        final_linear_color[1].powf(1.0 / 2.2).max(0.0).min(1.0),
+                        final_linear_color[2].powf(1.0 / 2.2).max(0.0).min(1.0),
+                    ];
+
+                    // 9. Update Buffers
+                    z_slice[[row, col]] = interpolated_z;
+                    image_slice[[row, col, 0]] = (final_color_srgb[0] * 255.0) as u8;
+                    image_slice[[row, col, 1]] = (final_color_srgb[1] * 255.0) as u8;
+                    image_slice[[row, col, 2]] = (final_color_srgb[2] * 255.0) as u8;
                 }
             }
         }
     }
 }
 
-// Helper to normalize a 3-element array/slice in-place
+/// Normalizes a 3D vector in place. Handles zero vector case.
 #[inline]
 fn normalize_vec3(v: &mut [f32; 3]) {
-    let mag_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
-    if mag_sq > 1e-9 {
-        // Avoid division by zero/sqrt of zero
-        let inv_mag = 1.0 / mag_sq.sqrt();
-        v[0] *= inv_mag;
-        v[1] *= inv_mag;
-        v[2] *= inv_mag;
+    let norm_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    if norm_sq > 1e-9 {
+        // Use a threshold slightly larger than 0 for robustness
+        let norm = norm_sq.sqrt();
+        v[0] /= norm;
+        v[1] /= norm;
+        v[2] /= norm;
     } else {
-        // Handle zero vector case if necessary, e.g., set to a default
+        // Handle zero vector case (e.g., set to a default direction or leave as zero)
         v[0] = 0.0;
         v[1] = 0.0;
-        v[2] = 1.0; // Example fallback
+        v[2] = 1.0; // Example: Default to pointing up Z-axis
     }
 }
 
-// Simple struct to hold material properties
-#[derive(Debug, Clone, Copy)]
+/// Material properties matching typical MTL definitions.
+#[derive(Debug, Clone)]
 pub struct MaterialProperties {
     pub ka: [f32; 3], // Ambient color
     pub kd: [f32; 3], // Diffuse color
     pub ks: [f32; 3], // Specular color
     pub ns: f32,      // Specular exponent
-    pub opacity: f32, // Opacity (0.0=transparent, 1.0=opaque)
-    pub illum: u32,   // Illumination model
+    #[allow(dead_code)]
+    pub opacity: f32, // Opacity (0.0=transparent, 1.0=opaque) - Currently unused in shader
+    pub illum: i32,   // Illumination model
 }

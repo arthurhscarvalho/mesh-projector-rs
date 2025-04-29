@@ -1,13 +1,20 @@
-from textwrap import dedent
 import os
 import cv2
 import numpy as np
 import open3d as o3d
 from loguru import logger
+from enum import Enum
 
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
 )
+
+
+# Define an Enum for the modes
+class ProjectionMode(Enum):
+    OBJ_ONLY = "obj_only"
+    OBJ_TEXTURE = "obj_texture"
+    FULL = "full"  # Corresponds to OBJ+Texture+MTL
 
 
 def info(msg):
@@ -16,30 +23,34 @@ def info(msg):
 
 def _parse_mtl(mtl_path):
     """Parses relevant properties from an MTL file."""
+    logger.debug(f"Attempting to parse MTL: {mtl_path}")
+
+    # Default material if file not found or not provided
+    default_material = {
+        "ka": [0.0, 0.0, 0.0],
+        "kd": [1.0, 1.0, 1.0],
+        "ks": [0.0, 0.0, 0.0],
+        "ns": 10.0,
+        "opacity": 1.0,
+        "illum": 1,
+    }
 
     if not mtl_path or not os.path.exists(mtl_path):
         logger.warning(
             f"MTL file not provided or not found: {mtl_path}. Using default material values."
         )
-        # Raw texture applied directly to the surface
-        return {
-            "ka": [0.0, 0.0, 0.0],  # Default Ambient
-            "kd": [1.0, 1.0, 1.0],  # Default Diffuse
-            "ks": [0.0, 0.0, 0.0],  # Default Specular
-            "ns": 10.0,  # Default Shininess
-            "opacity": 1.0,  # Default Opacity (from d or Tr)
-            "illum": 1,  # Default Illumination model
-        }
+        return default_material
 
+    # Start with reasonable defaults before parsing
     material = {
-        "ka": [0.1, 0.1, 0.1],  # Default Ambient
-        "kd": [0.8, 0.8, 0.8],  # Default Diffuse
-        "ks": [0.1, 0.1, 0.1],  # Default Specular
-        "ns": 10.0,  # Default Shininess
-        "opacity": 1.0,  # Default Opacity (from d or Tr)
-        "illum": 2,  # Default Illumination model
+        "ka": [0.1, 0.1, 0.1],
+        "kd": [0.8, 0.8, 0.8],
+        "ks": [0.1, 0.1, 0.1],
+        "ns": 10.0,
+        "opacity": 1.0,
+        "illum": 2,
     }
-
+    parsed_successfully = False
     try:
         with open(mtl_path, "r") as f:
             for line in f:
@@ -57,59 +68,57 @@ def _parse_mtl(mtl_path):
                     material["ks"] = [float(v) for v in values]
                 elif key == "ns" and len(values) == 1:
                     material["ns"] = float(values[0])
-                elif key == "tr" and len(values) == 1:  # Transparency (1 - opacity)
+                elif key == "tr" and len(values) == 1:
                     material["opacity"] = 1.0 - float(values[0])
-                elif key == "d" and len(values) == 1:  # Dissolve (opacity)
+                elif key == "d" and len(values) == 1:
                     material["opacity"] = float(values[0])
                 elif key == "illum" and len(values) == 1:
                     material["illum"] = int(values[0])
-                # map_Kd is ignored here as the texture data is passed separately
 
-        # Clamp opacity
         material["opacity"] = max(0.0, min(1.0, material["opacity"]))
-        info(f"Parsed material properties from {mtl_path}: {material}")
+        parsed_successfully = True
 
     except Exception as e:
         logger.error(f"Error parsing MTL file {mtl_path}: {e}. Using default values.")
-        # Raw texture applied directly to the surface
-        return {
-            "ka": [0.0, 0.0, 0.0],  # Default Ambient
-            "kd": [1.0, 1.0, 1.0],  # Default Diffuse
-            "ks": [0.0, 0.0, 0.0],  # Default Specular
-            "ns": 10.0,  # Default Shininess
-            "opacity": 1.0,  # Default Opacity (from d or Tr)
-            "illum": 1,  # Default Illumination model
-        }
+        material = default_material
+
+    # Log final parsed/default values
+    if parsed_successfully:
+        logger.info(f"Successfully parsed MTL '{mtl_path}': {material}")
+    else:
+        logger.warning(f"Failed to parse MTL '{mtl_path}', using defaults: {material}")
 
     return material
 
 
 def read_mesh(
     obj_location,
-    texture_file,
+    texture_file=None,
     mtl_location=None,
     enable_post_processing=False,
+    mode=ProjectionMode.FULL,
     verbose=False,
 ):
     """
-    Loads a mesh and its texture (external).
+    Loads a mesh and optionally its texture based on the mode.
 
     Args:
         obj_location (str): Path to the OBJ mesh file.
-        texture_file (str): Path to the texture image file.
-        mtl_location (str, optional): Path to the MTL material file. Defaults to None.
-        enable_post_processing (bool): Enables Open3D post-processing (e.g., vertex merging).
+        texture_file (str, optional): Path to the texture image file. Required for OBJ_TEXTURE and FULL modes. Defaults to None.
+        mtl_location (str, optional): Path to the MTL material file. Used only in FULL mode. Defaults to None.
+        enable_post_processing (bool): Enables Open3D post-processing.
+        mode (ProjectionMode): The processing mode (OBJ_ONLY, OBJ_TEXTURE, FULL).
         verbose (bool): Enables detailed logging output.
 
     Returns:
-        o3d.geometry.TriangleMesh: The loaded mesh with texture attached.
+        o3d.geometry.TriangleMesh: The loaded mesh, possibly with texture attached.
 
     Raises:
-        ValueError, FileNotFoundError: On failure to load or missing components.
+        ValueError, FileNotFoundError: On failure to load or missing components required by the mode.
     """
     if verbose is not True:
         logger.remove()
-    info(f"Loading mesh: {obj_location}")
+    info(f"Loading mesh: {obj_location} in mode: {mode.value}")
     info(f"Post-processing enabled: {enable_post_processing}")
     mesh = o3d.io.read_triangle_mesh(
         obj_location,
@@ -118,6 +127,8 @@ def read_mesh(
     )
     if not mesh.has_vertices():
         raise ValueError(f"Mesh '{obj_location}' has no vertices!")
+
+    # Normals are generally useful for all modes if available, compute if missing.
     if not mesh.has_vertex_normals():
         logger.warning(
             f"Mesh '{obj_location}' does not have vertex normals. "
@@ -125,83 +136,173 @@ def read_mesh(
         )
         mesh.compute_vertex_normals()
         if not mesh.has_vertex_normals():
-            raise ValueError(
-                f"Failed to compute vertex normals for mesh '{obj_location}'. "
-                "Cannot proceed with smooth shading."
+            # Decide if this is critical depending on the mode or downstream usage
+            logger.warning(
+                f"Failed to compute vertex normals for mesh '{obj_location}'. Shading might be affected."
             )
-        logger.info("Successfully computed vertex normals.")
+        else:
+            logger.info("Successfully computed vertex normals.")
 
-    if not mesh.has_triangle_uvs():
-        err = f"Mesh '{obj_location}' has no UV coordinates, cannot use texture."
-        raise ValueError(err)
-    texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
-    mesh.textures = [o3d.geometry.Image(texture)]
-    info(f"Texture load successful: {texture_file}")
-    # Note: We load the MTL separately if needed, Open3D doesn't directly apply it here
-    # in a way that's easily transferable to our custom renderer.
+    # Handle texture and UVs based on mode
+    if mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL]:
+        if not texture_file or not os.path.exists(texture_file):
+            raise FileNotFoundError(
+                f"Texture file '{texture_file}' is required for mode '{mode.value}' but not found."
+            )
+        if not mesh.has_triangle_uvs():
+            raise ValueError(
+                f"Mesh '{obj_location}' has no UV coordinates, required for mode '{mode.value}'."
+            )
+
+        try:
+            texture = cv2.cvtColor(cv2.imread(texture_file), cv2.COLOR_BGR2RGB)
+            mesh.textures = [o3d.geometry.Image(texture)]
+            info(f"Texture load successful: {texture_file}")
+        except Exception as e:
+            raise ValueError(f"Failed to load texture '{texture_file}': {e}")
+
+    elif mode == ProjectionMode.OBJ_ONLY:
+        # In OBJ_ONLY mode, texture is not loaded. Check for vertex colors.
+        if mesh.has_vertex_colors():
+            info("Mesh has vertex colors.")
+        else:
+            logger.warning(
+                f"Mesh '{obj_location}' does not have vertex colors for OBJ_ONLY mode. Will need default color."
+            )
+        # Clear any textures that might have been loaded automatically by open3d based on MTL reference
+        mesh.textures = []
+
+    # MTL file is only relevant for FULL mode, parsed later in generate_projections
     return mesh
 
 
-def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
+def preprocess_mesh(
+    mesh, precision, mode=ProjectionMode.FULL, flip_v_coordinate=False, verbose=False
+):
     """
-    Processes a mesh by scaling vertices and adjusting UVs for use with texture.
+    Processes a mesh by scaling vertices and preparing data based on the mode.
 
     Args:
-        mesh (o3d.geometry.TriangleMesh): Mesh with texture, UVs, and vertex normals.
-        precision (int): A power-of-2 exponent determining the output image resolution.
-                         The output images will be `(2^precision) x (2^precision)`.
+        mesh (o3d.geometry.TriangleMesh): Loaded mesh.
+        precision (int): Output image resolution exponent (2^precision).
+        mode (ProjectionMode): The processing mode.
         flip_v_coordinate (bool): Whether to flip the V coordinate (1.0 - v).
         verbose (bool): Enables detailed logging.
 
     Returns:
-        tuple:
-            - vertices (np.ndarray[float32]): Scaled vertex positions (N, 3).
-            - triangle_indices (np.ndarray[uint64]): Triangle vertex indices (M, 3).
-            - vertex_normals (np.ndarray[float32]): Vertex normal vectors (N, 3).
-            - texture_np (np.ndarray[uint8]): Texture image data (H, W, C).
-            - triangle_uvs (np.ndarray[float32]): Per-triangle UV coordinates (M*3, 2).
+        dict: A dictionary containing processed mesh data:
+            - 'vertices': Scaled vertex positions (N, 3).
+            - 'triangle_indices': Triangle vertex indices (M, 3).
+            - 'vertex_normals': Vertex normal vectors (N, 3).
+            - 'texture_np' (optional): Texture image data (H, W, C), if mode requires texture.
+            - 'triangle_uvs' (optional): Per-triangle UV coordinates (M*3, 2), if mode requires texture.
+            - 'vertex_colors' (optional): Vertex color data (N, 3), if mode is OBJ_ONLY and colors exist.
     """
     if verbose is not True:
         logger.remove()
 
-    if not mesh.has_vertex_normals():
-        raise ValueError("Mesh lacks vertex normals required for preprocessing.")
+    processed_data = {}
 
-    texture_np = np.asarray(mesh.textures[0])
-    if texture_np.ndim != 3 or texture_np.shape[2] < 3:
-        err = f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
-        raise ValueError(err)
-    tex_height, tex_width, tex_channels = texture_np.shape
-    info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
-    triangle_uvs = np.asarray(mesh.triangle_uvs)
-    if triangle_uvs.shape[1] != 2:
-        err = f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
-        raise ValueError(err)
-    # Clamp UVs to [0, 1] range to avoid issues with sampling outside bounds
-    triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
-    # IMPORTANT: Optionally flip the V (vertical) coordinate.
-    if flip_v_coordinate:
-        info("Flipping V coordinate (1.0 - v)")
-        triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
-    else:
-        info("Using original V coordinates")
-    # --- Vertex Data ---
+    # --- Vertex Data (Common) ---
     vertices = np.asarray(mesh.vertices)
-    vertex_normals = np.asarray(mesh.vertex_normals)
-    triangle_indices = np.asarray(mesh.triangles, dtype=np.uint32)
+    triangle_indices = np.asarray(
+        mesh.triangles, dtype=np.uint32
+    )  # Changed to uint32 based on previous check
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
-    if triangle_uvs.shape[0] != triangle_indices.size:
-        err = f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size}) pixels"
-        raise ValueError(err)
-    if vertices.shape[0] != vertex_normals.shape[0]:
-        err = f"Vertex count mismatch: Vertices ({vertices.shape[0]}) vs. Normals ({vertex_normals.shape[0]})"
-        raise ValueError(err)
-    # --- Vertex Scaling ---
+
+    # --- Normals (Common, if available) ---
+    if mesh.has_vertex_normals():
+        vertex_normals = np.asarray(mesh.vertex_normals)
+        if vertices.shape[0] != vertex_normals.shape[0]:
+            raise ValueError(
+                f"Vertex count mismatch: Vertices ({vertices.shape[0]}) vs. Normals ({vertex_normals.shape[0]})"
+            )
+
+        # Ensure normals are normalized
+        norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
+        zero_norms_mask = norm_norms.flatten() < 1e-9
+        if np.any(zero_norms_mask):
+            logger.warning(
+                f"Found {np.sum(zero_norms_mask)} zero-length normals. Setting them to [0, 0, 1]."
+            )
+            vertex_normals[zero_norms_mask] = [0.0, 0.0, 1.0]
+            norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
+            norm_norms[norm_norms < 1e-9] = (
+                1.0  # Avoid division by zero for default normals
+            )
+
+        processed_data["vertex_normals"] = vertex_normals / norm_norms
+    else:
+        # Handle case where normals couldn't be computed/loaded
+        logger.warning("Mesh lacks vertex normals. Proceeding without them.")
+        # Create placeholder normals if needed by Rust, or handle absence there
+        # For now, just don't include them in the dict
+        # processed_data['vertex_normals'] = np.zeros_like(vertices, dtype=np.float32) # Example placeholder
+        processed_data["vertex_normals"] = None  # Indicate absence
+
+    # --- Mode-Specific Data ---
+    if mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL]:
+        if not mesh.textures:
+            raise ValueError(
+                f"Mode '{mode.value}' requires textures, but none are loaded on the mesh."
+            )
+        if not mesh.has_triangle_uvs():
+            raise ValueError(
+                f"Mode '{mode.value}' requires UVs, but none are found on the mesh."
+            )
+
+        texture_np = np.asarray(mesh.textures[0])
+        if texture_np.ndim != 3 or texture_np.shape[2] < 3:
+            raise ValueError(
+                f"Texture has shape {texture_np.shape}. Expected 3 channels (RGB)."
+            )
+        tex_height, tex_width, tex_channels = texture_np.shape
+        info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
+        processed_data["texture_np"] = texture_np
+
+        triangle_uvs = np.asarray(mesh.triangle_uvs)
+        if triangle_uvs.shape[1] != 2:
+            raise ValueError(
+                f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
+            )
+        if triangle_uvs.shape[0] != triangle_indices.size:
+            raise ValueError(
+                f"UV mismatch: UVs ({triangle_uvs.shape[0]}) vs. triangles ({triangle_indices.size})"
+            )
+
+        triangle_uvs = np.clip(triangle_uvs, 0.0, 1.0)
+        if flip_v_coordinate:
+            info("Flipping V coordinate (1.0 - v)")
+            triangle_uvs[:, 1] = 1.0 - triangle_uvs[:, 1]
+        else:
+            info("Using original V coordinates")
+        processed_data["triangle_uvs"] = triangle_uvs.astype(
+            np.float32
+        )  # Ensure float32
+
+    elif mode == ProjectionMode.OBJ_ONLY:
+        if mesh.has_vertex_colors():
+            vertex_colors = np.asarray(mesh.vertex_colors)
+            if vertex_colors.shape[0] != vertices.shape[0]:
+                raise ValueError(
+                    f"Vertex color mismatch: Vertices ({vertices.shape[0]}) vs. Colors ({vertex_colors.shape[0]})"
+                )
+            processed_data["vertex_colors"] = vertex_colors.astype(
+                np.float32
+            )  # Ensure float32
+            info(f"Vertex colors shape: {vertex_colors.shape}")
+        else:
+            processed_data["vertex_colors"] = None  # Indicate absence
+            info("No vertex colors found for OBJ_ONLY mode.")
+        # Ensure texture and UVs are not included
+        processed_data["texture_np"] = None
+        processed_data["triangle_uvs"] = None
+
+    # --- Vertex Scaling (Common) ---
     min_bound = vertices.min(axis=0)
     max_bound = vertices.max(axis=0)
     info(f"Original BBox Min: {min_bound}, Max: {max_bound}")
-    # Shift if necessary to make min bound >= 0
     shift = np.maximum(0, -min_bound)
     if np.any(shift > 0):
         info(f"Shifting vertices by: {shift}")
@@ -210,113 +311,184 @@ def preprocess_mesh(mesh, precision, flip_v_coordinate=False, verbose=False):
         max_bound = vertices.max(axis=0)
         info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
     bbox_size = max_bound - min_bound
-    # Handle zero size dimensions if any (e.g., flat mesh)
-    bbox_size[bbox_size == 0] = 1e-6  # Avoid division by zero, set a tiny size
-    # Uniform scaling based on the *largest* dimension
+    bbox_size[bbox_size == 0] = 1e-6
     max_dim = np.max(bbox_size)
-    # Target maximum coordinate value (e.g., 65535.0 for precision=16)
     target_max_val = (1 << precision) - 1.0
     scale_factor = target_max_val / max_dim
     info(f"Scaling vertices. Max dimension: {max_dim}, Scale factor: {scale_factor}")
     vertices *= scale_factor
-    # Update bounds after scaling
     min_bound_scaled = vertices.min(axis=0)
     max_bound_scaled = vertices.max(axis=0)
     info(f"Scaled BBox Min: {min_bound_scaled}, Max: {max_bound_scaled}")
 
-    # Important: Do not scale normals. They are direction vectors.
-    # Ensure normals are normalized (Open3D usually returns normalized normals, but good to check/force)
-    norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
-    # Avoid division by zero for zero-length normals
-    zero_norms_mask = norm_norms.flatten() < 1e-9
-    if np.any(zero_norms_mask):
-        logger.warning(
-            f"Found {np.sum(zero_norms_mask)} zero-length normals. Setting them to [0, 0, 1]."
-        )
-        vertex_normals[zero_norms_mask] = [0.0, 0.0, 1.0]  # Assign a default normal
-        # Recalculate norms for the updated normals
-        norm_norms = np.linalg.norm(vertex_normals, axis=1, keepdims=True)
-        # Avoid division by zero again for the (now non-zero) default normals
-        norm_norms[norm_norms < 1e-9] = 1.0
+    processed_data["vertices"] = vertices.astype(np.float32)  # Ensure float32
+    processed_data["triangle_indices"] = triangle_indices  # Already uint32
 
-    vertex_normals = vertex_normals / norm_norms
+    # Final Logging
+    final_shapes = {
+        k: (v.shape if hasattr(v, "shape") else type(v))
+        for k, v in processed_data.items()
+        if v is not None
+    }
+    info(f"Final Processed Data Shapes: {final_shapes}")
 
-    final_msg = dedent(f"""
-        Final Data Shapes:
-            Vertices (scaled): {vertices.shape}, dtype={vertices.dtype}
-            Triangle Indices: {triangle_indices.shape}, dtype={triangle_indices.dtype}
-            Vertex Normals: {vertex_normals.shape}, dtype={vertex_normals.dtype}
-            Texture: {texture_np.shape}, dtype={texture_np.dtype}
-            Triangle UVs (processed): {triangle_uvs.shape}, dtype={triangle_uvs.dtype}
-    """).strip()
-    info(final_msg)
-    # Return data needed by Rust
-    return (
-        vertices.astype(np.float32),
-        triangle_indices.astype(np.uint64),
-        vertex_normals.astype(np.float32),
-        texture_np.astype(np.uint8),
-        triangle_uvs.astype(np.float32),
-    )
+    return processed_data
 
 
 def generate_projections(
-    mesh,
+    processed_data,
     precision,
     mtl_location=None,
+    mode=ProjectionMode.FULL,
     filtering=0,
     verbose=False,
 ):
     """
-    Computes 6 orthographic projections (front/back for X/Y/Z) of a textured mesh.
-
-    This function calls a Rust back-end to perform the projection calculations.
+    Generates 6 orthogonal projections of a mesh using the Rust backend.
 
     Args:
-        mesh: (o3d.geometry.TriangleMesh): An open3d mesh with texture, UVs, and vertex normals attached.
-        precision (int): A power-of-2 exponent determining the output image resolution.
-                         The output images will be `(2^precision) x (2^precision)`.
-        mtl_location (str, optional): Path to the MTL file for material properties. Defaults to None.
-        filtering (int, optional): Radius of the square neighborhood window for outlier filtering. Defaults to 0.
-                                   A value of 0 disables the filtering step.
-        verbose (bool, optional): Flag to enable or disable logging messages. Defaults to False.
+        processed_data (dict): Result from preprocess_mesh, containing vertices,
+                               indices, normals, and mode-specific data (texture/UVs or colors).
+        precision (int): Output image resolution exponent (2^precision).
+        mtl_location (str, optional): Path to the MTL file. Used only in FULL mode. Defaults to None.
+        mode (ProjectionMode): The processing mode (OBJ_ONLY, OBJ_TEXTURE, FULL).
+        filtering (int, optional): Radius for outlier filtering. Defaults to 0 (disabled).
+        verbose (bool): Enables detailed logging.
 
     Returns:
-        tuple: A tuple containing:
-            - images (np.ndarray[np.uint8]): An array of shape (6, H, W, C) holding the 6 rendered projection images.
-            - ocp_maps (np.ndarray[np.float32]): An array of shape (6, H, W) holding the 6 occlusion maps,
-                                                where 1.0 indicates a mesh pixel and 0.0 indicates background.
+        List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
+
+    Raises:
+        ValueError: If required data for the selected mode is missing in processed_data.
+        RuntimeError: If the Rust backend fails.
     """
     if verbose is not True:
         logger.remove()
 
-    info("Parsing MTL file (if provided)")
-    material_props = _parse_mtl(mtl_location)
+    # --- Material Handling based on Mode ---
+    if mode == ProjectionMode.FULL:
+        info(f"Using FULL mode. Parsing MTL: {mtl_location}")
+        material_props = _parse_mtl(mtl_location)
+    elif mode == ProjectionMode.OBJ_TEXTURE:
+        info("Using OBJ_TEXTURE mode. Applying default material for texturing.")
+        material_props = {
+            "ka": [0.0, 0.0, 0.0],  # No Ambient
+            "kd": [1.0, 1.0, 1.0],  # Base color modulation (texture is base)
+            "ks": [0.0, 0.0, 0.0],  # No Specular
+            "ns": 10.0,  # Default Shininess (unused if Ks=0)
+            "opacity": 1.0,  # Fully Opaque
+            # Use illum 0: Color = ShadingColor (base color, no lighting calc)
+            "illum": 0,  # CHANGED from 1 to 0
+        }
+    elif mode == ProjectionMode.OBJ_ONLY:
+        info("Using OBJ_ONLY mode. Applying default material for vertex colors.")
+        material_props = {
+            "ka": [0.0, 0.0, 0.0],  # No Ambient term from material
+            "kd": [1.0, 1.0, 1.0],  # Base color modulation (vertex color is base)
+            "ks": [0.0, 0.0, 0.0],  # No Specular
+            "ns": 10.0,
+            "opacity": 1.0,
+            "illum": 0,  # Color = ShadingColor (no lighting calculation)
+        }
+    else:
+        raise ValueError(f"Unknown ProjectionMode: {mode}")
 
-    info("Preprocessing mesh")
-    mesh_data = preprocess_mesh(mesh, precision, verbose=verbose)
-    info("Sending data to Rust back-end")
+    # --- Unpack Processed Data ---
+    vertices = processed_data.get("vertices")
+    triangle_indices = processed_data.get("triangle_indices")
+    vertex_normals = processed_data.get("vertex_normals")  # Can be None
+    texture_np = processed_data.get("texture_np")  # Can be None
+    triangle_uvs = processed_data.get("triangle_uvs")  # Can be None
+    vertex_colors = processed_data.get("vertex_colors")  # Can be None
 
-    # Unpack mesh data
-    vertices, triangle_indices, vertex_normals, texture_np, triangle_uvs = mesh_data
+    # --- Validate Data Requirements per Mode ---
+    if vertices is None or triangle_indices is None:
+        raise ValueError("Vertices and triangle_indices are always required.")
+    # Normals are preferred for lighting, but might be optional depending on Rust impl.
+    if (
+        vertex_normals is None
+        and mode != ProjectionMode.OBJ_ONLY
+        and material_props["illum"] > 0
+    ):
+        logger.warning(
+            "Vertex normals are missing. Lighting/Shading might be incorrect."
+        )
+        # Consider generating default normals if Rust requires them:
+        # vertex_normals = np.zeros_like(vertices, dtype=np.float32)
+        # vertex_normals[:, 2] = 1.0 # Point up Z-axis
 
-    # Call the Rust backend with material properties and vertex normals
-    images, ocp_maps = _internal_generate_projections(
-        vertices,
-        triangle_indices,
-        vertex_normals,
-        texture_np,
-        triangle_uvs,
-        precision,
-        material_props["ka"],  # Ambient color (list/tuple)
-        material_props["kd"],  # Diffuse color (list/tuple)
-        material_props["ks"],  # Specular color (list/tuple)
-        material_props["ns"],  # Shininess (float)
-        material_props["opacity"],  # Opacity (float)
-        material_props["illum"],  # Illumination model (int)
-        filtering,
-        verbose,
-    )
-    images, ocp_maps = np.asarray(images), np.asarray(ocp_maps)
-    info("Projections successfully generated!")
-    return images, ocp_maps
+    if mode in [ProjectionMode.OBJ_TEXTURE, ProjectionMode.FULL]:
+        if texture_np is None or triangle_uvs is None:
+            raise ValueError(
+                f"Mode '{mode.value}' requires texture_np and triangle_uvs."
+            )
+    elif mode == ProjectionMode.OBJ_ONLY:
+        if vertex_colors is None:
+            logger.warning(
+                "Vertex colors are missing for OBJ_ONLY mode. Using default white."
+            )
+            # Create default white vertex colors if none exist
+            vertex_colors = np.ones_like(vertices, dtype=np.float32)
+
+    # Convert mode enum to string for Rust FFI
+    mode_str = mode.value
+
+    # <<< --- Log final properties before Rust call --- >>>
+    logger.info(f"--- Calling Rust Backend ---")
+    logger.info(f"Mode: {mode_str}")
+    logger.info(f"Material Properties Sent: {material_props}")
+    logger.info(f"Texture provided: {texture_np is not None}")
+    logger.info(f"UVs provided: {triangle_uvs is not None}")
+    logger.info(f"Vertex Normals provided: {vertex_normals is not None}")
+    logger.info(f"Vertex Colors provided: {vertex_colors is not None}")
+    logger.info(f"--------------------------")
+    # <<< --- End logging --- >>>
+
+    try:
+        results = _internal_generate_projections(
+            vertices.flatten().tolist(),  # Flattened vertex coords
+            triangle_indices.flatten().tolist(),  # Flattened triangle indices
+            vertex_normals.flatten().tolist() if vertex_normals is not None else None,
+            vertex_colors.flatten().tolist() if vertex_colors is not None else None,
+            texture_np.flatten().tolist() if texture_np is not None else None,
+            texture_np.shape[0] if texture_np is not None else 0,
+            texture_np.shape[1] if texture_np is not None else 0,
+            triangle_uvs.flatten().tolist() if triangle_uvs is not None else None,
+            material_props["ka"],
+            material_props["kd"],
+            material_props["ks"],
+            material_props["ns"],
+            material_props["opacity"],
+            material_props["illum"],
+            precision,
+            filtering,
+            mode_str,
+        )
+    except Exception as e:
+        # Log the specific error from the Rust backend if possible
+        logger.error(f"Error calling Rust backend: {e}")
+        raise RuntimeError(f"Rust backend failed during projection generation: {e}")
+
+    # Process results (assuming Rust returns list of numpy arrays or similar)
+    projection_images = []
+    img_size = 1 << precision
+    expected_shape = (img_size, img_size, 3)  # Assuming RGB output
+
+    for i, res_bytes in enumerate(results):
+        try:
+            # Assuming res_bytes is bytes data for a numpy array
+            img = np.frombuffer(res_bytes, dtype=np.uint8).reshape(expected_shape)
+            projection_images.append(img)
+        except Exception as e:
+            logger.error(
+                f"Error processing result {i}: {e}. Data length: {len(res_bytes)}, Expected shape: {expected_shape}"
+            )
+            # Handle error, maybe append a placeholder image or re-raise
+            placeholder = np.zeros(expected_shape, dtype=np.uint8)
+            projection_images.append(placeholder)
+
+    if len(projection_images) != 6:
+        logger.warning(f"Expected 6 projections, but received {len(projection_images)}")
+
+    info(f"Generated {len(projection_images)} projections.")
+    return projection_images

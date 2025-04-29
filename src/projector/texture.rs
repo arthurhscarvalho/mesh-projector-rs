@@ -5,6 +5,7 @@ use nd::ArrayView3;
 #[derive(Debug, Clone)]
 pub struct TextureData<'a> {
     /// Read-only view into the texture pixel data (H, W, C).
+    #[allow(dead_code)]
     pub texture: ArrayView3<'a, u8>,
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).
     pub channels: usize,
