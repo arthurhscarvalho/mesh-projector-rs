@@ -383,17 +383,18 @@ pub fn rasterize_triangle(
                     };
 
                     // --- Calculate Final Color (Lighting) ---
-                    let light_dir = [0.577, 0.577, 0.577];
                     let view_dir_tuple = projection_config.view_dir;
-                    let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2]; // FIXED: Convert tuple to array
+                    let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
+                    let light_dir_array =
+                        [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
                     let light_color = [1.0, 1.0, 1.0];
 
                     let final_linear_color = calculate_lighting(
                         material,
                         linear_base_color,
                         interpolated_normal,
-                        light_dir,
-                        view_dir_array, // Pass array
+                        light_dir_array,
+                        view_dir_array,
                         light_color,
                     );
 
