@@ -190,12 +190,12 @@ fn extract_color_array(
 
 #[pymodule]
 fn mesh_projector(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    logging::init_logger().map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-            "Failed to initialize logger: {}",
-            e
-        ))
-    })?;
+    // logging::init_logger().map_err(|e| {
+    //     PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+    //         "Failed to initialize logger: {}",
+    //         e
+    //     ))
+    // })?;
     log::info!("Initializing mesh_projector Rust extension module");
 
     m.add_function(wrap_pyfunction!(generate_projections, m)?)?;

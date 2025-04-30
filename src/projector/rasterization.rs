@@ -1,8 +1,6 @@
 // src/projector/rasterization.rs
 use crate::projector::config::ProjectionConfig;
-use crate::projector::constants::{
-    DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR,
-};
+use crate::projector::constants::{DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR};
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
@@ -61,22 +59,18 @@ pub fn rasterize_triangle(
     let z0 = p0[projection_config.depth_axis];
     let z1 = p1[projection_config.depth_axis];
     let z2 = p2[projection_config.depth_axis];
-    // Add small epsilon to avoid division by zero, check if necessary
-    let inv_z0 = 1.0 / (z0.abs() + 1e-6) * z0.signum();
-    let inv_z1 = 1.0 / (z1.abs() + 1e-6) * z1.signum();
-    let inv_z2 = 1.0 / (z2.abs() + 1e-6) * z2.signum();
 
-    // Perspective-correct attributes (attribute / z)
-    let mut n0_over_z = (0.0, 0.0, 0.0);
-    let mut n1_over_z = (0.0, 0.0, 0.0);
-    let mut n2_over_z = (0.0, 0.0, 0.0);
-    let mut uv0_over_z = (0.0, 0.0);
-    let mut uv1_over_z = (0.0, 0.0);
-    let mut uv2_over_z = (0.0, 0.0);
-    // Default vertex color is white
-    let mut c0_over_z = (inv_z0, inv_z0, inv_z0);
-    let mut c1_over_z = (inv_z1, inv_z1, inv_z1);
-    let mut c2_over_z = (inv_z2, inv_z2, inv_z2);
+    // Store raw attributes for linear interpolation
+    let mut n0 = (0.0, 0.0, 0.0);
+    let mut n1 = (0.0, 0.0, 0.0);
+    let mut n2 = (0.0, 0.0, 0.0);
+    let mut uv0 = (0.0, 0.0);
+    let mut uv1 = (0.0, 0.0);
+    let mut uv2 = (0.0, 0.0);
+    // Default vertex color is white (linear)
+    let mut c0 = (1.0, 1.0, 1.0);
+    let mut c1 = (1.0, 1.0, 1.0);
+    let mut c2 = (1.0, 1.0, 1.0);
     let mut has_normals = false;
 
     // Setup normals if available
@@ -84,9 +78,10 @@ pub fn rasterize_triangle(
         let n0v = v_normals.row(i0);
         let n1v = v_normals.row(i1);
         let n2v = v_normals.row(i2);
-        n0_over_z = (n0v[0] * inv_z0, n0v[1] * inv_z0, n0v[2] * inv_z0);
-        n1_over_z = (n1v[0] * inv_z1, n1v[1] * inv_z1, n1v[2] * inv_z1);
-        n2_over_z = (n2v[0] * inv_z2, n2v[1] * inv_z2, n2v[2] * inv_z2);
+        // Store raw normals
+        n0 = (n0v[0], n0v[1], n0v[2]);
+        n1 = (n1v[0], n1v[1], n1v[2]);
+        n2 = (n2v[0], n2v[1], n2v[2]);
         has_normals = true;
     }
 
@@ -94,17 +89,18 @@ pub fn rasterize_triangle(
     if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
         if let Some(uvs) = triangle_uvs {
             let uv_idx_base = t_idx * 3;
-            let uv0 = uvs.row(uv_idx_base);
-            let uv1 = uvs.row(uv_idx_base + 1);
-            let uv2 = uvs.row(uv_idx_base + 2);
-            uv0_over_z = (uv0[0] * inv_z0, uv0[1] * inv_z0);
-            uv1_over_z = (uv1[0] * inv_z1, uv1[1] * inv_z1);
-            uv2_over_z = (uv2[0] * inv_z2, uv2[1] * inv_z2);
+            let uv0_data = uvs.row(uv_idx_base);
+            let uv1_data = uvs.row(uv_idx_base + 1);
+            let uv2_data = uvs.row(uv_idx_base + 2);
+            // Store raw UVs
+            uv0 = (uv0_data[0], uv0_data[1]);
+            uv1 = (uv1_data[0], uv1_data[1]);
+            uv2 = (uv2_data[0], uv2_data[1]);
         } else {
-            // Should have been caught earlier, but default to avoid panic
-            uv0_over_z = (0.0, 0.0);
-            uv1_over_z = (0.0, 0.0);
-            uv2_over_z = (0.0, 0.0);
+            // Default UVs are (0,0)
+            uv0 = (0.0, 0.0);
+            uv1 = (0.0, 0.0);
+            uv2 = (0.0, 0.0);
         }
     }
 
@@ -114,24 +110,12 @@ pub fn rasterize_triangle(
             let c0v = v_colors.row(i0);
             let c1v = v_colors.row(i1);
             let c2v = v_colors.row(i2);
-            // Assume vertex colors are sRGB [0,1], store linear/z for interpolation
-            c0_over_z = (
-                c0v[0].powf(2.2) * inv_z0,
-                c0v[1].powf(2.2) * inv_z0,
-                c0v[2].powf(2.2) * inv_z0,
-            );
-            c1_over_z = (
-                c1v[0].powf(2.2) * inv_z1,
-                c1v[1].powf(2.2) * inv_z1,
-                c1v[2].powf(2.2) * inv_z1,
-            );
-            c2_over_z = (
-                c2v[0].powf(2.2) * inv_z2,
-                c2v[1].powf(2.2) * inv_z2,
-                c2v[2].powf(2.2) * inv_z2,
-            );
+            // Assume vertex colors are sRGB [0,1], store linear for interpolation
+            c0 = (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2));
+            c1 = (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2));
+            c2 = (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2));
         }
-        // If None, the default white setup remains.
+        // If None, the default white setup (1,1,1) remains.
     }
 
     // 3. Project Vertices to 2D
@@ -159,12 +143,15 @@ pub fn rasterize_triangle(
 
             // Check if inside using Barycentric coordinates
             if is_inside_triangle(w0, w1, w2) {
-                // 7. Perspective Correct Interpolation
-                let interpolated_inv_z = w0 * inv_z0 + w1 * inv_z1 + w2 * inv_z2;
-                if interpolated_inv_z == 0.0 {
-                    continue;
-                }
-                let interpolated_z = 1.0 / interpolated_inv_z;
+                // 7. Linear Interpolation for Orthographic Projection
+                // let interpolated_inv_z = w0 * inv_z0 + w1 * inv_z1 + w2 * inv_z2;
+                // if interpolated_inv_z == 0.0 {
+                //     continue;
+                // }
+                // let interpolated_z = 1.0 / interpolated_inv_z;
+
+                // Interpolate depth linearly
+                let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
 
                 // 8. Depth Test
                 let current_z = z_slice[[row, col]];
@@ -180,12 +167,10 @@ pub fn rasterize_triangle(
                         let bw0 = w0;
                         let bw1 = w1;
                         let bw2 = w2;
-                        let nx = (bw0 * n0_over_z.0 + bw1 * n1_over_z.0 + bw2 * n2_over_z.0)
-                            * interpolated_z;
-                        let ny = (bw0 * n0_over_z.1 + bw1 * n1_over_z.1 + bw2 * n2_over_z.1)
-                            * interpolated_z;
-                        let nz = (bw0 * n0_over_z.2 + bw1 * n1_over_z.2 + bw2 * n2_over_z.2)
-                            * interpolated_z;
+                        // Linear interpolation of normals
+                        let nx = bw0 * n0.0 + bw1 * n1.0 + bw2 * n2.0;
+                        let ny = bw0 * n0.1 + bw1 * n1.1 + bw2 * n2.1;
+                        let nz = bw0 * n0.2 + bw1 * n1.2 + bw2 * n2.2;
                         let mut norm = [nx, ny, nz];
                         normalize_vec3(&mut norm);
                         norm
@@ -195,10 +180,9 @@ pub fn rasterize_triangle(
 
                     let (interpolated_u, interpolated_v) =
                         if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
-                            let u = (w0 * uv0_over_z.0 + w1 * uv1_over_z.0 + w2 * uv2_over_z.0)
-                                * interpolated_z;
-                            let v = (w0 * uv0_over_z.1 + w1 * uv1_over_z.1 + w2 * uv2_over_z.1)
-                                * interpolated_z;
+                            // Linear interpolation of UVs
+                            let u = w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0;
+                            let v = w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1;
                             (u, v)
                         } else {
                             (0.0, 0.0)
@@ -206,12 +190,10 @@ pub fn rasterize_triangle(
 
                     let linear_base_color = match mode {
                         ProjectionMode::ObjOnly => {
-                            let r = (w0 * c0_over_z.0 + w1 * c1_over_z.0 + w2 * c2_over_z.0)
-                                * interpolated_z;
-                            let g = (w0 * c0_over_z.1 + w1 * c1_over_z.1 + w2 * c2_over_z.1)
-                                * interpolated_z;
-                            let b = (w0 * c0_over_z.2 + w1 * c1_over_z.2 + w2 * c2_over_z.2)
-                                * interpolated_z;
+                            // Linear interpolation of vertex colors (already in linear space)
+                            let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
+                            let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
+                            let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
                             [r.max(0.0), g.max(0.0), b.max(0.0)]
                         }
                         ProjectionMode::ObjTexture | ProjectionMode::Full => {
