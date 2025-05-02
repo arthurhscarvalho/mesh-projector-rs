@@ -2,6 +2,7 @@ import argparse
 import os
 
 import cv2
+import numpy as np
 from loguru import logger
 
 import mesh_projector as mp
@@ -24,7 +25,7 @@ def main():
                     --obj assets/spot/spot_triangulated.obj \
                     --texture assets/spot/spot_texture.png \
                     --mtl assets/spot/spot_triangulated.mtl \
-                    --mode full --out projections_full/
+                    --mode full --out projections_full/ --filtering 2
 
         Example (OBJ+Texture):
         python examples/example_generate_projections.py \
@@ -100,7 +101,8 @@ def main():
     # --- Generate Projections using the combined function ---
     try:
         # The project_mesh function now handles mode inference and validation internally
-        projection_images = mp.project_mesh(
+        # It now returns a tuple: (projection_images, occlusion_maps)
+        projection_images, occlusion_maps = mp.project_mesh(
             obj_location=args.obj,
             precision=args.precision,
             texture_file=args.texture,
@@ -113,7 +115,7 @@ def main():
             # enable_post_processing could be added as an arg if needed
         )
         if (
-            projection_images is None
+            projection_images is None or occlusion_maps is None
         ):  # Should not happen if exceptions are raised correctly
             logger.error("Projection generation failed, but no exception was raised.")
             return
@@ -132,6 +134,12 @@ def main():
         logger.warning(
             f"Expected {len(view_names)} projections but got {len(projection_images)}. Saving available images."
         )
+    # Check occlusion maps length as well if filtering was enabled
+    save_occlusion = args.filtering > 0 and len(occlusion_maps) == len(view_names)
+    if args.filtering > 0 and not save_occlusion:
+        logger.warning(
+            f"Filtering was enabled, but expected {len(view_names)} occlusion maps and got {len(occlusion_maps)}. Not saving occlusion maps."
+        )
 
     for i, img in enumerate(projection_images):
         if i >= len(view_names):
@@ -145,9 +153,22 @@ def main():
         except Exception as e:
             logger.error(f"Failed to save projection {view_names[i]}: {e}")
 
-        # Occlusion maps are no longer returned or saved
+        # Save occlusion map if available and filtering was enabled
+        if save_occlusion:
+            try:
+                occ_map = occlusion_maps[i]
+                # Scale 0/1 map to 0/255 for saving as visible grayscale image
+                occ_map_scaled = (occ_map * 255).astype(np.uint8)
+                cv2.imwrite(
+                    os.path.join(args.out, f"proj_{view_names[i]}_occ.png"),
+                    occ_map_scaled,
+                )
+            except Exception as e:
+                logger.error(f"Failed to save occlusion map {view_names[i]}: {e}")
 
     logger.info(f"Projections saved to {args.out}")
+    if save_occlusion:
+        logger.info(f"Occlusion maps saved to {args.out}")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 // src/projector/buffers.rs
 use crate::projector::constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
 use nd::{s, Array3, Array4};
-use std::f32;
+use std::f64;
 
 /// Holds the output image buffers generated during the projection process:
 /// the color images and Z-buffers for each of the `NUM_IMAGES` views.
@@ -11,7 +11,7 @@ pub struct Buffers {
     pub images: Array4<u8>,
     /// Z-buffers (depth maps) (NUM_IMAGES, H, W). Stores the depth of the closest fragment.
     /// Initialized to +/- INFINITY depending on the view direction for correct depth testing.
-    pub z_buffers: Array3<f32>,
+    pub z_buffers: Array3<f64>,
 }
 
 impl Buffers {
@@ -31,10 +31,10 @@ impl Buffers {
         Buffers {
             images: Array4::from_elem((num_images, rows, cols, channels), BACKGROUND_BRIGHTNESS),
             z_buffers: {
-                let mut z = Array3::from_elem((num_images, rows, cols), f32::INFINITY);
+                let mut z = Array3::from_elem((num_images, rows, cols), f64::INFINITY);
                 // Initialize back views (odd indices: 1, 3, 5) with NEG_INFINITY
                 for i in (1..num_images).step_by(2) {
-                    z.slice_mut(s![i, .., ..]).fill(f32::NEG_INFINITY);
+                    z.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY);
                 }
                 z
             },

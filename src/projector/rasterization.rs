@@ -11,22 +11,22 @@ use crate::projector::sampling::sample_texture_color_bilinear;
 use crate::projector::texture::TextureData;
 use crate::ProjectionMode;
 use nd::{Array2, ArrayView2, ArrayViewMut2, ArrayViewMut3};
-use std::f32;
+use std::f64;
 
 /// Rasterizes a single triangle based on the projection mode.
 #[allow(clippy::too_many_arguments)]
 pub fn rasterize_triangle(
     t_idx: usize,                            // Index of the current triangle
-    points: ArrayView2<f32>,                 // All vertex 3D positions (N, 3)
+    points: ArrayView2<f64>,                 // All vertex 3D positions (N, 3)
     triangles: ArrayView2<usize>,            // Triangle vertex indices (M, 3)
-    triangle_uvs: Option<ArrayView2<f32>>,   // Optional UV coords per tri vertex (M*3, 2)
-    triangle_normals: &Array2<f32>,          // Precomputed face normals (M, 3) -> For Culling
-    vertex_normals: Option<ArrayView2<f32>>, // Optional vertex normals (N, 3) -> For Shading
-    vertex_colors: Option<ArrayView2<f32>>,  // Optional vertex colors (N, 3) -> For Shading
+    triangle_uvs: Option<ArrayView2<f64>>,   // Optional UV coords per tri vertex (M*3, 2)
+    triangle_normals: &Array2<f64>,          // Precomputed face normals (M, 3) -> For Culling
+    vertex_normals: Option<ArrayView2<f64>>, // Optional vertex normals (N, 3) -> For Shading
+    vertex_colors: Option<ArrayView2<f64>>,  // Optional vertex colors (N, 3) -> For Shading
     material: &MaterialProperties,           // Material properties
     texture_data: Option<&TextureData<'_>>,  // Optional diffuse texture data
     projection_config: &ProjectionConfig,    // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f32>,        // Mutable view to the Z-buffer slice
+    z_slice: &mut ArrayViewMut2<f64>,        // Mutable view to the Z-buffer slice
     image_slice: &mut ArrayViewMut3<u8>,     // Mutable view to the color image buffer slice
     mode: ProjectionMode,                    // Rendering mode
 ) {
@@ -134,7 +134,7 @@ pub fn rasterize_triangle(
     // 5. Pixel Loop
     for row in min_row..max_row {
         for col in min_col..max_col {
-            let pixel_center = (col as f32 + 0.5, row as f32 + 0.5);
+            let pixel_center = (col as f64 + 0.5, row as f64 + 0.5);
 
             // 6. Barycentric Coordinates FIRST
             let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
@@ -241,10 +241,10 @@ pub fn rasterize_triangle(
                         let old_g_u8 = image_slice[[row, col, 1]];
                         let old_b_u8 = image_slice[[row, col, 2]];
 
-                        // Convert existing color to linear f32
-                        let old_r_linear = (old_r_u8 as f32 / 255.0).powf(2.2);
-                        let old_g_linear = (old_g_u8 as f32 / 255.0).powf(2.2);
-                        let old_b_linear = (old_b_u8 as f32 / 255.0).powf(2.2);
+                        // Convert existing color to linear f64
+                        let old_r_linear = (old_r_u8 as f64 / 255.0).powf(2.2);
+                        let old_g_linear = (old_g_u8 as f64 / 255.0).powf(2.2);
+                        let old_b_linear = (old_b_u8 as f64 / 255.0).powf(2.2);
 
                         // Perform alpha blending in linear space
                         let blended_r =

@@ -211,16 +211,16 @@ def preprocess_mesh(
     processed_data = {}
 
     # --- Vertex Data (Common) ---
-    vertices = np.asarray(mesh.vertices, dtype=np.float32)
+    vertices = np.asarray(mesh.vertices, dtype=np.double)
     triangle_indices = np.asarray(
-        mesh.triangles, dtype=np.uint32
+        mesh.triangles, dtype=np.uint64
     )  # Already correctly specified
     if triangle_indices.size == 0:
         raise ValueError("Mesh has vertices but no triangles!")
 
     # --- Normals (Common, if available) ---
     if mesh.has_vertex_normals():
-        vertex_normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
+        vertex_normals = np.asarray(mesh.vertex_normals, dtype=np.double)
         if vertices.shape[0] != vertex_normals.shape[0]:
             raise ValueError(
                 f"Vertex count mismatch: Vertices ({vertices.shape[0]}) vs. Normals ({vertex_normals.shape[0]})"
@@ -239,7 +239,7 @@ def preprocess_mesh(
                 1.0  # Avoid division by zero for default normals
             )
 
-        # Normalize the normals (result is still float32)
+        # Normalize the normals (result is still float64)
         processed_data["vertex_normals"] = vertex_normals / norm_norms
     else:
         # Handle case where normals couldn't be computed/loaded
@@ -266,7 +266,7 @@ def preprocess_mesh(
         info(f"Texture shape: H={tex_height}, W={tex_width}, C={tex_channels}")
         processed_data["texture_np"] = texture_np
 
-        triangle_uvs = np.asarray(mesh.triangle_uvs, dtype=np.float32)
+        triangle_uvs = np.asarray(mesh.triangle_uvs, dtype=np.double)
         if triangle_uvs.shape[1] != 2:
             raise ValueError(
                 f"Expected triangle_uvs shape to be (*, 2), but got {triangle_uvs.shape}"
@@ -286,7 +286,7 @@ def preprocess_mesh(
 
     elif mode == ProjectionMode.OBJ_ONLY:
         if mesh.has_vertex_colors():
-            vertex_colors = np.asarray(mesh.vertex_colors, dtype=np.float32)
+            vertex_colors = np.asarray(mesh.vertex_colors, dtype=np.double)
             if vertex_colors.shape[0] != vertices.shape[0]:
                 raise ValueError(
                     f"Vertex color mismatch: Vertices ({vertices.shape[0]}) vs. Colors ({vertex_colors.shape[0]})"
@@ -312,7 +312,7 @@ def preprocess_mesh(
         max_bound = vertices.max(axis=0)
         info(f"Shifted BBox Min: {min_bound}, Max: {max_bound}")
     bbox_size = max_bound - min_bound
-    bbox_size[bbox_size == 0] = 1e-6
+    bbox_size[bbox_size == 0] = 1e-9
     max_dim = np.max(bbox_size)
     target_max_val = (1 << precision) - 1.0
     scale_factor = target_max_val / max_dim
@@ -346,7 +346,7 @@ def generate_projections(
     ignore_opacity: bool = False,
 ):
     """
-    Generates 6 orthogonal projections of a mesh using the Rust backend.
+    Generates 6 orthogonal projections and corresponding outlier occlusion maps of a mesh using the Rust backend.
 
     Args:
         processed_data (dict): Result from preprocess_mesh, containing vertices,
@@ -354,12 +354,16 @@ def generate_projections(
         precision (int): Output image resolution exponent (2^precision).
         mtl_location (str, optional): Path to the MTL file. Used only in FULL mode. Defaults to None.
         mode (ProjectionMode): The processing mode (OBJ_ONLY, OBJ_TEXTURE, FULL).
-        filtering (int, optional): Radius for outlier filtering. Defaults to 0 (disabled).
+        filtering (int, optional): Radius for outlier filtering. If > 0, occlusion maps are generated.
+                                  Defaults to 0 (disabled).
         verbose (bool): Enables detailed logging.
         ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value.
 
     Returns:
-        List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
+        Tuple[List[np.ndarray], List[np.ndarray]]:
+            - A list of 6 numpy arrays, each representing a projection image (H, W, 3).
+            - A list of 6 numpy arrays, each representing an outlier occlusion map (H, W).
+              Value is 1 for filtered outlier pixels, 0 otherwise. Returns empty maps if filtering=0.
 
     Raises:
         ValueError: If required data for the selected mode is missing in processed_data.
@@ -462,8 +466,8 @@ def generate_projections(
             logger.warning(
                 "Vertex colors are missing for OBJ_ONLY mode. Using default black."
             )
-            # Create default black vertex colors if none exist and ensure float32 type
-            vertex_colors = np.zeros_like(vertices, dtype=np.float32)
+            # Create default black vertex colors if none exist and ensure float64 type
+            vertex_colors = np.zeros_like(vertices, dtype=np.double)
 
     # Convert mode enum to string for Rust FFI
     mode_str = mode.value
@@ -480,15 +484,14 @@ def generate_projections(
     # <<< --- End logging --- >>>
 
     try:
-        # Call the Rust backend with the data directly from processed_data
-        # preprocess_mesh already ensures the correct types and shapes
-        projection_array = _internal_generate_projections(
-            vertices,  # Already np.float32 from preprocess_mesh
-            triangle_indices,  # Already np.uint32 from preprocess_mesh
-            vertex_normals,  # Already normalized and np.float32 or None
-            vertex_colors,  # Already np.float32 or None
+        # Call the Rust backend - now returns a tuple
+        projection_array, occlusion_array = _internal_generate_projections(
+            vertices,  # Already np.double from preprocess_mesh
+            triangle_indices,  # Already np.uint64 from preprocess_mesh
+            vertex_normals,  # Already normalized and np.double or None
+            vertex_colors,  # Already np.double or None
             texture_np,  # Already correct format from preprocess_mesh
-            triangle_uvs,  # Already np.float32 from preprocess_mesh
+            triangle_uvs,  # Already np.double from preprocess_mesh
             material_props["ka"],  # ka_list
             material_props["kd"],  # kd_list
             material_props["ks"],  # ks_list
@@ -496,14 +499,21 @@ def generate_projections(
             material_props["opacity"],
             material_props["illum"],
             precision,
-            filtering,
+            filtering,  # Pass filtering radius
             mode_str,
+            verbose,
         )
 
-        # Convert the 4D array to list of images
-        # The result is now a 4D numpy array with shape (6, height, width, 3)
+        # Convert the 4D arrays to lists of images/maps
+        # Projection Images (6, H, W, 3)
         projection_images = [
             projection_array[i] for i in range(projection_array.shape[0])
+        ]
+
+        # Occlusion Maps (6, H, W, 1) -> need to squeeze to (6, H, W)
+        occlusion_maps = [
+            np.squeeze(occlusion_array[i], axis=-1)
+            for i in range(occlusion_array.shape[0])
         ]
 
     except Exception as e:
@@ -513,9 +523,13 @@ def generate_projections(
 
     if len(projection_images) != 6:
         logger.warning(f"Expected 6 projections, but received {len(projection_images)}")
+    if len(occlusion_maps) != 6:
+        logger.warning(f"Expected 6 occlusion maps, but received {len(occlusion_maps)}")
 
-    info(f"Generated {len(projection_images)} projections.")
-    return projection_images
+    info(
+        f"Generated {len(projection_images)} projections and {len(occlusion_maps)} occlusion maps."
+    )
+    return projection_images, occlusion_maps  # Return tuple
 
 
 def project_mesh(
@@ -531,7 +545,7 @@ def project_mesh(
     ignore_opacity: bool = False,
 ):
     """
-    High-level function to load, preprocess, and generate projections for a mesh.
+    High-level function to load, preprocess, and generate projections and occlusion maps for a mesh.
 
     Args:
         obj_location (str): Path to the OBJ mesh file.
@@ -541,7 +555,8 @@ def project_mesh(
         mode (ProjectionMode or str, optional): The processing mode ('obj_only', 'obj_texture', 'full').
                                                 If None, it will be inferred based on provided files.
                                                 Defaults to None.
-        filtering (int, optional): Radius for outlier filtering. Defaults to 0 (disabled).
+        filtering (int, optional): Radius for outlier filtering. If > 0, occlusion maps are generated.
+                                  Defaults to 0 (disabled).
         flip_uv (bool): Whether to flip the V coordinate (1.0 - v) during preprocessing.
                         Defaults to True.
         verbose (bool): Enables detailed logging. Defaults to False.
@@ -550,8 +565,11 @@ def project_mesh(
         ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value. Defaults to False.
 
     Returns:
-        List[np.ndarray]: A list of 6 numpy arrays, each representing a projection image.
-                          Returns None if any step fails.
+        Tuple[List[np.ndarray], List[np.ndarray]]:
+            - A list of 6 numpy arrays, each representing a projection image (H, W, 3).
+            - A list of 6 numpy arrays, each representing an outlier occlusion map (H, W).
+              Value is 1 for filtered outlier pixels, 0 otherwise. Returns empty maps if filtering=0.
+            Returns None for both lists if any step fails (deprecated, now raises exceptions).
 
     Raises:
         FileNotFoundError: If required files (OBJ, or Texture/MTL based on mode) are not found.
@@ -631,18 +649,18 @@ def project_mesh(
         verbose=verbose,
     )
 
-    # --- Generate Projections ---
+    # --- Generate Projections --- (now returns tuple)
     # Errors (ValueError, RuntimeError) will propagate up
-    projection_images = generate_projections(
+    projection_images, occlusion_maps = generate_projections(
         processed_data=processed_data,
         precision=precision,
         mtl_location=mtl_location
         if resolved_mode == ProjectionMode.FULL
         else None,  # Only pass MTL for FULL mode
         mode=resolved_mode,
-        filtering=filtering,
+        filtering=filtering,  # Pass filtering radius
         verbose=verbose,
         ignore_opacity=ignore_opacity,
     )
 
-    return projection_images
+    return projection_images, occlusion_maps  # Return tuple

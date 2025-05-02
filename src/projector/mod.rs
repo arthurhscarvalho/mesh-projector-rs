@@ -30,13 +30,13 @@ use rayon::scope;
 /// Computes 6 orthographic projections based on the specified mode.
 ///
 /// Returns:
-/// Tuple: (images: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
+/// Tuple: (images: Array4<u8>, occlusion_maps: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
 pub fn compute_mesh_projections<'a>(
     mesh: &Mesh<'a>,                 // Core mesh data
     attributes: &MeshAttributes<'a>, // Optional mesh attributes
     material: &MaterialProperties,   // Material properties
     settings: &ProjectionSettings,   // Projection settings
-) -> (Array4<u8>, [u64; NUM_IMAGES]) {
+) -> (Array4<u8>, Array4<u8>, [u64; NUM_IMAGES]) {
     log::info!(
         "Initializing projector backend. Mode: {:?}, Precision: {}, Filtering: {}",
         settings.mode,
@@ -46,19 +46,21 @@ pub fn compute_mesh_projections<'a>(
 
     // --- Setup & Validation ---
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f32: f32 = max_bound as f32;
+    let max_bound_f64: f64 = max_bound as f64;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
     let channels = 3; // Assuming RGB output for now
 
     // Handle potential empty inputs
+    let shape4d_img = Ix4(NUM_IMAGES, rows, cols, channels);
+    let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1); // Shape for occlusion maps
     if mesh.vertices.is_empty() || mesh.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
-        let shape4d = Ix4(NUM_IMAGES, rows, cols, channels);
         return (
-            Array4::from_elem(shape4d, BACKGROUND_BRIGHTNESS),
-            [0; NUM_IMAGES], // Return array of zeros for counts
+            Array4::from_elem(shape4d_img, BACKGROUND_BRIGHTNESS),
+            Array4::zeros(shape4d_occ), // Return empty occlusion map
+            [0; NUM_IMAGES],            // Return array of zeros for counts
         );
     }
 
@@ -93,8 +95,8 @@ pub fn compute_mesh_projections<'a>(
         if let Some(ref texture_data) = attributes.texture {
             log::info!(
                 "Texture loaded: {}x{}x{}",
-                texture_data.height_f32,
-                texture_data.width_f32,
+                texture_data.height_f64,
+                texture_data.width_f64,
                 texture_data.channels
             );
         }
@@ -177,22 +179,50 @@ pub fn compute_mesh_projections<'a>(
     log::info!("...Rasterization finished.");
 
     // Apply outlier filtering if enabled
-    let outlier_counts = if settings.filtering_window_radius > 0 {
+    let (occlusion_maps, outlier_counts) = if settings.filtering_window_radius > 0 {
         log::info!(
             "Filtering outliers with window radius {}...",
             settings.filtering_window_radius
         );
         filter_outliers(
-            &mut buffers.z_buffers,
-            &mut buffers.images,
+            &buffers.z_buffers,
             settings.filtering_window_radius,
-            max_bound_f32,
+            max_bound_f64,
         )
     } else {
         log::info!("Outlier filtering disabled.");
-        [0; NUM_IMAGES]
+        let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1);
+        (Array4::zeros(shape4d_occ), [0; NUM_IMAGES])
     };
+
+    // --- Apply filtering to images using the occlusion map ---
+    if settings.filtering_window_radius > 0 {
+        log::info!("Applying filtering to projection images based on occlusion map...");
+        // Iterate through images and occlusion maps simultaneously
+        buffers
+            .images
+            .axis_iter_mut(Axis(0))
+            .zip(occlusion_maps.axis_iter(Axis(0)))
+            .par_bridge() // Parallelize the application
+            .for_each(|(mut img_slice, occ_slice)| {
+                // img_slice shape: (rows, cols, channels)
+                // occ_slice shape: (rows, cols, 1)
+                for r in 0..rows {
+                    for c in 0..cols {
+                        // Check the occlusion map's single channel
+                        if occ_slice[[r, c, 0]] == 1 {
+                            // If outlier, set all channels of the image pixel to background
+                            for chan in 0..channels {
+                                img_slice[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
+                            }
+                        }
+                    }
+                }
+            });
+        log::info!("...Filtering applied to images.");
+    }
+
     log::info!("...Processing complete.");
 
-    (buffers.images, outlier_counts)
+    (buffers.images, occlusion_maps, outlier_counts)
 }

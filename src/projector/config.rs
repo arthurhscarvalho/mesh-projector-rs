@@ -10,7 +10,7 @@ pub struct ProjectionConfig {
     /// false if it's a back view (looking along the negative direction).
     pub is_front_view: bool,
     /// Normalized view direction vector corresponding to this projection.
-    pub view_dir: (f32, f32, f32),
+    pub view_dir: (f64, f64, f64),
     /// The primary axis index for the 2D projection plane (e.g., Y if depth is X).
     /// This typically corresponds to the image's column index.
     pub p_axis: usize,

@@ -8,12 +8,12 @@ use crate::projector::math::{dot_product, normalize_vec3, reflect};
 /// Calculates the final linear color based on base color, material, lighting, and normal.
 pub fn calculate_lighting(
     material: &MaterialProperties,
-    linear_base_color: [f32; 3],
-    normal: [f32; 3],
-    light_dir: [f32; 3],
-    view_dir: [f32; 3],
-    light_color: [f32; 3],
-) -> [f32; 3] {
+    linear_base_color: [f64; 3],
+    normal: [f64; 3],
+    light_dir: [f64; 3],
+    view_dir: [f64; 3],
+    light_color: [f64; 3],
+) -> [f64; 3] {
     let linear_ka = [
         material.ka[0].powf(2.2),
         material.ka[1].powf(2.2),
@@ -36,7 +36,7 @@ pub fn calculate_lighting(
         linear_base_color[2] * linear_kd[2],
     ];
 
-    let mut final_color_linear = [0.0f32; 3];
+    let mut final_color_linear = [0.0f64; 3];
     match material.illum {
         0 => {
             // Base color only

@@ -9,9 +9,9 @@ pub struct TextureData<'a> {
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).
     pub channels: usize,
     /// Height of the texture as a floating-point number.
-    pub height_f32: f32,
+    pub height_f64: f64,
     /// Width of the texture as a floating-point number.
-    pub width_f32: f32,
+    pub width_f64: f64,
 }
 
 impl<'a> TextureData<'a> {
@@ -24,8 +24,8 @@ impl<'a> TextureData<'a> {
         TextureData {
             texture,
             channels: shape[2],
-            height_f32: height as f32,
-            width_f32: width as f32,
+            height_f64: height as f64,
+            width_f64: width as f64,
         }
     }
 }

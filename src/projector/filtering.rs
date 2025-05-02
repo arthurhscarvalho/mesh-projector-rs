@@ -1,19 +1,17 @@
 // src/projector/filtering.rs
-use crate::projector::constants::{
-    BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_IMAGES,
-};
-use nd::{Array3, Array4, ArrayView2, ArrayViewMut3, Axis};
+use crate::projector::constants::{FILTERING_NEIGHBORHOOD_FACTOR, NUM_IMAGES};
+use nd::{Array3, Array4, ArrayView2, Axis, Ix4};
 use rayon::prelude::*;
-use std::f32;
+use std::f64;
 
 /// Finds outlier pixels by comparing depth to neighbors.
 /// Now uses z-buffer validity instead of occlusion map.
 fn find_outliers_for_layer(
-    z_slice: ArrayView2<f32>, // Z-buffer for the current layer
+    z_slice: ArrayView2<f64>, // Z-buffer for the current layer
     w: usize,                 // Filter window radius
     rows: usize,              // Total rows
     cols: usize,              // Total columns
-    filter_threshold: f32,    // Depth difference threshold
+    filter_threshold: f64,    // Depth difference threshold
     is_front_view: bool,      // Flag for view direction
 ) -> Vec<(usize, usize)> {
     let row_start = w;
@@ -36,8 +34,8 @@ fn find_outliers_for_layer(
 
                 let center_depth = z_slice[[r, c]];
                 // Skip if the center pixel depth is invalid (background).
-                if (is_front_view && center_depth == f32::INFINITY)
-                    || (!is_front_view && center_depth == f32::NEG_INFINITY)
+                if (is_front_view && center_depth == f64::INFINITY)
+                    || (!is_front_view && center_depth == f64::NEG_INFINITY)
                 {
                     continue;
                 }
@@ -64,9 +62,9 @@ fn find_outliers_for_layer(
 
                         // Check if neighbor is valid (not background and finite)
                         let is_valid_neighbor = if is_front_view {
-                            neighbor_depth < f32::INFINITY && neighbor_depth.is_finite()
+                            neighbor_depth < f64::INFINITY && neighbor_depth.is_finite()
                         } else {
-                            neighbor_depth > f32::NEG_INFINITY && neighbor_depth.is_finite()
+                            neighbor_depth > f64::NEG_INFINITY && neighbor_depth.is_finite()
                         };
 
                         if is_valid_neighbor {
@@ -97,66 +95,60 @@ fn find_outliers_for_layer(
         .collect()
 }
 
-/// Applies filtering by resetting outlier image pixels to background.
-fn apply_outlier_filter(
-    outlier_coords: &[(usize, usize)],  // List of outlier coordinates
-    mut image_slice: ArrayViewMut3<u8>, // Mutable image view
-    channels: usize,                    // Number of channels
-    background_color: u8,               // Background color
-) {
-    if outlier_coords.is_empty() {
-        return;
-    }
-    for &(r, c) in outlier_coords {
-        for chan in 0..channels {
-            image_slice[[r, c, chan]] = background_color;
-        }
-    }
-}
-
-/// Filters outlier pixels for all image layers. Returns counts of filtered pixels per layer.
+/// Filters outlier pixels for all image layers.
+/// Returns a tuple containing:
+/// 1. An occlusion map (Array4<u8>, shape=[NUM_IMAGES, rows, cols, 1]) where 1 indicates an outlier.
+/// 2. Counts of filtered pixels per layer ([u64; NUM_IMAGES]).
 pub fn filter_outliers(
-    z_buffers: &mut Array3<f32>,  // Mutable z buffers to check
-    images: &mut Array4<u8>,      // Mutable images to update
-    filtering_window_radius: u32, // Radius 'w' (0 disables)
-    max_bound_f32: f32,           // Max dimension for threshold calc
-) -> [u64; NUM_IMAGES] {
+    z_buffers: &Array3<f64>,      // Changed from &mut to &
+    filtering_window_radius: u64, // Radius 'w' (0 disables)
+    max_bound_f64: f64,           // Max dimension for threshold calc
+) -> (Array4<u8>, [u64; NUM_IMAGES]) {
+    // Changed return type
     // Return outlier counts array
     let mut outlier_counts: [u64; NUM_IMAGES] = [0; NUM_IMAGES];
+    let rows = z_buffers.shape()[1];
+    let cols = z_buffers.shape()[2];
+    // Initialize occlusion map (NUM_IMAGES, rows, cols, 1 channel)
+    let mut occlusion_maps = Array4::<u8>::zeros(Ix4(NUM_IMAGES, rows, cols, 1));
 
     if filtering_window_radius == 0 {
-        return outlier_counts;
+        return (occlusion_maps, outlier_counts); // Return empty map and zero counts
     }
 
     let w = filtering_window_radius as usize;
-    let rows = z_buffers.shape()[1];
-    let cols = z_buffers.shape()[2];
-    let channels = images.shape()[3];
 
     if rows <= 2 * w || cols <= 2 * w {
-        return outlier_counts;
+        return (occlusion_maps, outlier_counts); // Return empty map and zero counts
     }
 
-    let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f32;
+    let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f64;
 
-    for k in 0..NUM_IMAGES {
-        let z_slice = z_buffers.index_axis(Axis(0), k);
-        let is_front_view = k % 2 == 0;
+    // Collect results from parallel processing
+    let results: Vec<_> = (0..NUM_IMAGES)
+        .into_par_iter()
+        .map(|k| {
+            let z_slice = z_buffers.index_axis(Axis(0), k);
+            let is_front_view = k % 2 == 0;
 
-        let outlier_coords =
-            find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold, is_front_view);
+            let outlier_coords =
+                find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold, is_front_view);
+            let count = outlier_coords.len() as u64;
+            (k, outlier_coords, count) // Return index, coords, and count
+        })
+        .collect();
 
-        let image_slice = images.index_axis_mut(Axis(0), k);
-
-        apply_outlier_filter(
-            &outlier_coords,
-            image_slice,
-            channels,
-            BACKGROUND_BRIGHTNESS,
-        );
-
-        outlier_counts[k] = outlier_coords.len() as u64;
+    // Populate the occlusion map and counts sequentially after parallel computation
+    for (k, outlier_coords, count) in results {
+        outlier_counts[k] = count;
+        if !outlier_coords.is_empty() {
+            let mut occlusion_slice = occlusion_maps.index_axis_mut(Axis(0), k);
+            for &(r, c) in &outlier_coords {
+                // Set the single channel to 1 for outliers
+                occlusion_slice[[r, c, 0]] = 1;
+            }
+        }
     }
 
-    outlier_counts
+    (occlusion_maps, outlier_counts) // Return the map and the counts
 }
