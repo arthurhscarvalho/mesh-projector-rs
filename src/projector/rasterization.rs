@@ -9,20 +9,18 @@ use crate::projector::math::normalize_vec3;
 use crate::projector::mesh::Mesh;
 use crate::projector::projection::ProjectionMode;
 use crate::projector::sampling::sample_texture_color_bilinear;
-use crate::projector::texture::TextureData;
 use nd::{Array2, ArrayViewMut2, ArrayViewMut3};
 use std::f64;
 
 /// Rasterizes a single triangle based on the projection mode.
 pub fn rasterize_triangle(
-    mesh: &Mesh,                            // Mesh with material properties
-    triangle_index: usize,                  // Index of the current triangle
-    triangle_normals: &Array2<f64>, // Triangle face normals (M, 3) - Precomputed or provided
-    texture_data: Option<&TextureData<'_>>, // Optional diffuse texture data
+    mesh: &Mesh,                          // Mesh with material properties
+    triangle_index: usize,                // Index of the current triangle
+    triangle_normals: &Array2<f64>,       // Triangle face normals (M, 3) - Precomputed or provided
     projection_config: &ProjectionConfig, // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f64>, // Mutable view to the Z-buffer slice
-    image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer slice
-    mode: ProjectionMode,           // Rendering mode
+    z_slice: &mut ArrayViewMut2<f64>,     // Mutable view to the Z-buffer slice
+    image_slice: &mut ArrayViewMut3<u8>,  // Mutable view to the color image buffer slice
+    mode: ProjectionMode,                 // Rendering mode
 ) {
     // Back-face Culling
     let geometric_normal_view = triangle_normals.row(triangle_index);
@@ -40,8 +38,8 @@ pub fn rasterize_triangle(
         return;
     }
     // Get Vertex Data Indices & Positions
-    let points = mesh.vertices.view();
-    let triangles = mesh.triangles.view();
+    let points = mesh.geometry.vertices.view();
+    let triangles = mesh.geometry.triangles.view();
     let tri_indices = triangles.row(triangle_index);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
@@ -66,7 +64,7 @@ pub fn rasterize_triangle(
     let mut c2 = (1.0, 1.0, 1.0);
     let mut has_normals = false;
     // Setup normals if available
-    if let Some(v_normals) = &mesh.vertex_normals {
+    if let Some(v_normals) = &mesh.geometry.vertex_normals {
         let v_normals_view = v_normals.view();
         let n0v = v_normals_view.row(i0);
         let n1v = v_normals_view.row(i1);
@@ -79,7 +77,7 @@ pub fn rasterize_triangle(
     }
     // Setup UVs if available (required for texture modes)
     if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
-        if let Some(uvs) = &mesh.triangle_uvs {
+        if let Some(uvs) = &mesh.texture.triangle_uvs {
             let uvs_view = uvs.view();
             let uv_idx_base = triangle_index * 3;
             let uv0_data = uvs_view.row(uv_idx_base);
@@ -98,7 +96,7 @@ pub fn rasterize_triangle(
     }
     // Setup vertex colors if available (required for ObjOnly mode)
     if mode == ProjectionMode::ObjOnly {
-        if let Some(v_colors) = &mesh.vertex_colors {
+        if let Some(v_colors) = &mesh.texture.vertex_colors {
             let v_colors_view = v_colors.view();
             let c0v = v_colors_view.row(i0);
             let c1v = v_colors_view.row(i1);
@@ -175,11 +173,14 @@ pub fn rasterize_triangle(
                             [r.max(0.0), g.max(0.0), b.max(0.0)]
                         }
                         ProjectionMode::ObjTexture | ProjectionMode::Full => {
-                            if let Some(tex) = texture_data {
+                            if let Some(tex) = &mesh.texture.texture {
                                 let sampled_srgb = sample_texture_color_bilinear(
                                     interpolated_u,
                                     interpolated_v,
-                                    tex,
+                                    tex.view(),
+                                    mesh.texture.channels,
+                                    mesh.texture.height_f64,
+                                    mesh.texture.width_f64,
                                 );
                                 [
                                     sampled_srgb[0].powf(2.2),
@@ -203,55 +204,20 @@ pub fn rasterize_triangle(
                         view_dir_array,
                         light_dir_array,
                         light_color,
-                        &mesh.ka,
-                        &mesh.kd,
-                        &mesh.ks,
-                        mesh.ns,
-                        mesh.illum,
+                        &mesh.material,
                     );
-                    // Alpha Blending
-                    let final_color_to_write_linear = if mesh.opacity < 0.999 {
-                        let alpha = mesh.opacity;
-                        // Read existing color from buffer (sRGB u8)
-                        let old_r_u8 = image_slice[[row, col, 0]];
-                        let old_g_u8 = image_slice[[row, col, 1]];
-                        let old_b_u8 = image_slice[[row, col, 2]];
-                        // Convert existing color to linear f64
-                        let old_r_linear = (old_r_u8 as f64 / 255.0).powf(2.2);
-                        let old_g_linear = (old_g_u8 as f64 / 255.0).powf(2.2);
-                        let old_b_linear = (old_b_u8 as f64 / 255.0).powf(2.2);
-                        // Perform alpha blending in linear space
-                        let blended_r =
-                            final_linear_color[0] * alpha + old_r_linear * (1.0 - alpha);
-                        let blended_g =
-                            final_linear_color[1] * alpha + old_g_linear * (1.0 - alpha);
-                        let blended_b =
-                            final_linear_color[2] * alpha + old_b_linear * (1.0 - alpha);
-                        [blended_r, blended_g, blended_b]
-                    } else {
-                        // Opaque, use calculated color directly
-                        final_linear_color
-                    };
-                    // Gamma Correction (Linear -> sRGB) & Clamping
-                    let final_color_srgb = [
-                        final_color_to_write_linear[0]
-                            .powf(1.0 / 2.2)
-                            .max(0.0)
-                            .min(1.0),
-                        final_color_to_write_linear[1]
-                            .powf(1.0 / 2.2)
-                            .max(0.0)
-                            .min(1.0),
-                        final_color_to_write_linear[2]
-                            .powf(1.0 / 2.2)
-                            .max(0.0)
-                            .min(1.0),
-                    ];
-                    // Update Buffers
+                    // Convert linear to sRGB and quantize to [0, 255]
+                    let srgb_r = final_linear_color[0].powf(1.0 / 2.2);
+                    let srgb_g = final_linear_color[1].powf(1.0 / 2.2);
+                    let srgb_b = final_linear_color[2].powf(1.0 / 2.2);
+                    let r_byte = (srgb_r * 255.0).min(255.0).max(0.0) as u8;
+                    let g_byte = (srgb_g * 255.0).min(255.0).max(0.0) as u8;
+                    let b_byte = (srgb_b * 255.0).min(255.0).max(0.0) as u8;
+                    // Update Z-buffer and color buffer
                     z_slice[[row, col]] = interpolated_z;
-                    image_slice[[row, col, 0]] = (final_color_srgb[0] * 255.0) as u8;
-                    image_slice[[row, col, 1]] = (final_color_srgb[1] * 255.0) as u8;
-                    image_slice[[row, col, 2]] = (final_color_srgb[2] * 255.0) as u8;
+                    image_slice[[row, col, 0]] = r_byte;
+                    image_slice[[row, col, 1]] = g_byte;
+                    image_slice[[row, col, 2]] = b_byte;
                 }
             }
         }

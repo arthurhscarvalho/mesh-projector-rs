@@ -1,21 +1,19 @@
 // src/projector/sampling.rs
 //! Texture and color sampling functions for the projector.
 
-use crate::projector::texture::TextureData;
+use ndarray::ArrayView3;
 
 /// Samples the texture color using bilinear filtering.
 /// Assumes texture data is valid.
 pub fn sample_texture_color_bilinear(
     interp_u_coord: f64,
     interp_v_coord: f64,
-    texture_data: &TextureData<'_>, // Pass TextureData instead of raw array view
+    texture: ArrayView3<u8>,
+    channels: usize,
+    height_f64: f64,
+    width_f64: f64,
 ) -> [f64; 3] {
     // Return fixed-size array [R, G, B] in [0,1] range
-    let texture = texture_data.texture;
-    let channels = texture_data.channels;
-    let height_f64 = texture_data.height_f64;
-    let width_f64 = texture_data.width_f64;
-
     let tex_xf = interp_u_coord * width_f64;
     // Assuming V=0 is bottom in input UVs based on Python preprocessing flip logic
     let tex_yf = interp_v_coord * height_f64;

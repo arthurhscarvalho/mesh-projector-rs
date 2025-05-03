@@ -6,11 +6,11 @@ use ndarray::{Array, Array2, Array3};
 use std::path::Path;
 use tobj;
 
-use crate::projector::mesh::Mesh;
+use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture};
 use crate::projector::projection::ProjectionMode;
 
 /// Default material properties when no MTL file is provided or parsing fails
-const DEFAULT_MATERIAL: Material = Material {
+const DEFAULT_MATERIAL: MeshMaterial = MeshMaterial {
     ka: [0.0, 0.0, 0.0],
     kd: [1.0, 1.0, 1.0],
     ks: [0.0, 0.0, 0.0],
@@ -18,17 +18,6 @@ const DEFAULT_MATERIAL: Material = Material {
     opacity: 1.0,
     illum: 1,
 };
-
-/// Represents material properties from an MTL file
-#[derive(Debug, Clone, Copy)]
-pub struct Material {
-    pub ka: [f64; 3],
-    pub kd: [f64; 3],
-    pub ks: [f64; 3],
-    pub ns: f64,
-    pub opacity: f64,
-    pub illum: i64,
-}
 
 /// Loads a 3D mesh from an OBJ file and optionally its texture and material
 /// The projection mode is automatically inferred based on provided files.
@@ -247,7 +236,7 @@ pub fn load_mesh_with_mode(
         }
     } else if mode == ProjectionMode::ObjTexture {
         // Default material for texturing
-        Material {
+        MeshMaterial {
             ka: [0.0, 0.0, 0.0], // No Ambient
             kd: [1.0, 1.0, 1.0], // Base color modulation (texture is base)
             ks: [0.0, 0.0, 0.0], // No Specular
@@ -257,7 +246,7 @@ pub fn load_mesh_with_mode(
         }
     } else {
         // OBJ_ONLY mode
-        Material {
+        MeshMaterial {
             ka: [0.0, 0.0, 0.0], // No Ambient term from material
             kd: [1.0, 1.0, 1.0], // Base color modulation (vertex color is base)
             ks: [0.0, 0.0, 0.0], // No Specular
@@ -268,27 +257,44 @@ pub fn load_mesh_with_mode(
     };
     // Preprocess the mesh (scale vertices to fit in the target precision)
     let vertices = preprocess_vertices(vertices, precision);
-    // Create the mesh structure
+
+    // Get texture dimensions if texture exists
+    let (texture_channels, texture_height, texture_width) = if let Some(ref tex) = texture {
+        (tex.shape()[2], tex.shape()[0] as f64, tex.shape()[1] as f64)
+    } else {
+        (3, 0.0, 0.0)
+    };
+
+    // Create the mesh structure with the new structure
     let mesh = Mesh {
-        vertices,
-        triangles,
-        vertex_normals,
-        vertex_colors,
-        texture,
-        triangle_uvs,
-        ka: material.ka,
-        kd: material.kd,
-        ks: material.ks,
-        ns: material.ns,
-        opacity: material.opacity,
-        illum: material.illum,
+        geometry: MeshGeometry {
+            vertices,
+            triangles,
+            vertex_normals,
+        },
+        texture: MeshTexture {
+            texture,
+            vertex_colors,
+            triangle_uvs,
+            channels: texture_channels,
+            height_f64: texture_height,
+            width_f64: texture_width,
+        },
+        material: MeshMaterial {
+            ka: material.ka,
+            kd: material.kd,
+            ks: material.ks,
+            ns: material.ns,
+            opacity: material.opacity,
+            illum: material.illum,
+        },
         mode, // Store the inferred/provided mode
     };
     Ok(mesh)
 }
 
 /// Loads material properties from an MTL file
-fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> Material {
+fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial {
     if !Path::new(mtl_path).exists() {
         warn!(
             "MTL file not found: {}. Using default material values.",
@@ -297,7 +303,7 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> Material {
         return DEFAULT_MATERIAL;
     }
 
-    let mut material = Material {
+    let mut material = MeshMaterial {
         ka: [0.1, 0.1, 0.1],
         kd: [0.8, 0.8, 0.8],
         ks: [0.1, 0.1, 0.1],

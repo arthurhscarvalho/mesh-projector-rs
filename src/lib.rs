@@ -58,12 +58,12 @@ fn generate_projections<'py>(
     // Log material properties
     log::info!(
         "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
-        mesh.ka,
-        mesh.kd,
-        mesh.ks,
-        mesh.ns,
-        mesh.opacity,
-        mesh.illum
+        mesh.material.ka,
+        mesh.material.kd,
+        mesh.material.ks,
+        mesh.material.ns,
+        mesh.material.opacity,
+        mesh.material.illum
     );
     // Set up projection settings with the mesh's mode
     let settings = ProjectionSettings::new(precision, filtering_radius, mesh.mode);
