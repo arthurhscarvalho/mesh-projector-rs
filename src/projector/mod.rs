@@ -98,7 +98,7 @@ pub fn compute_mesh_projections(
             }
         }
         // Log texture info if available
-        if let Some(ref _texture_data) = mesh.texture.texture {
+        if mesh.mode == MeshMode::ObjTexture || mesh.mode == MeshMode::Full {
             log::info!(
                 "Texture loaded: {}x{}x{}",
                 mesh.texture.height_f64,
