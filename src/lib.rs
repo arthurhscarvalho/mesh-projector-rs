@@ -15,7 +15,6 @@ use crate::projector::projection::ProjectionSettings;
 
 mod logging;
 mod projector;
-mod utils;
 
 #[pyfunction]
 fn generate_projections<'py>(
