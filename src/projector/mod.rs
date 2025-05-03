@@ -168,11 +168,11 @@ pub fn compute_mesh_projections(
                 let projection_config = ProjectionConfig::new(img_layer);
                 let num_faces = mesh.triangles.nrows();
 
-                for t_idx in 0..num_faces {
+                for triangle_index in 0..num_faces {
                     rasterize_triangle(
-                        t_idx,
-                        &triangle_normals,
                         mesh,
+                        triangle_index,
+                        &triangle_normals,
                         texture.as_ref(),
                         &projection_config,
                         &mut z_slice.view_mut(),

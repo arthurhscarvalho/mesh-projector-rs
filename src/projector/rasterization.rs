@@ -15,9 +15,9 @@ use std::f64;
 
 /// Rasterizes a single triangle based on the projection mode.
 pub fn rasterize_triangle(
-    t_idx: usize,                           // Index of the current triangle
+    mesh: &Mesh,                            // Mesh with material properties
+    triangle_index: usize,                  // Index of the current triangle
     triangle_normals: &Array2<f64>, // Triangle face normals (M, 3) - Precomputed or provided
-    mesh: &Mesh,                    // Mesh with material properties
     texture_data: Option<&TextureData<'_>>, // Optional diffuse texture data
     projection_config: &ProjectionConfig, // Configuration for the current projection view
     z_slice: &mut ArrayViewMut2<f64>, // Mutable view to the Z-buffer slice
@@ -25,7 +25,7 @@ pub fn rasterize_triangle(
     mode: ProjectionMode,           // Rendering mode
 ) {
     // Back-face Culling
-    let geometric_normal_view = triangle_normals.row(t_idx);
+    let geometric_normal_view = triangle_normals.row(triangle_index);
     let face_normal = [
         geometric_normal_view[0],
         geometric_normal_view[1],
@@ -42,7 +42,7 @@ pub fn rasterize_triangle(
     // Get Vertex Data Indices & Positions
     let points = mesh.vertices.view();
     let triangles = mesh.triangles.view();
-    let tri_indices = triangles.row(t_idx);
+    let tri_indices = triangles.row(triangle_index);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
@@ -81,7 +81,7 @@ pub fn rasterize_triangle(
     if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
         if let Some(uvs) = &mesh.triangle_uvs {
             let uvs_view = uvs.view();
-            let uv_idx_base = t_idx * 3;
+            let uv_idx_base = triangle_index * 3;
             let uv0_data = uvs_view.row(uv_idx_base);
             let uv1_data = uvs_view.row(uv_idx_base + 1);
             let uv2_data = uvs_view.row(uv_idx_base + 2);

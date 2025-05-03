@@ -59,8 +59,8 @@ pub fn precompute_triangle_normals(
     // This loop computes the normal for each triangle face.
     // It could be parallelized if num_faces is extremely large, but for typical meshes,
     // sequential computation is often fast enough and simpler.
-    for t_idx in 0..num_faces {
-        let tri_indices = triangles.row(t_idx);
+    for triangle_index in 0..num_faces {
+        let tri_indices = triangles.row(triangle_index);
         let i0 = tri_indices[0];
         let i1 = tri_indices[1];
         let i2 = tri_indices[2];
@@ -86,9 +86,9 @@ pub fn precompute_triangle_normals(
         let normal_z = v0x * v1y - v0y * v1x;
 
         // Store the computed normal components
-        triangle_normals[[t_idx, 0]] = normal_x;
-        triangle_normals[[t_idx, 1]] = normal_y;
-        triangle_normals[[t_idx, 2]] = normal_z;
+        triangle_normals[[triangle_index, 0]] = normal_x;
+        triangle_normals[[triangle_index, 1]] = normal_y;
+        triangle_normals[[triangle_index, 2]] = normal_z;
     }
     triangle_normals
 }
