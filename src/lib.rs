@@ -10,8 +10,8 @@ use numpy::{IntoPyArray, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
-use crate::projector::mesh::{Mesh, PyMesh};
-use crate::projector::projection::{ProjectionMode, ProjectionSettings};
+use crate::projector::io;
+use crate::projector::projection::ProjectionSettings;
 
 mod logging;
 mod projector;
@@ -20,10 +20,13 @@ mod utils;
 #[pyfunction]
 fn generate_projections<'py>(
     py: Python<'py>,
-    mesh: PyMesh<'py>,
+    obj_path: &str,
+    texture_path: Option<&str>,
+    mtl_path: Option<&str>,
     precision: u64,
     filtering_radius: u64,
-    mode_str: &str,
+    flip_uv: bool,
+    ignore_opacity: bool,
     verbose: bool,
 ) -> PyResult<(Py<PyArray4<u8>>, Py<PyArray4<u8>>)> {
     if verbose {
@@ -34,27 +37,24 @@ fn generate_projections<'py>(
             ))
         })?;
     }
-    // Initial setup
     log::info!("Entering Rust generate_projections backend");
-    let mesh: Mesh = mesh.into();
-    let mode = ProjectionMode::from_str(mode_str)?;
-    let settings = ProjectionSettings::new(precision, filtering_radius, mode);
-    log::info!("Projection Mode: {:?}", mode);
-    // Validate based on mode
-    if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
-        if mesh.texture.is_none() {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Texture data is required for mode {:?} but is None.",
-                mode
+    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
+    let mesh = match io::load_mesh(
+        obj_path,
+        texture_path,
+        mtl_path,
+        precision as u32,
+        flip_uv,
+        ignore_opacity,
+    ) {
+        Ok(mesh) => mesh,
+        Err(e) => {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to load mesh: {}",
+                e
             )));
         }
-        if mesh.triangle_uvs.is_none() {
-            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Triangle UVs are required for mode {:?} but are None.",
-                mode
-            )));
-        }
-    }
+    };
     // Log material properties
     log::info!(
         "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
@@ -65,10 +65,13 @@ fn generate_projections<'py>(
         mesh.opacity,
         mesh.illum
     );
+    // Set up projection settings with the mesh's mode
+    let settings = ProjectionSettings::new(precision, filtering_radius, mesh.mode);
     // Call the backend to compute projections
     let (projection_results, occlusion_maps, outlier_counts) =
         py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
     log::info!("Back-end projections generation complete!");
+    // Log outlier filtering results if requested
     if filtering_radius > 0 {
         let total_removed: u64 = outlier_counts.iter().copied().sum();
         if total_removed > 0 {

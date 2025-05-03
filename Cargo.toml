@@ -14,6 +14,8 @@ numpy = "0.24.0"
 log = "0.4.27"
 colog = "1.3.0"
 rayon = "1.10.0"
+tobj = "4.0.0"
+image = "0.24.7"
 
 [dependencies.pyo3]
 version = "0.24.1"

@@ -1,6 +1,7 @@
 // src/projector/mesh.rs
 //! Mesh data structures for representing 3D geometry.
 
+use crate::projector::projection::ProjectionMode;
 use ndarray::{Array2, Array3};
 use numpy::Element;
 use numpy::PyArrayMethods;
@@ -13,7 +14,6 @@ pub struct Mesh {
     pub vertices: Array2<f64>,
     pub triangles: Array2<usize>,
     pub vertex_normals: Option<Array2<f64>>,
-    pub triangle_normals: Option<Array2<f64>>, // Face normals
     // Texture
     pub vertex_colors: Option<Array2<f64>>,
     pub texture: Option<Array3<u8>>,
@@ -25,6 +25,8 @@ pub struct Mesh {
     pub ns: f64,      // Specular exponent
     pub opacity: f64, // Opacity (0.0=transparent, 1.0=opaque)
     pub illum: i64,   // Illumination model
+    // Rendering mode
+    pub mode: ProjectionMode, // Inferred rendering mode
 }
 
 #[derive(FromPyObject)]
@@ -33,7 +35,6 @@ pub struct PyMesh<'py> {
     pub vertices: PyReadonlyArray2<'py, f64>,
     pub triangles: PyReadonlyArray2<'py, usize>,
     pub vertex_normals: Option<PyReadonlyArray2<'py, f64>>,
-    pub triangle_normals: Option<PyReadonlyArray2<'py, f64>>,
     // Texture
     pub vertex_colors: Option<PyReadonlyArray2<'py, f64>>,
     pub texture: Option<PyReadonlyArray3<'py, u8>>,
@@ -53,7 +54,6 @@ impl<'py> From<PyMesh<'py>> for Mesh {
             vertices: raw.vertices.to_owned_array(),
             triangles: raw.triangles.to_owned_array(),
             vertex_normals: raw.vertex_normals.to_owned_array_opt(),
-            triangle_normals: raw.triangle_normals.to_owned_array_opt(),
             vertex_colors: raw.vertex_colors.to_owned_array_opt(),
             texture: raw.texture.to_owned_array_opt(),
             triangle_uvs: raw.triangle_uvs.to_owned_array_opt(),
@@ -63,6 +63,7 @@ impl<'py> From<PyMesh<'py>> for Mesh {
             ns: raw.ns,
             opacity: raw.opacity,
             illum: raw.illum,
+            mode: ProjectionMode::ObjOnly, // Default mode, will be overridden
         }
     }
 }

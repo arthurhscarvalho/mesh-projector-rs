@@ -7,9 +7,9 @@ use crate::projector::geometry::{
 use crate::projector::lighting::calculate_lighting;
 use crate::projector::math::normalize_vec3;
 use crate::projector::mesh::Mesh;
+use crate::projector::projection::ProjectionMode;
 use crate::projector::sampling::sample_texture_color_bilinear;
 use crate::projector::texture::TextureData;
-use crate::ProjectionMode;
 use nd::{Array2, ArrayViewMut2, ArrayViewMut3};
 use std::f64;
 

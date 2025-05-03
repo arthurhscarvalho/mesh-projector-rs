@@ -4,6 +4,7 @@ mod config;
 mod constants;
 mod filtering;
 mod geometry;
+pub mod io;
 mod lighting;
 mod math;
 pub mod mesh;
@@ -140,17 +141,8 @@ pub fn compute_mesh_projections(
     }
 
     // --- Precomputation ---
-    log::info!("Checking triangle normals...");
-    let triangle_normals = match &mesh.triangle_normals {
-        Some(normals) => {
-            log::info!("Using pre-computed triangle normals from mesh");
-            normals.clone()
-        }
-        None => {
-            log::info!("Precomputing triangle normals...");
-            precompute_triangle_normals(mesh.vertices.view(), mesh.triangles.view())
-        }
-    };
+    log::info!("Precomputing triangle normals...");
+    let triangle_normals = precompute_triangle_normals(mesh.vertices.view(), mesh.triangles.view());
     log::info!("...Triangle normal handling finished.");
 
     // --- Buffer Initialization ---
