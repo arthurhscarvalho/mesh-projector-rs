@@ -6,13 +6,12 @@ use crate::projector::geometry::{
 };
 use crate::projector::lighting::calculate_lighting;
 use crate::projector::math::normalize_vec3;
-use crate::projector::mesh::Mesh;
-use crate::projector::projection::ProjectionMode;
+use crate::projector::mesh::{Mesh, MeshMode};
 use crate::projector::sampling::sample_texture_color_bilinear;
 use nd::{Array2, ArrayViewMut2, ArrayViewMut3};
 use std::f64;
 
-/// Rasterizes a single triangle based on the projection mode.
+/// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
     mesh: &Mesh,                          // Mesh with material properties
     triangle_index: usize,                // Index of the current triangle
@@ -20,7 +19,6 @@ pub fn rasterize_triangle(
     projection_config: &ProjectionConfig, // Configuration for the current projection view
     z_slice: &mut ArrayViewMut2<f64>,     // Mutable view to the Z-buffer slice
     image_slice: &mut ArrayViewMut3<u8>,  // Mutable view to the color image buffer slice
-    mode: ProjectionMode,                 // Rendering mode
 ) {
     // Back-face Culling
     let geometric_normal_view = triangle_normals.row(triangle_index);
@@ -76,7 +74,7 @@ pub fn rasterize_triangle(
         has_normals = true;
     }
     // Setup UVs if available (required for texture modes)
-    if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
+    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
         if let Some(uvs) = &mesh.texture.triangle_uvs {
             let uvs_view = uvs.view();
             let uv_idx_base = triangle_index * 3;
@@ -94,8 +92,8 @@ pub fn rasterize_triangle(
             uv2 = (0.0, 0.0);
         }
     }
-    // Setup vertex colors if available (required for ObjOnly mode)
-    if mode == ProjectionMode::ObjOnly {
+    // Setup vertex colors if available (required for ObjOnly mesh.mode)
+    if mesh.mode == MeshMode::ObjOnly {
         if let Some(v_colors) = &mesh.texture.vertex_colors {
             let v_colors_view = v_colors.view();
             let c0v = v_colors_view.row(i0);
@@ -156,7 +154,7 @@ pub fn rasterize_triangle(
                         face_normal
                     };
                     let (interpolated_u, interpolated_v) =
-                        if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
+                        if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
                             // Linear interpolation of UVs
                             let u = w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0;
                             let v = w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1;
@@ -164,15 +162,15 @@ pub fn rasterize_triangle(
                         } else {
                             (0.0, 0.0)
                         };
-                    let linear_base_color = match mode {
-                        ProjectionMode::ObjOnly => {
+                    let linear_base_color = match mesh.mode {
+                        MeshMode::ObjOnly => {
                             // Linear interpolation of vertex colors (already in linear space)
                             let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
                             let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
                             let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
                             [r.max(0.0), g.max(0.0), b.max(0.0)]
                         }
-                        ProjectionMode::ObjTexture | ProjectionMode::Full => {
+                        MeshMode::ObjTexture | MeshMode::Full => {
                             if let Some(tex) = &mesh.texture.texture {
                                 let sampled_srgb = sample_texture_color_bilinear(
                                     interpolated_u,

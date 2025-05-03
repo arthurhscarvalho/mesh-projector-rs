@@ -18,8 +18,8 @@ use constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
 use mesh::Mesh;
+use mesh::MeshMode;
 use nd::{Array4, Axis, Ix4};
-use projection::ProjectionMode;
 use projection::ProjectionSettings;
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
@@ -35,7 +35,7 @@ pub fn compute_mesh_projections(
 ) -> (Array4<u8>, Array4<u8>, [u64; NUM_IMAGES]) {
     log::info!(
         "Initializing projector backend. Mode: {:?}, Precision: {}, Filtering: {}",
-        settings.mode,
+        mesh.mode,
         settings.precision,
         settings.filtering_window_radius
     );
@@ -71,18 +71,18 @@ pub fn compute_mesh_projections(
     }
 
     // Validate data required by the mode
-    if settings.mode == ProjectionMode::Full || settings.mode == ProjectionMode::ObjTexture {
+    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
         if mesh.texture.texture.is_none() {
             // This should ideally be caught by Python checks, but panic defensively
             panic!(
                 "Texture is required for mode {:?} but was not provided.",
-                settings.mode
+                mesh.mode
             );
         }
         if mesh.texture.triangle_uvs.is_none() {
             panic!(
                 "Triangle UVs are required for mode {:?} but were not provided.",
-                settings.mode
+                mesh.mode
             );
         }
         // Validate UV shape if Some
@@ -107,7 +107,7 @@ pub fn compute_mesh_projections(
             );
         }
     } else {
-        // ProjectionMode::ObjOnly
+        // MeshMode::ObjOnly
         // We don't need texture or UVs.
         // Check for vertex colors (rasterizer handles default if None)
         if mesh.texture.vertex_colors.is_none() {
@@ -126,11 +126,11 @@ pub fn compute_mesh_projections(
                 normals.nrows()
             );
         }
-    } else if settings.mode != ProjectionMode::ObjOnly && mesh.material.illum > 0 {
+    } else if mesh.mode != MeshMode::ObjOnly && mesh.material.illum > 0 {
         // Warn if normals are missing but lighting is expected
         log::warn!(
              "Vertex normals not provided for lighting mode {:?} (illum={}). Shading may be flat or incorrect.",
-             settings.mode, mesh.material.illum
+             mesh.mode, mesh.material.illum
          );
         // We will proceed and let the rasterizer handle None normals (e.g., skip lighting or use default normal)
     }
@@ -174,7 +174,6 @@ pub fn compute_mesh_projections(
                         &projection_config,
                         &mut z_slice.view_mut(),
                         &mut image_slice.view_mut(),
-                        settings.mode,
                     );
                 }
             });

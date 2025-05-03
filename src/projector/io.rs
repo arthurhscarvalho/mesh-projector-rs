@@ -6,8 +6,7 @@ use ndarray::{Array, Array2, Array3};
 use std::path::Path;
 use tobj;
 
-use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture};
-use crate::projector::projection::ProjectionMode;
+use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
 
 /// Default material properties when no MTL file is provided or parsing fails
 const DEFAULT_MATERIAL: MeshMaterial = MeshMaterial {
@@ -71,7 +70,7 @@ pub fn load_mesh_with_mode(
     obj_path: &str,
     texture_path: Option<&str>,
     mtl_path: Option<&str>,
-    mode: ProjectionMode,
+    mode: MeshMode,
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
@@ -147,85 +146,84 @@ pub fn load_mesh_with_mode(
             }
         }
         Some(colors)
-    } else if mode == ProjectionMode::ObjOnly {
+    } else if mode == MeshMode::ObjOnly {
         info!("No vertex colors found. Using defaults for OBJ_ONLY mode.");
         Some(Array::zeros((vertices.shape()[0], 3)))
     } else {
         None
     };
     // Load texture and UVs if required by the mode
-    let (texture, triangle_uvs) =
-        if mode == ProjectionMode::Full || mode == ProjectionMode::ObjTexture {
-            // Texture is required for these modes
-            if texture_path.is_none() {
-                return Err(format!(
-                    "Texture file is required for mode {:?} but none was provided",
-                    mode
-                ));
+    let (texture, triangle_uvs) = if mode == MeshMode::Full || mode == MeshMode::ObjTexture {
+        // Texture is required for these modes
+        if texture_path.is_none() {
+            return Err(format!(
+                "Texture file is required for mode {:?} but none was provided",
+                mode
+            ));
+        }
+        // UVs are required for these modes
+        if mesh.texcoords.is_empty() {
+            return Err(format!(
+                "Mesh has no UV coordinates, required for mode {:?}",
+                mode
+            ));
+        }
+        // Load texture
+        let texture_path = texture_path.unwrap();
+        let texture_array = load_texture(texture_path)?;
+        info!(
+            "Texture load successful: {} ({}x{}x{})",
+            texture_path,
+            texture_array.shape()[0],
+            texture_array.shape()[1],
+            texture_array.shape()[2]
+        );
+        // Process UVs
+        let mut uvs = Array::zeros((mesh.texcoords.len() / 2, 2));
+        for i in 0..uvs.shape()[0] {
+            for j in 0..2 {
+                let mut value = mesh.texcoords[i * 2 + j] as f64;
+                // Clamp UVs to [0, 1]
+                value = value.max(0.0).min(1.0);
+                // Flip V coordinate if requested
+                if j == 1 && flip_v_coordinate {
+                    value = 1.0 - value;
+                }
+                uvs[[i, j]] = value;
             }
-            // UVs are required for these modes
-            if mesh.texcoords.is_empty() {
-                return Err(format!(
-                    "Mesh has no UV coordinates, required for mode {:?}",
-                    mode
-                ));
-            }
-            // Load texture
-            let texture_path = texture_path.unwrap();
-            let texture_array = load_texture(texture_path)?;
-            info!(
-                "Texture load successful: {} ({}x{}x{})",
-                texture_path,
-                texture_array.shape()[0],
-                texture_array.shape()[1],
-                texture_array.shape()[2]
-            );
-            // Process UVs
-            let mut uvs = Array::zeros((mesh.texcoords.len() / 2, 2));
-            for i in 0..uvs.shape()[0] {
-                for j in 0..2 {
-                    let mut value = mesh.texcoords[i * 2 + j] as f64;
-                    // Clamp UVs to [0, 1]
-                    value = value.max(0.0).min(1.0);
-                    // Flip V coordinate if requested
-                    if j == 1 && flip_v_coordinate {
-                        value = 1.0 - value;
-                    }
-                    uvs[[i, j]] = value;
+        }
+        // Map UVs to triangles if needed
+        let triangle_uvs = if mesh.texcoord_indices.is_empty() {
+            // If there are no explicit texcoord indices, assume they match vertex indices
+            warn!("No explicit texcoord indices found, using vertex indices");
+            let mut tri_uvs = Array::zeros((mesh.indices.len(), 2));
+            for i in 0..mesh.indices.len() {
+                let idx = mesh.indices[i] as usize;
+                if idx < uvs.shape()[0] {
+                    tri_uvs[[i, 0]] = uvs[[idx, 0]];
+                    tri_uvs[[i, 1]] = uvs[[idx, 1]];
                 }
             }
-            // Map UVs to triangles if needed
-            let triangle_uvs = if mesh.texcoord_indices.is_empty() {
-                // If there are no explicit texcoord indices, assume they match vertex indices
-                warn!("No explicit texcoord indices found, using vertex indices");
-                let mut tri_uvs = Array::zeros((mesh.indices.len(), 2));
-                for i in 0..mesh.indices.len() {
-                    let idx = mesh.indices[i] as usize;
-                    if idx < uvs.shape()[0] {
-                        tri_uvs[[i, 0]] = uvs[[idx, 0]];
-                        tri_uvs[[i, 1]] = uvs[[idx, 1]];
-                    }
-                }
-                tri_uvs
-            } else {
-                // Use explicit texcoord indices
-                let mut tri_uvs = Array::zeros((mesh.texcoord_indices.len(), 2));
-                for i in 0..mesh.texcoord_indices.len() {
-                    let idx = mesh.texcoord_indices[i] as usize;
-                    if idx < uvs.shape()[0] {
-                        tri_uvs[[i, 0]] = uvs[[idx, 0]];
-                        tri_uvs[[i, 1]] = uvs[[idx, 1]];
-                    }
-                }
-                tri_uvs
-            };
-            (Some(texture_array), Some(triangle_uvs))
+            tri_uvs
         } else {
-            // For OBJ_ONLY mode, we don't need texture or UVs
-            (None, None)
+            // Use explicit texcoord indices
+            let mut tri_uvs = Array::zeros((mesh.texcoord_indices.len(), 2));
+            for i in 0..mesh.texcoord_indices.len() {
+                let idx = mesh.texcoord_indices[i] as usize;
+                if idx < uvs.shape()[0] {
+                    tri_uvs[[i, 0]] = uvs[[idx, 0]];
+                    tri_uvs[[i, 1]] = uvs[[idx, 1]];
+                }
+            }
+            tri_uvs
         };
+        (Some(texture_array), Some(triangle_uvs))
+    } else {
+        // For OBJ_ONLY mode, we don't need texture or UVs
+        (None, None)
+    };
     // Load material properties based on mode
-    let material = if mode == ProjectionMode::Full {
+    let material = if mode == MeshMode::Full {
         if let Some(mtl_path) = mtl_path {
             // Load MTL separately from the specified path
             info!("Loading MTL from explicit path: {}", mtl_path);
@@ -234,7 +232,7 @@ pub fn load_mesh_with_mode(
             warn!("No MTL file provided for FULL mode. Using default material.");
             DEFAULT_MATERIAL
         }
-    } else if mode == ProjectionMode::ObjTexture {
+    } else if mode == MeshMode::ObjTexture {
         // Default material for texturing
         MeshMaterial {
             ka: [0.0, 0.0, 0.0], // No Ambient
@@ -592,38 +590,38 @@ fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<f64>
 /// * `mtl_path` - Optional path to the MTL material file
 ///
 /// # Returns
-/// The inferred ProjectionMode
-fn infer_projection_mode(texture_path: Option<&str>, mtl_path: Option<&str>) -> ProjectionMode {
+/// The inferred MeshMode
+fn infer_projection_mode(texture_path: Option<&str>, mtl_path: Option<&str>) -> MeshMode {
     match (texture_path, mtl_path) {
         (Some(tex_path), Some(mtl_path)) => {
             // Both texture and MTL provided
             if Path::new(tex_path).exists() && Path::new(mtl_path).exists() {
                 info!("Inferred FULL mode (OBJ+Texture+MTL)");
-                ProjectionMode::Full
+                MeshMode::Full
             } else if Path::new(tex_path).exists() {
                 // Texture exists but MTL doesn't
                 info!("Inferred OBJ_TEXTURE mode (OBJ+Texture, MTL not found)");
-                ProjectionMode::ObjTexture
+                MeshMode::ObjTexture
             } else {
                 // Texture doesn't exist
                 info!("Inferred OBJ_ONLY mode (Texture not found)");
-                ProjectionMode::ObjOnly
+                MeshMode::ObjOnly
             }
         }
         (Some(tex_path), None) => {
             // Texture provided but no MTL
             if Path::new(tex_path).exists() {
                 info!("Inferred OBJ_TEXTURE mode (OBJ+Texture)");
-                ProjectionMode::ObjTexture
+                MeshMode::ObjTexture
             } else {
                 info!("Inferred OBJ_ONLY mode (Texture not found)");
-                ProjectionMode::ObjOnly
+                MeshMode::ObjOnly
             }
         }
         (None, _) => {
             // No texture, so OBJ only
             info!("Inferred OBJ_ONLY mode (No texture provided)");
-            ProjectionMode::ObjOnly
+            MeshMode::ObjOnly
         }
     }
 }

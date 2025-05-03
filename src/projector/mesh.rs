@@ -1,8 +1,14 @@
 // src/projector/mesh.rs
 //! Mesh data structures for representing 3D geometry.
 
-use crate::projector::projection::ProjectionMode;
 use ndarray::{Array2, Array3};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeshMode {
+    ObjOnly,
+    ObjTexture,
+    Full,
+}
 
 #[derive(Debug)]
 pub struct MeshGeometry {
@@ -43,5 +49,5 @@ pub struct Mesh {
     // Material
     pub material: MeshMaterial,
     // Rendering mode
-    pub mode: ProjectionMode,
+    pub mode: MeshMode,
 }
