@@ -1,54 +1,82 @@
 // src/projector/mesh.rs
 //! Mesh data structures for representing 3D geometry.
 
-use crate::projector::texture::TextureData;
-use nd::{ArrayView2, ArrayView3};
+use ndarray::{Array2, Array3};
+use numpy::Element;
+use numpy::PyArrayMethods;
+use numpy::{PyReadonlyArray2, PyReadonlyArray3};
+use pyo3::FromPyObject;
 
-/// Represents the core geometry of a 3D mesh.
 #[derive(Debug, Clone)]
-pub struct Mesh<'a> {
-    /// Vertex positions as a (N, 3) array of float64 values.
-    pub vertices: ArrayView2<'a, f64>,
-    /// Triangle face indices as a (M, 3) array of usize values.
-    pub triangles: ArrayView2<'a, usize>,
+pub struct Mesh {
+    // Geometry
+    pub vertices: Array2<f64>,
+    pub triangles: Array2<usize>,
+    pub vertex_normals: Option<Array2<f64>>,
+    pub triangle_normals: Option<Array2<f64>>, // Face normals
+    // Texture
+    pub vertex_colors: Option<Array2<f64>>,
+    pub texture: Option<Array3<u8>>,
+    pub triangle_uvs: Option<Array2<f64>>,
+    // Material
+    pub ka: [f64; 3], // Ambient color
+    pub kd: [f64; 3], // Diffuse color
+    pub ks: [f64; 3], // Specular color
+    pub ns: f64,      // Specular exponent
+    pub opacity: f64, // Opacity (0.0=transparent, 1.0=opaque)
+    pub illum: i64,   // Illumination model
 }
 
-/// Optional attributes that may be present for a mesh.
-#[derive(Debug, Clone)]
-pub struct MeshAttributes<'a> {
-    /// Optional vertex normal vectors as a (N, 3) array.
-    pub vertex_normals: Option<ArrayView2<'a, f64>>,
-    /// Optional vertex colors as a (N, 3) array.
-    pub vertex_colors: Option<ArrayView2<'a, f64>>,
-    /// Optional texture data for the mesh.
-    pub texture: Option<TextureData<'a>>,
-    /// Optional UV coordinates for each triangle vertex as a (M*3, 2) array.
-    pub triangle_uvs: Option<ArrayView2<'a, f64>>,
+#[derive(FromPyObject)]
+pub struct PyMesh<'py> {
+    // Geometry
+    pub vertices: PyReadonlyArray2<'py, f64>,
+    pub triangles: PyReadonlyArray2<'py, usize>,
+    pub vertex_normals: Option<PyReadonlyArray2<'py, f64>>,
+    pub triangle_normals: Option<PyReadonlyArray2<'py, f64>>,
+    // Texture
+    pub vertex_colors: Option<PyReadonlyArray2<'py, f64>>,
+    pub texture: Option<PyReadonlyArray3<'py, u8>>,
+    pub triangle_uvs: Option<PyReadonlyArray2<'py, f64>>,
+    // Material
+    pub ka: [f64; 3],
+    pub kd: [f64; 3],
+    pub ks: [f64; 3],
+    pub ns: f64,
+    pub opacity: f64,
+    pub illum: i64,
 }
 
-impl<'a> Mesh<'a> {
-    /// Creates a new mesh from vertex and triangle data.
-    pub fn new(vertices: ArrayView2<'a, f64>, triangles: ArrayView2<'a, usize>) -> Self {
+impl<'py> From<PyMesh<'py>> for Mesh {
+    fn from(raw: PyMesh<'py>) -> Self {
         Mesh {
-            vertices,
-            triangles,
+            vertices: raw.vertices.to_owned_array(),
+            triangles: raw.triangles.to_owned_array(),
+            vertex_normals: raw.vertex_normals.to_owned_array_opt(),
+            triangle_normals: raw.triangle_normals.to_owned_array_opt(),
+            vertex_colors: raw.vertex_colors.to_owned_array_opt(),
+            texture: raw.texture.to_owned_array_opt(),
+            triangle_uvs: raw.triangle_uvs.to_owned_array_opt(),
+            ka: raw.ka,
+            kd: raw.kd,
+            ks: raw.ks,
+            ns: raw.ns,
+            opacity: raw.opacity,
+            illum: raw.illum,
         }
     }
 }
 
-impl<'a> MeshAttributes<'a> {
-    /// Creates a new mesh attributes object with the provided data.
-    pub fn new(
-        vertex_normals: Option<ArrayView2<'a, f64>>,
-        vertex_colors: Option<ArrayView2<'a, f64>>,
-        texture: Option<ArrayView3<'a, u8>>,
-        triangle_uvs: Option<ArrayView2<'a, f64>>,
-    ) -> Self {
-        MeshAttributes {
-            vertex_normals,
-            vertex_colors,
-            texture: texture.map(TextureData::new),
-            triangle_uvs,
-        }
+trait ToOwnedArrayOpt {
+    type Output;
+    fn to_owned_array_opt(self) -> Option<Self::Output>;
+}
+
+impl<'py, T: Clone + Element + 'py, D: ndarray::Dimension> ToOwnedArrayOpt
+    for Option<numpy::PyReadonlyArray<'py, T, D>>
+{
+    type Output = ndarray::Array<T, D>;
+    fn to_owned_array_opt(self) -> Option<Self::Output> {
+        self.map(|a| a.to_owned_array())
     }
 }

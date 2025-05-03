@@ -1,7 +1,8 @@
 // src/projector/projection.rs
 //! Projection settings and related structures.
 
-use crate::ProjectionMode;
+use pyo3::PyErr;
+use pyo3::PyResult;
 
 /// Contains all the settings for controlling the projection process.
 #[derive(Debug, Clone)]
@@ -21,6 +22,27 @@ impl ProjectionSettings {
             precision,
             filtering_window_radius,
             mode,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectionMode {
+    ObjOnly,
+    ObjTexture,
+    Full,
+}
+
+impl ProjectionMode {
+    pub fn from_str(s: &str) -> PyResult<Self> {
+        match s {
+            "obj_only" => Ok(ProjectionMode::ObjOnly),
+            "obj_texture" => Ok(ProjectionMode::ObjTexture),
+            "full" => Ok(ProjectionMode::Full),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Invalid projection mode: {}",
+                s
+            ))),
         }
     }
 }
