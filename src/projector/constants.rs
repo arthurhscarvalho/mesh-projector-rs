@@ -7,7 +7,7 @@ pub const NUM_IMAGES: usize = 6;
 /// Default background color/brightness for output images.
 pub const BACKGROUND_BRIGHTNESS: u8 = 255;
 /// Epsilon value for checking division by zero in barycentric coordinate calculation.
-pub const BARYCENTRIC_EPSILON: f64 = 1e-7;
+pub const BARYCENTRIC_EPSILON: f64 = f64::EPSILON;
 /// Epsilon tolerance for checking if calculated barycentric coordinates (u,v,w) are within the valid range [0, 1].
 pub const BARYCENTRIC_COORD_EPSILON: f64 = -f64::EPSILON;
 /// Factor applied to the maximum dimension (`max_bound`) to determine the depth threshold for outlier filtering.
