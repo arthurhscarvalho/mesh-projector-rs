@@ -4,8 +4,11 @@ use ndarray::{Array2, Array3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MeshMode {
+    /// Only the OBJ file is used.
     ObjOnly,
+    /// The OBJ file and texture are used.
     ObjTexture,
+    /// The OBJ file, texture, and material are used.
     Full,
 }
 

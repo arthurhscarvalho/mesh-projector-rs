@@ -149,11 +149,12 @@ pub fn filter_outliers(
             for r in 0..rows {
                 for c in 0..cols {
                     // Check the occlusion map's single channel
-                    if occ_slice[[r, c, 0]] == 1 {
-                        // If outlier, set all channels of the image pixel to background
-                        for chan in 0..NUM_CHANNELS {
-                            img_slice[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
-                        }
+                    if occ_slice[[r, c, 0]] == 0 {
+                        continue;
+                    }
+                    // If outlier, set all channels of the image pixel to background
+                    for chan in 0..NUM_CHANNELS {
+                        img_slice[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
                     }
                 }
             }

@@ -28,13 +28,11 @@ pub fn calculate_lighting(
         material.ks[1].powf(2.2),
         material.ks[2].powf(2.2),
     ];
-
     let effective_diffuse_linear = [
         linear_base_color[0] * linear_kd[0],
         linear_base_color[1] * linear_kd[1],
         linear_base_color[2] * linear_kd[2],
     ];
-
     let mut final_color_linear = [0.0f64; 3];
     match material.illum {
         0 => {
@@ -62,7 +60,6 @@ pub fn calculate_lighting(
                 linear_ka[1] * GLOBAL_AMBIENT[1],
                 linear_ka[2] * GLOBAL_AMBIENT[2],
             ];
-
             // Diffuse term (without light color initially)
             let dot_nl = dot_product(&normal, &light_dir).max(0.0);
             let diffuse_term = [
@@ -70,7 +67,6 @@ pub fn calculate_lighting(
                 effective_diffuse_linear[1] * dot_nl,
                 effective_diffuse_linear[2] * dot_nl,
             ];
-
             // Specular term (without light color initially)
             let mut reflected_light_dir = [0.0; 3];
             let neg_light_dir = [-light_dir[0], -light_dir[1], -light_dir[2]];
@@ -87,7 +83,6 @@ pub fn calculate_lighting(
                 linear_ks[1] * specular_intensity,
                 linear_ks[2] * specular_intensity,
             ];
-
             // Combine: Final = Ambient + LightColor * (Diffuse + Specular)
             for i in 0..3 {
                 final_color_linear[i] =

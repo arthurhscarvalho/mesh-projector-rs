@@ -127,96 +127,96 @@ pub fn rasterize_triangle(
                 continue;
             };
             // Check if inside using Barycentric coordinates
-            if is_inside_triangle(w0, w1, w2) {
-                // Interpolate depth linearly
-                let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
-                // Depth Test
-                let current_z = z_slice[[row, col]];
-                let depth_test_passed = if projection_config.is_front_view {
-                    interpolated_z < current_z
+            if !is_inside_triangle(w0, w1, w2) {
+                continue;
+            }
+            // Interpolate depth linearly
+            let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
+            // Depth Test
+            let current_z = z_slice[[row, col]];
+            let depth_test_passed = if projection_config.is_front_view {
+                interpolated_z < current_z
+            } else {
+                interpolated_z > current_z
+            };
+            if depth_test_passed {
+                // Interpolate Attributes
+                let interpolated_normal = if has_normals {
+                    let bw0 = w0;
+                    let bw1 = w1;
+                    let bw2 = w2;
+                    // Linear interpolation of normals
+                    let nx = bw0 * n0.0 + bw1 * n1.0 + bw2 * n2.0;
+                    let ny = bw0 * n0.1 + bw1 * n1.1 + bw2 * n2.1;
+                    let nz = bw0 * n0.2 + bw1 * n1.2 + bw2 * n2.2;
+                    let mut norm = [nx, ny, nz];
+                    normalize_vec3(&mut norm);
+                    norm
                 } else {
-                    interpolated_z > current_z
+                    face_normal
                 };
-                if depth_test_passed {
-                    // Interpolate Attributes
-                    let interpolated_normal = if has_normals {
-                        let bw0 = w0;
-                        let bw1 = w1;
-                        let bw2 = w2;
-                        // Linear interpolation of normals
-                        let nx = bw0 * n0.0 + bw1 * n1.0 + bw2 * n2.0;
-                        let ny = bw0 * n0.1 + bw1 * n1.1 + bw2 * n2.1;
-                        let nz = bw0 * n0.2 + bw1 * n1.2 + bw2 * n2.2;
-                        let mut norm = [nx, ny, nz];
-                        normalize_vec3(&mut norm);
-                        norm
+                let (interpolated_u, interpolated_v) =
+                    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
+                        // Linear interpolation of UVs
+                        let u = w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0;
+                        let v = w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1;
+                        (u, v)
                     } else {
-                        face_normal
+                        (0.0, 0.0)
                     };
-                    let (interpolated_u, interpolated_v) =
-                        if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-                            // Linear interpolation of UVs
-                            let u = w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0;
-                            let v = w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1;
-                            (u, v)
+                let linear_base_color = match mesh.mode {
+                    MeshMode::ObjOnly => {
+                        // Linear interpolation of vertex colors (already in linear space)
+                        let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
+                        let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
+                        let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
+                        [r.max(0.0), g.max(0.0), b.max(0.0)]
+                    }
+                    MeshMode::ObjTexture | MeshMode::Full => {
+                        if let Some(tex) = &mesh.texture.texture {
+                            let sampled_srgb = sample_texture_color_bilinear(
+                                interpolated_u,
+                                interpolated_v,
+                                tex.view(),
+                                mesh.texture.channels,
+                                mesh.texture.height_f64,
+                                mesh.texture.width_f64,
+                            );
+                            [
+                                sampled_srgb[0].powf(2.2),
+                                sampled_srgb[1].powf(2.2),
+                                sampled_srgb[2].powf(2.2),
+                            ]
                         } else {
-                            (0.0, 0.0)
-                        };
-                    let linear_base_color = match mesh.mode {
-                        MeshMode::ObjOnly => {
-                            // Linear interpolation of vertex colors (already in linear space)
-                            let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
-                            let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
-                            let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
-                            [r.max(0.0), g.max(0.0), b.max(0.0)]
+                            DEFAULT_MISSING_TEXTURE_COLOR
                         }
-                        MeshMode::ObjTexture | MeshMode::Full => {
-                            if let Some(tex) = &mesh.texture.texture {
-                                let sampled_srgb = sample_texture_color_bilinear(
-                                    interpolated_u,
-                                    interpolated_v,
-                                    tex.view(),
-                                    mesh.texture.channels,
-                                    mesh.texture.height_f64,
-                                    mesh.texture.width_f64,
-                                );
-                                [
-                                    sampled_srgb[0].powf(2.2),
-                                    sampled_srgb[1].powf(2.2),
-                                    sampled_srgb[2].powf(2.2),
-                                ]
-                            } else {
-                                DEFAULT_MISSING_TEXTURE_COLOR
-                            }
-                        }
-                    };
-                    // Calculate Final Color (Lighting)
-                    let view_dir_tuple = projection_config.view_dir;
-                    let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
-                    let light_dir_array =
-                        [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
-                    let light_color = DEFAULT_LIGHT_COLOR;
-                    let final_linear_color = calculate_lighting(
-                        &mesh.material,
-                        linear_base_color,
-                        interpolated_normal,
-                        view_dir_array,
-                        light_dir_array,
-                        light_color,
-                    );
-                    // Convert linear to sRGB and quantize to [0, 255]
-                    let srgb_r = final_linear_color[0].powf(1.0 / 2.2);
-                    let srgb_g = final_linear_color[1].powf(1.0 / 2.2);
-                    let srgb_b = final_linear_color[2].powf(1.0 / 2.2);
-                    let r_byte = (srgb_r * 255.0).min(255.0).max(0.0) as u8;
-                    let g_byte = (srgb_g * 255.0).min(255.0).max(0.0) as u8;
-                    let b_byte = (srgb_b * 255.0).min(255.0).max(0.0) as u8;
-                    // Update Z-buffer and color buffer
-                    z_slice[[row, col]] = interpolated_z;
-                    image_slice[[row, col, 0]] = r_byte;
-                    image_slice[[row, col, 1]] = g_byte;
-                    image_slice[[row, col, 2]] = b_byte;
-                }
+                    }
+                };
+                // Calculate Final Color (Lighting)
+                let view_dir_tuple = projection_config.view_dir;
+                let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
+                let light_dir_array = [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
+                let light_color = DEFAULT_LIGHT_COLOR;
+                let final_linear_color = calculate_lighting(
+                    &mesh.material,
+                    linear_base_color,
+                    interpolated_normal,
+                    view_dir_array,
+                    light_dir_array,
+                    light_color,
+                );
+                // Convert linear to sRGB and quantize to [0, 255]
+                let srgb_r = final_linear_color[0].powf(1.0 / 2.2);
+                let srgb_g = final_linear_color[1].powf(1.0 / 2.2);
+                let srgb_b = final_linear_color[2].powf(1.0 / 2.2);
+                let r_byte = (srgb_r * 255.0).min(255.0).max(0.0) as u8;
+                let g_byte = (srgb_g * 255.0).min(255.0).max(0.0) as u8;
+                let b_byte = (srgb_b * 255.0).min(255.0).max(0.0) as u8;
+                // Update Z-buffer and color buffer
+                z_slice[[row, col]] = interpolated_z;
+                image_slice[[row, col, 0]] = r_byte;
+                image_slice[[row, col, 1]] = g_byte;
+                image_slice[[row, col, 2]] = b_byte;
             }
         }
     }
