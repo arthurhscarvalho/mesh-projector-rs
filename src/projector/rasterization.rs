@@ -197,12 +197,12 @@ pub fn rasterize_triangle(
                         [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
                     let light_color = DEFAULT_LIGHT_COLOR;
                     let final_linear_color = calculate_lighting(
+                        &mesh.material,
                         linear_base_color,
                         interpolated_normal,
                         view_dir_array,
                         light_dir_array,
                         light_color,
-                        &mesh.material,
                     );
                     // Convert linear to sRGB and quantize to [0, 255]
                     let srgb_r = final_linear_color[0].powf(1.0 / 2.2);

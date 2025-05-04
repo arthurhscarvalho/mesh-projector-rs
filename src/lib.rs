@@ -6,12 +6,11 @@ extern crate numpy;
 extern crate pyo3;
 extern crate rayon;
 
+use crate::projector::io;
+use crate::projector::projection::ProjectionSettings;
 use numpy::{IntoPyArray, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
-
-use crate::projector::io;
-use crate::projector::projection::ProjectionSettings;
 
 mod logging;
 mod projector;

@@ -27,7 +27,6 @@ impl Buffers {
             num_images, NUM_IMAGES,
             "Inconsistent number of images requested in Buffers::new"
         );
-
         Buffers {
             images: Array4::from_elem((num_images, rows, cols, channels), BACKGROUND_BRIGHTNESS),
             z_buffers: {

@@ -1,10 +1,7 @@
 import argparse
 import os
-
 import cv2
 import numpy as np
-from loguru import logger
-
 import mesh_projector as mp
 
 
@@ -84,11 +81,6 @@ def main():
         help="Ignore opacity from MTL file and force it to 1.0.",
     )
     args = parser.parse_args()
-
-    # Configure logging
-    if not args.verbose:
-        logger.remove()
-
     # --- Generate Projections using the combined function ---
     try:
         # Mode is automatically inferred based on the provided files
@@ -105,30 +97,19 @@ def main():
         if (
             projection_images is None or occlusion_maps is None
         ):  # Should not happen if exceptions are raised correctly
-            logger.error("Projection generation failed, but no exception was raised.")
+            print("Projection generation failed, but no exception was raised.")
             return
-
     except (FileNotFoundError, ValueError, RuntimeError) as e:
-        logger.error(f"Failed to generate projections: {e}")
+        print(f"Failed to generate projections: {e}")
         return
     except Exception as e:  # Catch any unexpected errors
-        logger.error(f"An unexpected error occurred: {e}")
+        print(f"An unexpected error occurred: {e}")
         return
-
     # --- Save Output ---
     os.makedirs(args.out, exist_ok=True)
     view_names = ["X+", "X-", "Y+", "Y-", "Z+", "Z-"]
-    if len(projection_images) != len(view_names):
-        logger.warning(
-            f"Expected {len(view_names)} projections but got {len(projection_images)}. Saving available images."
-        )
     # Check occlusion maps length as well if filtering was enabled
     save_occlusion = args.filtering > 0 and len(occlusion_maps) == len(view_names)
-    if args.filtering > 0 and not save_occlusion:
-        logger.warning(
-            f"Filtering was enabled, but expected {len(view_names)} occlusion maps and got {len(occlusion_maps)}. Not saving occlusion maps."
-        )
-
     for i, img in enumerate(projection_images):
         if i >= len(view_names):
             break  # Prevent index error if fewer images returned
@@ -139,8 +120,7 @@ def main():
                 cv2.cvtColor(img, cv2.COLOR_RGB2BGR),
             )
         except Exception as e:
-            logger.error(f"Failed to save projection {view_names[i]}: {e}")
-
+            print(f"Failed to save projection {view_names[i]}: {e}")
         # Save occlusion map if available and filtering was enabled
         if save_occlusion:
             try:
@@ -152,11 +132,10 @@ def main():
                     occ_map_scaled,
                 )
             except Exception as e:
-                logger.error(f"Failed to save occlusion map {view_names[i]}: {e}")
-
-    logger.info(f"Projections saved to {args.out}")
+                print(f"Failed to save occlusion map {view_names[i]}: {e}")
+    print(f"Projections saved to {args.out}")
     if save_occlusion:
-        logger.info(f"Occlusion maps saved to {args.out}")
+        print(f"Occlusion maps saved to {args.out}")
 
 
 if __name__ == "__main__":

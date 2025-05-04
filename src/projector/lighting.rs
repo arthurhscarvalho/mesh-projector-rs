@@ -1,18 +1,17 @@
 // src/projector/lighting.rs
 //! Lighting calculation functions for the projector.
-
 use crate::projector::constants::GLOBAL_AMBIENT;
 use crate::projector::math::{dot_product, normalize_vec3, reflect};
 use crate::projector::mesh::MeshMaterial;
 
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
 pub fn calculate_lighting(
+    material: &MeshMaterial,
     linear_base_color: [f64; 3],
     normal: [f64; 3],
     view_dir: [f64; 3],
     light_dir: [f64; 3],
     light_color: [f64; 3],
-    material: &MeshMaterial,
 ) -> [f64; 3] {
     let linear_ka = [
         material.ka[0].powf(2.2),

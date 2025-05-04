@@ -1,6 +1,5 @@
 // src/projector/mesh.rs
 //! Mesh data structures for representing 3D geometry.
-
 use ndarray::{Array2, Array3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,15 +11,21 @@ pub enum MeshMode {
 
 #[derive(Debug)]
 pub struct MeshGeometry {
+    /// Vertex positions (N, 3).
     pub vertices: Array2<f64>,
+    /// Triangles faces based on vertex indices (M, 3).
     pub triangles: Array2<usize>,
+    /// Vertex normals (optional).
     pub vertex_normals: Option<Array2<f64>>,
 }
 
 #[derive(Debug)]
 pub struct MeshTexture {
+    /// Texture image data (optional).
     pub texture: Option<Array3<u8>>,
+    /// Vertex colors (optional).
     pub vertex_colors: Option<Array2<f64>>,
+    /// Triangle UV coordinates (optional).
     pub triangle_uvs: Option<Array2<f64>>,
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).
     pub channels: usize,

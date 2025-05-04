@@ -1,12 +1,10 @@
 // src/projector/io.rs
 //! Module for loading and preprocessing 3D mesh data.
-
+use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
 use log::{info, warn};
 use ndarray::{Array, Array2, Array3};
 use std::path::Path;
 use tobj;
-
-use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
 
 /// Default material properties when no MTL file is provided or parsing fails
 const DEFAULT_MATERIAL: MeshMaterial = MeshMaterial {
@@ -300,7 +298,6 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial 
         );
         return DEFAULT_MATERIAL;
     }
-
     let mut material = MeshMaterial {
         ka: [0.1, 0.1, 0.1],
         kd: [0.8, 0.8, 0.8],
@@ -309,7 +306,6 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial 
         opacity: 1.0,
         illum: 2,
     };
-
     let parsed_successfully = match tobj::load_mtl(mtl_path) {
         Ok((materials, _)) => {
             if materials.is_empty() {
@@ -321,41 +317,32 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial 
             } else {
                 // Use the first material
                 let mtl = &materials[0];
-
                 // Apply material properties
                 if let Some(ambient) = mtl.ambient {
                     material.ka = [ambient[0] as f64, ambient[1] as f64, ambient[2] as f64];
                 }
-
                 if let Some(diffuse) = mtl.diffuse {
                     material.kd = [diffuse[0] as f64, diffuse[1] as f64, diffuse[2] as f64];
                 }
-
                 if let Some(specular) = mtl.specular {
                     material.ks = [specular[0] as f64, specular[1] as f64, specular[2] as f64];
                 }
-
                 if let Some(shininess) = mtl.shininess {
                     material.ns = shininess as f64;
                 }
-
                 if let Some(dissolve) = mtl.dissolve {
                     material.opacity = dissolve as f64;
                 }
-
                 if let Some(illum) = mtl.illumination_model {
                     material.illum = illum as i64;
                 }
-
                 // Ensure opacity is in valid range
                 material.opacity = material.opacity.max(0.0).min(1.0);
-
                 // Override opacity if requested
                 if ignore_opacity {
                     info!("Ignoring MTL opacity and setting it to 1.0.");
                     material.opacity = 1.0;
                 }
-
                 true
             }
         }
@@ -367,7 +354,6 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial 
             false
         }
     };
-
     if parsed_successfully {
         info!("Successfully parsed MTL '{}': {:?}", mtl_path, material);
     } else {
@@ -376,7 +362,6 @@ fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshMaterial 
             mtl_path, material
         );
     }
-
     material
 }
 
@@ -385,7 +370,6 @@ fn load_texture(texture_path: &str) -> Result<Array3<u8>, String> {
     if !Path::new(texture_path).exists() {
         return Err(format!("Texture file not found: {}", texture_path));
     }
-
     match image::open(texture_path) {
         Ok(img) => {
             let rgb_img = img.to_rgb8();
@@ -417,16 +401,13 @@ fn compute_vertex_normals(
     if vertices_count == 0 || triangles.shape()[0] == 0 {
         return None;
     }
-
     // Initialize normals to zero
     let mut normals = Array2::zeros((vertices_count, 3));
-
     // For each triangle, compute its normal and add to the normals of its vertices
     for i in 0..triangles.shape()[0] {
         let idx1 = triangles[[i, 0]];
         let idx2 = triangles[[i, 1]];
         let idx3 = triangles[[i, 2]];
-
         // Get triangle vertices
         let v1 = [
             vertices[[idx1, 0]],
@@ -443,23 +424,19 @@ fn compute_vertex_normals(
             vertices[[idx3, 1]],
             vertices[[idx3, 2]],
         ];
-
         // Compute edges
         let edge1 = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
         let edge2 = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]];
-
         // Compute cross product (normal)
         let normal = [
             edge1[1] * edge2[2] - edge1[2] * edge2[1],
             edge1[2] * edge2[0] - edge1[0] * edge2[2],
             edge1[0] * edge2[1] - edge1[1] * edge2[0],
         ];
-
         // Normalize the normal if it's not too small
         let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
         if length > 1e-9 {
             let normalized = [normal[0] / length, normal[1] / length, normal[2] / length];
-
             // Add to vertex normals
             for j in 0..3 {
                 normals[[idx1, j]] += normalized[j];
@@ -468,10 +445,8 @@ fn compute_vertex_normals(
             }
         }
     }
-
     // Normalize all vertex normals
     normalize_normals(&mut normals);
-
     Some(normals)
 }
 
@@ -502,84 +477,68 @@ fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<f64>
     // Get bounding box
     let mut min_bound = [f64::MAX, f64::MAX, f64::MAX];
     let mut max_bound = [f64::MIN, f64::MIN, f64::MIN];
-
     for i in 0..vertices.shape()[0] {
         for j in 0..3 {
             min_bound[j] = min_bound[j].min(vertices[[i, j]]);
             max_bound[j] = max_bound[j].max(vertices[[i, j]]);
         }
     }
-
     info!("Original BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
-
     // Shift vertices if any minimum coordinate is negative
     let shift = [
         min_bound[0].min(0.0).abs(),
         min_bound[1].min(0.0).abs(),
         min_bound[2].min(0.0).abs(),
     ];
-
     if shift[0] > 0.0 || shift[1] > 0.0 || shift[2] > 0.0 {
         info!("Shifting vertices by: {:?}", shift);
-
         for i in 0..vertices.shape()[0] {
             for j in 0..3 {
                 vertices[[i, j]] += shift[j];
             }
         }
-
         // Update bounds
         for j in 0..3 {
             min_bound[j] += shift[j];
             max_bound[j] += shift[j];
         }
-
         info!("Shifted BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
     }
-
     // Calculate scale factor based on max dimension
     let mut bbox_size = [
         max_bound[0] - min_bound[0],
         max_bound[1] - min_bound[1],
         max_bound[2] - min_bound[2],
     ];
-
     // Avoid division by zero
     for j in 0..3 {
         if bbox_size[j] == 0.0 {
             bbox_size[j] = 1e-9;
         }
     }
-
     let max_dim = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
     let target_max_val = (1 << precision) as f64 - 1.0;
     let scale_factor = target_max_val / max_dim;
-
     info!(
         "Scaling vertices. Max dimension: {}, Scale factor: {}",
         max_dim, scale_factor
     );
-
     // Scale vertices
     for i in 0..vertices.shape()[0] {
         for j in 0..3 {
             vertices[[i, j]] *= scale_factor;
         }
     }
-
     // Calculate new bounds for verification
     min_bound = [f64::MAX, f64::MAX, f64::MAX];
     max_bound = [f64::MIN, f64::MIN, f64::MIN];
-
     for i in 0..vertices.shape()[0] {
         for j in 0..3 {
             min_bound[j] = min_bound[j].min(vertices[[i, j]]);
             max_bound[j] = max_bound[j].max(vertices[[i, j]]);
         }
     }
-
     info!("Scaled BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
-
     vertices
 }
 

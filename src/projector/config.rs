@@ -29,11 +29,9 @@ impl ProjectionConfig {
             "Invalid image layer index: {}",
             img_layer
         );
-
         let depth_axis = img_layer / 2; // 0 for X, 1 for Y, 2 for Z
         let view_type = img_layer % 2; // 0 for front, 1 for back
         let is_front_view = view_type == 0;
-
         // Determine view direction based on axis and front/back type
         let view_dir = match (depth_axis, is_front_view) {
             (0, true) => (1.0, 0.0, 0.0),   // +X
@@ -44,7 +42,6 @@ impl ProjectionConfig {
             (2, false) => (0.0, 0.0, -1.0), // -Z
             _ => unreachable!(),            // Should be covered by the assert above
         };
-
         // Define the axes used for the 2D projection plane (P, Q) based on the depth axis
         // If depth is X (0), plane is YZ (1, 2) -> p=Y, q=Z
         // If depth is Y (1), plane is XZ (0, 2) -> p=X, q=Z

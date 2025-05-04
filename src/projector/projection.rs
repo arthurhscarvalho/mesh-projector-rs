@@ -2,7 +2,7 @@
 //! Projection settings and related structures.
 
 /// Contains all the settings for controlling the projection process.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProjectionSettings {
     /// The precision/resolution of the output images (log2 of dimensions).
     pub precision: u64,

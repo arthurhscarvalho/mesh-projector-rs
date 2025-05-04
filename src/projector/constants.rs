@@ -4,6 +4,8 @@ use std::f64;
 // --- Constants ---
 /// Number of projection images (3 axes, 2 directions each: +X, -X, +Y, -Y, +Z, -Z).
 pub const NUM_IMAGES: usize = 6;
+/// Number of channels in the output image (RGB).
+pub const NUM_CHANNELS: usize = 3;
 /// Default background color/brightness for output images.
 pub const BACKGROUND_BRIGHTNESS: u8 = 255;
 /// Epsilon value for checking division by zero in barycentric coordinate calculation.
