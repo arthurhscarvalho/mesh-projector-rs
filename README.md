@@ -18,7 +18,7 @@ Generate 6 orthographic projections (+X, -X, +Y, -Y, +Z, -Z) from a 3D mesh, pro
 * **Vertex Scaling:** Automatically scales and shifts mesh vertices to fit within a specified precision range for consistent projection dimensions.
 * **Performance:** Core rasterization and projection logic implemented in Rust using `ndarray` and `rayon` for parallelism, providing significant speed advantages.
 * **Outlier Filtering:** Optional depth-based outlier filtering to remove isolated pixels far from their neighbours.
-* **Outputs:** Provides both the rendered RGB projection images and floating-point occlusion maps (1.0 for mesh, 0.0 for background).
+* **Outputs:** Provides both the rendered RGB projection images and BW occlusion maps (1 for mesh, 0 for background).
 
 ## Installation
 
