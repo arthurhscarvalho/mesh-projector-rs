@@ -4,14 +4,17 @@
 [![Python Version](https://img.shields.io/badge/python-3.12.9-blue.svg)](https://www.python.org/)
 [![Rust Version](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-Generate 6 orthographic projections (+X, -X, +Y, -Y, +Z, -Z) from a textured 3D mesh, producing both color images and occlusion maps. This library implements a Rust backend via PyO3 for efficient computation, wrapped in a user-friendly Python interface.
+Generate 6 orthographic projections (+X, -X, +Y, -Y, +Z, -Z) from a 3D mesh, producing both color images and occlusion maps. This library implements a Rust backend via PyO3 for efficient computation, wrapped in a user-friendly Python interface.
 
 ## Features
 
 * **Orthographic Projections:** Generates 6 projections along the major axes (front/back for X, Y, Z).
-* **Textured Mesh Handling:** Processes meshes with associated texture maps (requires separate texture file).
-* **Mesh Loading:** Utilizes Open3D for loading `.obj` mesh files.
-* **UV Coordinate Processing:** Handles per-triangle UV coordinates, including an option to flip the V coordinate if needed.
+* **Multiple Rendering Modes:** The library automatically infers the rendering mode based on the provided files:
+  * **OBJ Only:** Uses OBJ vertices and vertex colors (if available). Requires only OBJ file.
+  * **OBJ + Texture:** Uses OBJ vertices/UVs and texture map. Requires OBJ and texture file.
+  * **OBJ + Texture + MTL:** Uses OBJ vertices/UVs, texture map, and MTL properties. Requires OBJ, texture, and MTL files.
+* **Mesh Loading:** Efficiently loads `.obj` mesh files directly in Rust.
+* **UV Coordinate Processing:** Handles per-triangle UV coordinates, with configurable V-coordinate flipping.
 * **Vertex Scaling:** Automatically scales and shifts mesh vertices to fit within a specified precision range for consistent projection dimensions.
 * **Performance:** Core rasterization and projection logic implemented in Rust using `ndarray` and `rayon` for parallelism, providing significant speed advantages.
 * **Outlier Filtering:** Optional depth-based outlier filtering to remove isolated pixels far from their neighbours.
@@ -48,65 +51,28 @@ Generate 6 orthographic projections (+X, -X, +Y, -Y, +Z, -Z) from a textured 3D 
 
 ## Usage
 
-The following example demonstrates how to load a mesh and generate projections:
+### Python API
 
-```python
-import os
-import time
+The library provides a single high-level function, `project_mesh()`, for generating projections. The repository includes an example script that demonstrates usage via command line:
 
-import cv2
-import numpy as np
+```bash
+# OBJ + Texture + MTL
+python examples/example_generate_projections.py \
+    --obj assets/just_a_girl_C0-L5_deq_tri.obj \
+    --texture assets/just_a_girl_C0-L5_deq_tri_0.png \
+    --mtl assets/just_a_girl_C0-L5_deq_tri.mtl \
+    --out projections --precision 12 --verbose
 
-import mesh_projector  # Import the library
+# OBJ + Texture
+python examples/example_generate_projections.py \
+    --obj assets/just_a_girl_C0-L5_deq_tri.obj \
+    --texture assets/just_a_girl_C0-L5_deq_tri_0.png \
+    --out projections --verbose
 
-
-def save_projections(projections, output_dir="./projections"):
-    """Helper function to save projection images."""
-    os.makedirs(output_dir, exist_ok=True)
-    for i in range(len(projections)):
-        image = projections[i].astype(np.uint8)
-        # Convert RGB (from library) to BGR (for OpenCV)
-        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(os.path.join(output_dir, f"projection_{i}.png"), image_bgr)
-    print(f"Projections saved to {output_dir}")
-
-
-if __name__ == "__main__":
-    # --- Configuration ---
-    # Precision determines output resolution: 2^precision x 2^precision
-    # e.g., precision=10 -> 1024x1024 images
-    precision = 12  # Results in 4096x4096 images
-    filtering = 0  # Outlier filtering radius (0 disables filtering)
-    verbose = True  # Enable logging messages
-
-    # --- Load Mesh ---
-    # Provide paths to your mesh and texture files
-    obj_path = "assets/just_a_girl_C0-L5_deq_tri.obj"
-    tex_path = "assets/just_a_girl_C0-L5_deq_tri_0.png"
-    mesh = mesh_projector.read_mesh(
-        obj_path,
-        tex_path,
-        verbose=verbose,
-    )
-
-    # --- Generate Projections ---
-    t0 = time.time()
-    images, ocp_maps = mesh_projector.generate_projections(
-        mesh, precision, filtering, verbose
-    )
-    t1 = time.time()
-    print(f"Projections generated. Time taken: {(t1 - t0):.2f} s")
-
-    # --- Process Outputs ---
-    # `images` is a NumPy array: (6, H, W, C) uint8
-    # `ocp_maps` is a NumPy array: (6, H, W) float32 (1.0=mesh, 0.0=background)
-    print(f"Output images shape: {images.shape}")
-    print(f"Output occlusion maps shape: {ocp_maps.shape}")
-
-    # Save the generated images
-    save_projections(images)
-
-    # You can now use `images` and `ocp_maps` for further processing.
+# OBJ Only (requires vertex colors in OBJ or will be white)
+python examples/example_generate_projections.py \
+    --obj assets/Chameleon_Ref_0.obj \
+    --out projections --verbose
 ```
 
 ## Development

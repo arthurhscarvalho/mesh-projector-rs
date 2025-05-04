@@ -1,4 +1,5 @@
 import numpy as np
+
 from .mesh_projector import (
     generate_projections as _internal_generate_projections,
 )
