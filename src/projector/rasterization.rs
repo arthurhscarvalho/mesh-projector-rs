@@ -1,158 +1,222 @@
 // src/projector/rasterization.rs
-use crate::projector::config::ProjectionConfig;
+use crate::projector::config::ViewConfig;
+use crate::projector::constants::{DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR};
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
-use crate::projector::texture::TextureData;
-use nd::{s, Array2, ArrayView, ArrayView2, ArrayViewMut, ArrayViewMut2, ArrayViewMut3};
-use std::f32;
+use crate::projector::lighting::calculate_lighting;
+use crate::projector::math::normalize_vec3;
+use crate::projector::mesh::{Mesh, MeshMode};
+use crate::projector::sampling::sample_texture_color_bilinear;
+use nd::{Array2, ArrayViewMut2, ArrayViewMut3};
+use std::f64;
 
-/// Interpolates texture coordinates using barycentric coordinates and samples the texture color.
-/// Assumes standard UV mapping where (0,0) is top-left and (1,1) is bottom-right.
-/// Handles clamping coordinates to the texture boundaries.
-#[inline]
-fn sample_texture_color(
-    u: f32,                                       // Barycentric coordinate corresponding to uv0
-    v: f32,                                       // Barycentric coordinate corresponding to uv1
-    w: f32,                                       // Barycentric coordinate corresponding to uv2
-    uv0: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the first vertex of the triangle
-    uv1: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the second vertex
-    uv2: ArrayView<f32, nd::Ix1>, // Texture coordinates (u, v) for the third vertex
-    texture_data: &TextureData,   // Contains texture view and dimensions
-    target_color: &mut ArrayViewMut<u8, nd::Ix1>, // Mutable slice to write the sampled color (length = channels)
-) {
-    // Linearly interpolate the UV coordinates using the barycentric coordinates.
-    let interp_u_coord = u * uv0[0] + v * uv1[0] + w * uv2[0];
-    let interp_v_coord = u * uv0[1] + v * uv1[1] + w * uv2[1];
-
-    // Convert interpolated UV coordinates [0, 1] to texture pixel coordinates [0, width-1], [0, height-1].
-    // We sample at the nearest pixel center using round().
-    // Clamp coordinates to ensure they stay within the valid texture bounds [0, dim-1].
-    let tex_x = (interp_u_coord * texture_data.width_f32) // Scale U to texture width
-        .round() // Find nearest pixel center
-        .max(0.0) // Clamp minimum to 0
-        .min(texture_data.width_f32 - 1.0) // Clamp maximum to width-1
-        as usize; // Convert to integer index
-
-    // The V texture coordinate is often inverted (0 is top, 1 is bottom in UV, but 0 is top row in image array).
-    // We apply (1.0 - V) to flip it before scaling and clamping.
-    let tex_y = ((1.0 - interp_v_coord) * texture_data.height_f32) // Scale flipped V to texture height
-        .round() // Find nearest pixel center
-        .max(0.0) // Clamp minimum to 0
-        .min(texture_data.height_f32 - 1.0) // Clamp maximum to height-1
-        as usize; // Convert to integer index
-
-    // Sample the color from the texture at the calculated (tex_y, tex_x) coordinates
-    // for all channels and write it to the target color buffer slice.
-    for chan in 0..texture_data.channels {
-        target_color[chan] = texture_data.texture[[tex_y, tex_x, chan]];
-    }
-}
-
-/// Rasterizes a single triangle onto the specified image slices (color, depth, occlusion).
-/// Performs back-face culling, projects vertices, iterates pixels within the bounding box,
-/// performs depth testing, and updates buffers for visible fragments inside the triangle.
+/// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
-    t_idx: usize,                         // Index of the current triangle being processed
-    points: ArrayView2<f32>,              // All vertex 3D positions (N, 3)
-    triangles: ArrayView2<usize>,         // Triangle vertex indices (M, 3) defining faces
-    triangle_uvs: ArrayView2<f32>,        // UV coordinates per triangle vertex (M*3, 2)
-    triangle_normals: &Array2<f32>,       // Precomputed geometric normals per triangle (M, 3)
-    texture_data: &TextureData,           // Texture image and properties
-    projection_config: &ProjectionConfig, // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f32>,     // Mutable view to the Z-buffer for this view
-    image_slice: &mut ArrayViewMut3<u8>,  // Mutable view to the color image buffer for this view
-    ocp_slice: &mut ArrayViewMut2<f32>,   // Mutable view to the occlusion map for this view
+    mesh: &Mesh,                         // Mesh with material properties
+    triangle_index: usize,               // Index of the current triangle
+    triangle_normals: &Array2<f64>,      // Triangle face normals (M, 3) - Precomputed or provided
+    projection_config: &ViewConfig,      // Configuration for the current projection view
+    z_slice: &mut ArrayViewMut2<f64>,    // Mutable view to the Z-buffer slice
+    image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer slice
 ) {
-    // 1. Back-face Culling: Check if the triangle is visible from the current view direction.
-    let normal = triangle_normals.row(t_idx);
-    if !is_triangle_visible(normal[0], normal[1], normal[2], projection_config.view_dir) {
-        return; // Cull the triangle if it's facing away from the view.
+    // Back-face Culling
+    let geometric_normal_view = triangle_normals.row(triangle_index);
+    let face_normal = [
+        geometric_normal_view[0],
+        geometric_normal_view[1],
+        geometric_normal_view[2],
+    ];
+    if !is_triangle_visible(
+        face_normal[0],
+        face_normal[1],
+        face_normal[2],
+        projection_config.view_dir,
+    ) {
+        return;
     }
-
-    // 2. Get Vertex Data: Retrieve 3D positions and UV coordinates for the triangle's vertices.
-    let tri_indices = triangles.row(t_idx);
+    // Get Vertex Data Indices & Positions
+    let points = mesh.geometry.vertices.view();
+    let triangles = mesh.geometry.triangles.view();
+    let tri_indices = triangles.row(triangle_index);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
-
-    let p0 = points.row(i0); // 3D position of vertex 0
-    let p1 = points.row(i1); // 3D position of vertex 1
-    let p2 = points.row(i2); // 3D position of vertex 2
-
-    // UV coordinates are often stored per-face-vertex, so index calculation is t_idx * 3 + vertex_index.
-    let uv_idx_base = t_idx * 3;
-    let uv0 = triangle_uvs.row(uv_idx_base); // UV coords for vertex 0 of this triangle instance
-    let uv1 = triangle_uvs.row(uv_idx_base + 1); // UV coords for vertex 1
-    let uv2 = triangle_uvs.row(uv_idx_base + 2); // UV coords for vertex 2
-
-    // 3. Project Vertices to 2D Plane: Extract the P and Q axis coordinates based on the projection config.
-    // These correspond to the (column, row) coordinates in the output image buffer.
+    let p0 = points.row(i0);
+    let p1 = points.row(i1);
+    let p2 = points.row(i2);
+    // Setup Data for Interpolation
+    let z0 = p0[projection_config.depth_axis];
+    let z1 = p1[projection_config.depth_axis];
+    let z2 = p2[projection_config.depth_axis];
+    // Store raw attributes for linear interpolation
+    let mut n0 = (0.0, 0.0, 0.0);
+    let mut n1 = (0.0, 0.0, 0.0);
+    let mut n2 = (0.0, 0.0, 0.0);
+    let mut uv0 = (0.0, 0.0);
+    let mut uv1 = (0.0, 0.0);
+    let mut uv2 = (0.0, 0.0);
+    // Default vertex color is white (linear)
+    let mut c0 = (1.0, 1.0, 1.0);
+    let mut c1 = (1.0, 1.0, 1.0);
+    let mut c2 = (1.0, 1.0, 1.0);
+    let mut has_normals = false;
+    // Setup normals if available
+    if let Some(v_normals) = &mesh.geometry.vertex_normals {
+        let v_normals_view = v_normals.view();
+        let n0v = v_normals_view.row(i0);
+        let n1v = v_normals_view.row(i1);
+        let n2v = v_normals_view.row(i2);
+        // Store raw normals
+        n0 = (n0v[0], n0v[1], n0v[2]);
+        n1 = (n1v[0], n1v[1], n1v[2]);
+        n2 = (n2v[0], n2v[1], n2v[2]);
+        has_normals = true;
+    }
+    // Setup UVs if available (required for texture modes)
+    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
+        if let Some(uvs) = &mesh.texture.triangle_uvs {
+            let uvs_view = uvs.view();
+            let uv_idx_base = triangle_index * 3;
+            let uv0_data = uvs_view.row(uv_idx_base);
+            let uv1_data = uvs_view.row(uv_idx_base + 1);
+            let uv2_data = uvs_view.row(uv_idx_base + 2);
+            // Store raw UVs
+            uv0 = (uv0_data[0], uv0_data[1]);
+            uv1 = (uv1_data[0], uv1_data[1]);
+            uv2 = (uv2_data[0], uv2_data[1]);
+        } else {
+            // Default UVs are (0,0)
+            uv0 = (0.0, 0.0);
+            uv1 = (0.0, 0.0);
+            uv2 = (0.0, 0.0);
+        }
+    }
+    // Setup vertex colors if available (required for ObjOnly mesh.mode)
+    if mesh.mode == MeshMode::ObjOnly {
+        if let Some(v_colors) = &mesh.texture.vertex_colors {
+            let v_colors_view = v_colors.view();
+            let c0v = v_colors_view.row(i0);
+            let c1v = v_colors_view.row(i1);
+            let c2v = v_colors_view.row(i2);
+            // Assume vertex colors are sRGB [0,1], store linear for interpolation
+            c0 = (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2));
+            c1 = (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2));
+            c2 = (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2));
+        }
+        // If None, the default white setup (1,1,1) remains.
+    }
+    // Project Vertices to 2D
     let p0_proj = (p0[projection_config.p_axis], p0[projection_config.q_axis]);
     let p1_proj = (p1[projection_config.p_axis], p1[projection_config.q_axis]);
     let p2_proj = (p2[projection_config.p_axis], p2[projection_config.q_axis]);
 
-    // 4. Calculate Bounding Box: Determine the min/max pixel coordinates covering the projected triangle.
+    // Calculate Bounding Box
     let (rows, cols) = (z_slice.shape()[0], z_slice.shape()[1]);
     let Some((min_row, max_row, min_col, max_col)) =
         calculate_bounding_box(p0_proj, p1_proj, p2_proj, rows, cols)
     else {
-        return; // Triangle is completely off-screen or projects to zero area on screen.
+        return;
     };
-
-    // 5. Iterate Pixels in Bounding Box: Loop through each pixel potentially covered by the triangle.
-    for r in min_row..=max_row {
-        // Iterate through rows (q_axis)
-        for c in min_col..=max_col {
-            // Iterate through columns (p_axis)
-            // Use pixel center coordinates for barycentric calculation for better accuracy.
-            let px = c as f32 + 0.5; // Center x-coordinate (p_axis)
-            let py = r as f32 + 0.5; // Center y-coordinate (q_axis)
-
-            // 6. Calculate Barycentric Coordinates: Determine if the pixel center (px, py) lies inside the projected triangle.
-            if let Some((u, v, w)) = barycentric(p0_proj, p1_proj, p2_proj, (px, py)) {
-                // Check if the coordinates are valid (all >= 0, handling floating point tolerance).
-                if is_inside_triangle(u, v, w) {
-                    // 7. Interpolate Depth: Calculate the depth value at this pixel using barycentric coordinates.
-                    let interpolated_depth = u * p0[projection_config.depth_axis]
-                        + v * p1[projection_config.depth_axis]
-                        + w * p2[projection_config.depth_axis];
-
-                    // 8. Depth Test: Compare the interpolated depth with the value currently in the Z-buffer.
-                    let current_z = z_slice[[r, c]];
-                    let depth_test_passed = if projection_config.is_front_view {
-                        // For front views, smaller depth values are closer.
-                        // Initial Z is +Infinity.
-                        interpolated_depth < current_z
+    // Pixel Loop
+    for row in min_row..max_row {
+        for col in min_col..max_col {
+            let pixel_center = (col as f64 + 0.5, row as f64 + 0.5);
+            // Barycentric Coordinates
+            let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
+                continue;
+            };
+            // Check if inside using Barycentric coordinates
+            if !is_inside_triangle(w0, w1, w2) {
+                continue;
+            }
+            // Interpolate depth linearly
+            let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
+            // Depth Test
+            let current_z = z_slice[[row, col]];
+            let depth_test_passed = if projection_config.is_front_view {
+                interpolated_z < current_z
+            } else {
+                interpolated_z > current_z
+            };
+            if depth_test_passed {
+                // Interpolate Attributes
+                let interpolated_normal = if has_normals {
+                    let bw0 = w0;
+                    let bw1 = w1;
+                    let bw2 = w2;
+                    // Linear interpolation of normals
+                    let nx = bw0 * n0.0 + bw1 * n1.0 + bw2 * n2.0;
+                    let ny = bw0 * n0.1 + bw1 * n1.1 + bw2 * n2.1;
+                    let nz = bw0 * n0.2 + bw1 * n1.2 + bw2 * n2.2;
+                    let mut norm = [nx, ny, nz];
+                    normalize_vec3(&mut norm);
+                    norm
+                } else {
+                    face_normal
+                };
+                let (interpolated_u, interpolated_v) =
+                    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
+                        // Linear interpolation of UVs
+                        let u = w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0;
+                        let v = w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1;
+                        (u, v)
                     } else {
-                        // For back views, larger depth values (less negative or more positive if crossing origin) are closer.
-                        // Initial Z is -Infinity.
-                        interpolated_depth > current_z
+                        (0.0, 0.0)
                     };
-
-                    if depth_test_passed {
-                        // 9. Update Buffers: If the depth test passes, this fragment is visible.
-                        // Update the Z-buffer with the new closer depth.
-                        z_slice[[r, c]] = interpolated_depth;
-                        // Mark this pixel as covered by the mesh in the occlusion map.
-                        ocp_slice[[r, c]] = 1.0;
-
-                        // 10. Sample Texture and Update Color Buffer:
-                        // Get a mutable slice for the color channels of the current pixel.
-                        let mut color_pixel_slice = image_slice.slice_mut(s![r, c, ..]);
-                        // Interpolate UVs and sample the texture color.
-                        sample_texture_color(
-                            u,
-                            v,
-                            w,
-                            uv0,
-                            uv1,
-                            uv2,
-                            texture_data,
-                            &mut color_pixel_slice,
-                        );
+                let linear_base_color = match mesh.mode {
+                    MeshMode::ObjOnly => {
+                        // Linear interpolation of vertex colors (already in linear space)
+                        let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
+                        let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
+                        let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
+                        [r.max(0.0), g.max(0.0), b.max(0.0)]
                     }
-                }
+                    MeshMode::ObjTexture | MeshMode::Full => {
+                        if let Some(tex) = &mesh.texture.texture {
+                            let sampled_srgb = sample_texture_color_bilinear(
+                                interpolated_u,
+                                interpolated_v,
+                                tex.view(),
+                                mesh.texture.channels,
+                                mesh.texture.height_f64,
+                                mesh.texture.width_f64,
+                            );
+                            [
+                                sampled_srgb[0].powf(2.2),
+                                sampled_srgb[1].powf(2.2),
+                                sampled_srgb[2].powf(2.2),
+                            ]
+                        } else {
+                            DEFAULT_MISSING_TEXTURE_COLOR
+                        }
+                    }
+                };
+                // Calculate Final Color (Lighting)
+                let view_dir_tuple = projection_config.view_dir;
+                let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
+                let light_dir_array = [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
+                let light_color = DEFAULT_LIGHT_COLOR;
+                let final_linear_color = calculate_lighting(
+                    &mesh.material,
+                    linear_base_color,
+                    interpolated_normal,
+                    view_dir_array,
+                    light_dir_array,
+                    light_color,
+                );
+                // Convert linear to sRGB and quantize to [0, 255]
+                let srgb_r = final_linear_color[0].powf(1.0 / 2.2);
+                let srgb_g = final_linear_color[1].powf(1.0 / 2.2);
+                let srgb_b = final_linear_color[2].powf(1.0 / 2.2);
+                let r_byte = (srgb_r * 255.0).min(255.0).max(0.0) as u8;
+                let g_byte = (srgb_g * 255.0).min(255.0).max(0.0) as u8;
+                let b_byte = (srgb_b * 255.0).min(255.0).max(0.0) as u8;
+                // Update Z-buffer and color buffer
+                z_slice[[row, col]] = interpolated_z;
+                image_slice[[row, col, 0]] = r_byte;
+                image_slice[[row, col, 1]] = g_byte;
+                image_slice[[row, col, 2]] = b_byte;
             }
         }
     }

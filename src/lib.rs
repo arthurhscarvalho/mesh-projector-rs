@@ -6,52 +6,87 @@ extern crate numpy;
 extern crate pyo3;
 extern crate rayon;
 
-use numpy::{PyArray3, PyArray4};
-use numpy::{PyReadonlyArray2, PyReadonlyArray3};
+use crate::projector::config::ProjectorConfig;
+use crate::projector::io;
+use numpy::{IntoPyArray, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
 mod logging;
 mod projector;
-mod utils;
 
 #[pyfunction]
 fn generate_projections<'py>(
     py: Python<'py>,
-    points: PyReadonlyArray2<f32>,
-    triangles: PyReadonlyArray2<usize>,
-    texture: PyReadonlyArray3<u8>,
-    triangle_uvs: PyReadonlyArray2<f32>,
-    precision: u32,
-    filtering: u32,
-    logging_enabled: bool,
-) -> (Bound<'py, PyArray4<u8>>, Bound<'py, PyArray3<f32>>) {
-    if logging_enabled {
-        colog::init();
+    obj_path: &str,
+    texture_path: Option<&str>,
+    mtl_path: Option<&str>,
+    precision: u64,
+    filtering_radius: u64,
+    flip_uv: bool,
+    ignore_opacity: bool,
+    verbose: bool,
+) -> PyResult<(Py<PyArray4<u8>>, Py<PyArray4<u8>>)> {
+    if verbose {
+        logging::init_logger().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to initialize logger: {}",
+                e
+            ))
+        })?;
     }
-    conditional_log!(logging_enabled, info, "Back-end projector starting");
-    let points = utils::to_ndarray2(&points).unwrap();
-    let triangles = utils::to_ndarray2(&triangles).unwrap().map(|&v| v as usize);
-    let texture = utils::to_ndarray3(&texture).unwrap().map(|&v| v as u8);
-    let triangle_uvs = utils::to_ndarray2(&triangle_uvs).unwrap();
-    let (images, ocp_maps, freqs) = projector::compute_mesh_projections(
-        points.view(),
-        triangles.view(),
-        texture.view(),
-        triangle_uvs.view(),
-        precision,
-        filtering,
-        logging_enabled,
+    log::info!("Entering Rust generate_projections backend");
+    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
+    let mesh = match io::load_mesh(
+        obj_path,
+        texture_path,
+        mtl_path,
+        precision as u32,
+        flip_uv,
+        ignore_opacity,
+    ) {
+        Ok(mesh) => mesh,
+        Err(e) => {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to load mesh: {}",
+                e
+            )));
+        }
+    };
+    // Log material properties
+    log::info!(
+        "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
+        mesh.material.ka,
+        mesh.material.kd,
+        mesh.material.ks,
+        mesh.material.ns,
+        mesh.material.opacity,
+        mesh.material.illum
     );
-    conditional_log!(
-        logging_enabled,
-        info,
-        "Back-end projections generation complete!"
-    );
-    let images = PyArray4::from_owned_array(py, images);
-    let ocp_maps = PyArray3::from_owned_array(py, ocp_maps);
-    log_removed_points!(logging_enabled && filtering > 0, freqs);
-    (images, ocp_maps)
+    // Set up projection settings with the mesh's mode
+    let settings = ProjectorConfig::new(precision, filtering_radius);
+    // Call the backend to compute projections
+    let (projection_results, occlusion_maps, outlier_counts) =
+        py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
+    log::info!("Back-end projections generation complete!");
+    // Log outlier filtering results if requested
+    if filtering_radius > 0 {
+        let total_removed: u64 = outlier_counts.iter().copied().sum();
+        if total_removed > 0 {
+            log::info!(
+                "Outlier Filtering Removed Points: Total = {} ({:?})",
+                total_removed,
+                outlier_counts
+            );
+        } else {
+            log::info!("Outlier Filtering: No points removed.");
+        }
+    }
+    // Convert the ndarray results directly to numpy arrays and return as a tuple
+    Ok((
+        projection_results.into_pyarray(py).into(),
+        occlusion_maps.into_pyarray(py).into(),
+    ))
 }
 
 #[pymodule]
