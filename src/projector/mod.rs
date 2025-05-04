@@ -1,6 +1,6 @@
 // src/projector/mod.rs
 mod buffers;
-mod config;
+pub mod config;
 mod constants;
 mod filtering;
 mod geometry;
@@ -8,18 +8,16 @@ pub mod io;
 mod lighting;
 mod math;
 pub mod mesh;
-pub mod projection;
 mod rasterization;
 mod sampling;
 
 use buffers::Buffers;
-use config::ProjectionConfig;
+use config::{ProjectorConfig, ViewConfig};
 use constants::{BACKGROUND_BRIGHTNESS, NUM_CHANNELS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
 use mesh::Mesh;
 use nd::{Array4, Axis, Ix4};
-use projection::ProjectionSettings;
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 
@@ -29,7 +27,7 @@ use rayon::prelude::*;
 /// Tuple: (images: Array4<u8>, occlusion_maps: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
 pub fn compute_mesh_projections(
     mesh: &Mesh,
-    settings: &ProjectionSettings,
+    settings: &ProjectorConfig,
 ) -> (Array4<u8>, Array4<u8>, [u64; NUM_IMAGES]) {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
@@ -82,7 +80,7 @@ pub fn compute_mesh_projections(
         .zip(image_views.par_iter_mut())
         .enumerate()
         .for_each(|(img_layer, (z_slice, image_slice))| {
-            let projection_config = ProjectionConfig::new(img_layer);
+            let projection_config = ViewConfig::new(img_layer);
             let num_faces = mesh.geometry.triangles.nrows();
             for triangle_index in 0..num_faces {
                 rasterize_triangle(

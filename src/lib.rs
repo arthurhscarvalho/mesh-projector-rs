@@ -6,8 +6,8 @@ extern crate numpy;
 extern crate pyo3;
 extern crate rayon;
 
+use crate::projector::config::ProjectorConfig;
 use crate::projector::io;
-use crate::projector::projection::ProjectionSettings;
 use numpy::{IntoPyArray, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -64,7 +64,7 @@ fn generate_projections<'py>(
         mesh.material.illum
     );
     // Set up projection settings with the mesh's mode
-    let settings = ProjectionSettings::new(precision, filtering_radius);
+    let settings = ProjectorConfig::new(precision, filtering_radius);
     // Call the backend to compute projections
     let (projection_results, occlusion_maps, outlier_counts) =
         py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));

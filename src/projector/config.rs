@@ -1,9 +1,29 @@
 // src/projector/config.rs
+//! Projection settings and related structures.
 use crate::projector::constants::NUM_IMAGES;
 
+/// Contains all the settings for controlling the projection process.
+#[derive(Debug)]
+pub struct ProjectorConfig {
+    /// The precision/resolution of the output images (log2 of dimensions).
+    pub precision: u64,
+    /// Radius for outlier filtering (0 = disabled).
+    pub filtering_window_radius: u64,
+}
+
+impl ProjectorConfig {
+    /// Creates a new projection settings object.
+    pub fn new(precision: u64, filtering_window_radius: u64) -> Self {
+        ProjectorConfig {
+            precision,
+            filtering_window_radius,
+        }
+    }
+}
+
 /// Encapsulates parameters for a single orthographic projection view (camera settings).
-#[derive(Debug, Clone, Copy)]
-pub struct ProjectionConfig {
+#[derive(Debug)]
+pub struct ViewConfig {
     /// The axis representing depth relative to the mesh (0=X, 1=Y, 2=Z).
     pub depth_axis: usize,
     /// True if this is a front view (looking along the positive direction of `depth_axis`),
@@ -19,7 +39,7 @@ pub struct ProjectionConfig {
     pub q_axis: usize,
 }
 
-impl ProjectionConfig {
+impl ViewConfig {
     /// Creates projection settings based on the image layer index (0 to NUM_IMAGES - 1).
     /// Layers 0, 2, 4 are front views (+X, +Y, +Z).
     /// Layers 1, 3, 5 are back views (-X, -Y, -Z).
@@ -49,8 +69,7 @@ impl ProjectionConfig {
         // Note: The order (p, q) maps to (cols, rows) typically.
         const PROJECTION_PLANE_AXES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
         let (p_axis, q_axis) = PROJECTION_PLANE_AXES[depth_axis];
-
-        ProjectionConfig {
+        ViewConfig {
             depth_axis,
             is_front_view,
             view_dir,

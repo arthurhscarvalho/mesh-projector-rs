@@ -1,5 +1,5 @@
 // src/projector/rasterization.rs
-use crate::projector::config::ProjectionConfig;
+use crate::projector::config::ViewConfig;
 use crate::projector::constants::{DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR};
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
@@ -13,12 +13,12 @@ use std::f64;
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
-    mesh: &Mesh,                          // Mesh with material properties
-    triangle_index: usize,                // Index of the current triangle
-    triangle_normals: &Array2<f64>,       // Triangle face normals (M, 3) - Precomputed or provided
-    projection_config: &ProjectionConfig, // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f64>,     // Mutable view to the Z-buffer slice
-    image_slice: &mut ArrayViewMut3<u8>,  // Mutable view to the color image buffer slice
+    mesh: &Mesh,                         // Mesh with material properties
+    triangle_index: usize,               // Index of the current triangle
+    triangle_normals: &Array2<f64>,      // Triangle face normals (M, 3) - Precomputed or provided
+    projection_config: &ViewConfig,      // Configuration for the current projection view
+    z_slice: &mut ArrayViewMut2<f64>,    // Mutable view to the Z-buffer slice
+    image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer slice
 ) {
     // Back-face Culling
     let geometric_normal_view = triangle_normals.row(triangle_index);
