@@ -253,14 +253,12 @@ pub fn load_mesh_with_mode(
     };
     // Preprocess the mesh (scale vertices to fit in the target precision)
     let vertices = preprocess_vertices(vertices, precision);
-
     // Get texture dimensions if texture exists
     let (texture_channels, texture_height, texture_width) = if let Some(ref tex) = texture {
         (tex.shape()[2], tex.shape()[0] as f64, tex.shape()[1] as f64)
     } else {
         (3, 0.0, 0.0)
     };
-
     // Create the mesh structure with the new structure
     let mesh = Mesh {
         geometry: MeshGeometry {
