@@ -13,26 +13,27 @@ mod sampling;
 
 use buffers::Buffers;
 use config::{ProjectorConfig, ViewConfig};
-use constants::{BACKGROUND_BRIGHTNESS, NUM_CHANNELS, NUM_IMAGES};
+use constants::{NUM_CHANNELS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
 use mesh::Mesh;
-use nd::{Array4, Axis, Ix4};
+use nd::{Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 
 /// Computes 6 orthographic projections based on the specified mode.
 ///
 /// Returns:
-/// Tuple: (Buffers, occlusion_maps: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
+/// Tuple: (images, depth_maps, normal_maps, occupancy_maps, outlier_counts)
+/// where occupancy_maps are RGB images (255 for occupied, 0 for empty).
 pub fn compute_mesh_projections(
     mesh: &Mesh,
     settings: &ProjectorConfig,
 ) -> (
-    Array4<u8>,
-    Array4<u8>,
-    Array4<u8>,
-    Array4<u8>,
+    Array4<u8>, // images
+    Array4<u8>, // depth_maps
+    Array4<u8>, // normal_maps
+    Array4<u8>, // occupancy_maps (3-channel)
     [u64; NUM_IMAGES],
 ) {
     log::info!(
@@ -57,18 +58,20 @@ pub fn compute_mesh_projections(
     let rows = max_bound_u;
     let cols = max_bound_u;
     // Shape definitions for output
-    let shape4d_img = Ix4(NUM_IMAGES, rows, cols, NUM_CHANNELS);
-    let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1); // Shape for occlusion maps
-                                                      // Handle empty meshes (this check is kept for robustness)
+    // let shape4d_img = Ix4(NUM_IMAGES, rows, cols, NUM_CHANNELS); // Not strictly needed if creating arrays directly
+    // let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1); // This was for the old 1-channel map
+
+    // Handle empty meshes
     if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
         let empty_buffers = Buffers::new(NUM_IMAGES, rows, cols, NUM_CHANNELS);
+        let empty_occupancy_map = Array4::<u8>::zeros((NUM_IMAGES, rows, cols, NUM_CHANNELS));
         return (
             empty_buffers.images,
             empty_buffers.depth_maps,
             empty_buffers.normal_maps,
-            Array4::zeros(shape4d_occ), // Return empty occlusion map
-            [0; NUM_IMAGES],            // Return array of zeros for counts
+            empty_occupancy_map,
+            [0; NUM_IMAGES],
         );
     }
     // Precomputation
@@ -111,18 +114,56 @@ pub fn compute_mesh_projections(
                 }
             },
         );
-    // Apply outlier filtering if enabled
-    let (occlusion_maps, outlier_counts) = filter_outliers(
+
+    // Apply outlier filtering (modifies buffers.images in place)
+    // The first returned element (outlier_identification_map) is not directly returned by this function anymore.
+    let (_outlier_identification_map, outlier_counts) = filter_outliers(
         &mut buffers.images,
         &buffers.z_buffers,
         settings.filtering_window_radius,
         max_bound_f64,
     );
+
+    // Create occupancy maps (white for occupied, black for empty)
+    log::info!("Generating occupancy maps from Z-buffers.");
+    let mut occupancy_maps = Array4::<u8>::zeros((NUM_IMAGES, rows, cols, NUM_CHANNELS));
+    let mut occupancy_map_views: Vec<_> = occupancy_maps.axis_iter_mut(Axis(0)).collect();
+    occupancy_map_views
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(k, occupancy_slice)| {
+            let z_slice = buffers.z_buffers.index_axis(Axis(0), k);
+            let is_front_view = k % 2 == 0;
+            // Assuming occupancy_slice.dim() gives (slice_rows, slice_cols, slice_channels)
+            // and z_slice.dim() gives (slice_rows, slice_cols)
+            // These should match rows and cols from the outer scope.
+            let (slice_rows, slice_cols, _slice_channels) = occupancy_slice.dim();
+
+            for r in 0..slice_rows {
+                for c in 0..slice_cols {
+                    let depth_val = z_slice[[r, c]];
+                    let is_occupied = if is_front_view {
+                        depth_val < f64::INFINITY && depth_val.is_finite()
+                    } else {
+                        depth_val > f64::NEG_INFINITY && depth_val.is_finite()
+                    };
+
+                    if is_occupied {
+                        for chan in 0..NUM_CHANNELS {
+                            // NUM_CHANNELS should be 3 for RGB
+                            occupancy_slice[[r, c, chan]] = 255;
+                        }
+                    }
+                    // Else: remains 0 (black) from initialization
+                }
+            }
+        });
+
     (
         buffers.images,
         buffers.depth_maps,
         buffers.normal_maps,
-        occlusion_maps,
+        occupancy_maps, // The new 3-channel occupancy map
         outlier_counts,
     )
 }
