@@ -221,15 +221,17 @@ pub fn rasterize_triangle(
                 image_slice[[row, col, 2]] = b_byte;
 
                 // Populate Depth Map (assuming further = brighter/higher value)
+                // Assumes interpolated_z (world coordinate along depth_axis) is normalized to be
+                // within [0, max_bound_f64] due to preprocessing in io.rs.
+                let max_bound = projection_config.max_bound_f64;
                 let normalized_depth_factor = if projection_config.is_front_view {
-                    // interpolated_z is positive, e.g., [0, max_bound_f64]
-                    (interpolated_z / projection_config.max_bound_f64).clamp(0.0, 1.0)
+                    // Front view: z=0 is closer (darker), z=max_bound is further (brighter).
+                    // Maps [0, M] to [0, 1].
+                    (1.0 - (interpolated_z / max_bound)).clamp(0.0, 1.0)
                 } else {
-                    // interpolated_z is negative, e.g., [-max_bound_f64, 0]
-                    // Map [-max_bound, 0] to [0, 1] (0 for far, 1 for close to -max_bound plane)
-                    ((interpolated_z + projection_config.max_bound_f64)
-                        / projection_config.max_bound_f64)
-                        .clamp(0.0, 1.0)
+                    // Back view: z=0 is further (brighter), z=max_bound is closer (darker).
+                    // Maps [0, M] to [1, 0] (further is 1, closer is 0), effectively (M - z) / M.
+                    (interpolated_z / max_bound).clamp(0.0, 1.0)
                 };
                 let depth_u8 = (normalized_depth_factor * 255.0).round() as u8;
                 depth_map_slice[[row, col, 0]] = depth_u8;
