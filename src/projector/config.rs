@@ -37,13 +37,15 @@ pub struct ViewConfig {
     /// The secondary axis index for the 2D projection plane (e.g., Z if depth is X).
     /// This typically corresponds to the image's row index.
     pub q_axis: usize,
+    /// The maximum bound of the projection space, used for scaling depth values.
+    pub max_bound_f64: f64,
 }
 
 impl ViewConfig {
     /// Creates projection settings based on the image layer index (0 to NUM_IMAGES - 1).
     /// Layers 0, 2, 4 are front views (+X, +Y, +Z).
     /// Layers 1, 3, 5 are back views (-X, -Y, -Z).
-    pub fn new(img_layer: usize) -> Self {
+    pub fn new(img_layer: usize, max_bound_f64: f64) -> Self {
         assert!(
             img_layer < NUM_IMAGES,
             "Invalid image layer index: {}",
@@ -75,6 +77,7 @@ impl ViewConfig {
             view_dir,
             p_axis,
             q_axis,
+            max_bound_f64,
         }
     }
 }

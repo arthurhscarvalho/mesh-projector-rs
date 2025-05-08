@@ -4,14 +4,18 @@ use nd::{s, Array3, Array4};
 use std::f64;
 
 /// Holds the output image buffers generated during the projection process:
-/// the color images and Z-buffers for each of the `NUM_IMAGES` views.
+/// the color images, Z-buffers, depth maps, and normal maps for each of the `NUM_IMAGES` views.
 #[derive(Debug)]
 pub struct Buffers {
     /// The rendered color images (NUM_IMAGES, H, W, C). Initialized to `BACKGROUND_BRIGHTNESS`.
     pub images: Array4<u8>,
-    /// Z-buffers (depth maps) (NUM_IMAGES, H, W). Stores the depth of the closest fragment.
+    /// Z-buffers (raw depth values) (NUM_IMAGES, H, W). Stores the depth of the closest fragment.
     /// Initialized to +/- INFINITY depending on the view direction for correct depth testing.
     pub z_buffers: Array3<f64>,
+    /// The rendered depth maps (NUM_IMAGES, H, W, C), scaled to `u8`. Initialized to 0.
+    pub depth_maps: Array4<u8>,
+    /// The rendered normal maps (NUM_IMAGES, H, W, C), with components scaled to `u8`. Initialized to 0.
+    pub normal_maps: Array4<u8>,
 }
 
 impl Buffers {
@@ -21,6 +25,7 @@ impl Buffers {
     /// - Z-buffers are initialized to +INFINITY for front views and -INFINITY for back views.
     ///   This ensures the first depth test always passes correctly based on view direction
     ///   (front views check `depth < current_z`, back views check `depth > current_z`).
+    /// - Depth maps and Normal maps are initialized to 0.
     pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
         // Ensure consistency if NUM_IMAGES constant is used elsewhere
         assert_eq!(
@@ -37,6 +42,8 @@ impl Buffers {
                 }
                 z
             },
+            depth_maps: Array4::from_elem((num_images, rows, cols, channels), 0u8),
+            normal_maps: Array4::from_elem((num_images, rows, cols, channels), 0u8),
         }
     }
 }

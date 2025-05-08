@@ -43,23 +43,25 @@ def project_mesh(
     """
     try:
         # The mode is automatically inferred in the Rust backend based on provided files
-        projection_array, occlusion_array = _internal_generate_projections(
-            obj_location,
-            texture_file,
-            mtl_location,
-            precision,
-            filtering,
-            flip_uv,
-            ignore_opacity,
-            verbose,
+        projection_array, depth_array, normal_array, occlusion_array = (
+            _internal_generate_projections(
+                obj_location,
+                texture_file,
+                mtl_location,
+                precision,
+                filtering,
+                flip_uv,
+                ignore_opacity,
+                verbose,
+            )
         )
     except Exception as e:
         raise RuntimeError(f"Rust backend failed during projection generation: {e}")
     # Convert the 4D arrays to lists of images/maps
     # Projection Images (6, H, W, 3)
-    projection_images = [projection_array[i] for i in range(projection_array.shape[0])]
+    # projection_images = [projection_array[i] for i in range(projection_array.shape[0])]
     # Occlusion Maps (6, H, W, 1) -> need to squeeze to (6, H, W)
-    occlusion_maps = [
-        np.squeeze(occlusion_array[i], axis=-1) for i in range(occlusion_array.shape[0])
-    ]
-    return projection_images, occlusion_maps
+    # occlusion_maps = [
+    #     np.squeeze(occlusion_array[i], axis=-1) for i in range(occlusion_array.shape[0])
+    # ]
+    return projection_array, depth_array, normal_array, occlusion_array

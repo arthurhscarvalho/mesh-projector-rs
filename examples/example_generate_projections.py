@@ -86,7 +86,7 @@ def main():
     # --- Generate Projections using the combined function ---
     try:
         # Mode is automatically inferred based on the provided files
-        projection_images, occlusion_maps = mp.project_mesh(
+        projection_array, depth_array, normal_array, occlusion_array = mp.project_mesh(
             obj_location=args.obj,
             texture_file=args.texture,
             mtl_location=args.mtl,
@@ -97,7 +97,10 @@ def main():
             verbose=args.verbose,
         )
         if (
-            projection_images is None or occlusion_maps is None
+            projection_array is None
+            or depth_array is None
+            or normal_array is None
+            or occlusion_array is None
         ):  # Should not happen if exceptions are raised correctly
             print("Projection generation failed, but no exception was raised.")
             return
@@ -110,34 +113,29 @@ def main():
     # --- Save Output ---
     os.makedirs(args.out, exist_ok=True)
     view_names = ["X+", "X-", "Y+", "Y-", "Z+", "Z-"]
-    # Check occlusion maps length as well if filtering was enabled
-    save_occlusion = args.filtering > 0 and len(occlusion_maps) == len(view_names)
-    for i, img in enumerate(projection_images):
-        if i >= len(view_names):
-            break  # Prevent index error if fewer images returned
+    images = zip(projection_array, occlusion_array, depth_array, normal_array)
+    for i, (image, occlusion, depth, normal) in enumerate(images):
         # Save image (convert RGB to BGR for OpenCV)
         try:
             cv2.imwrite(
                 os.path.join(args.out, f"proj_{view_names[i]}.png"),
-                cv2.cvtColor(img, cv2.COLOR_RGB2BGR),
+                cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
+            )
+            cv2.imwrite(
+                os.path.join(args.out, f"proj_{view_names[i]}_depth.png"),
+                cv2.cvtColor(depth, cv2.COLOR_RGB2BGR),
+            )
+            cv2.imwrite(
+                os.path.join(args.out, f"proj_{view_names[i]}_normal.png"),
+                cv2.cvtColor(normal, cv2.COLOR_RGB2BGR),
+            )
+            cv2.imwrite(
+                os.path.join(args.out, f"proj_{view_names[i]}_occ.png"),
+                cv2.cvtColor(occlusion, cv2.COLOR_RGB2BGR),
             )
         except Exception as e:
             print(f"Failed to save projection {view_names[i]}: {e}")
-        # Save occlusion map if available and filtering was enabled
-        if save_occlusion:
-            try:
-                occ_map = occlusion_maps[i]
-                # Scale 0/1 map to 0/255 for saving as visible grayscale image
-                occ_map_scaled = (occ_map * 255).astype(np.uint8)
-                cv2.imwrite(
-                    os.path.join(args.out, f"proj_{view_names[i]}_occ.png"),
-                    occ_map_scaled,
-                )
-            except Exception as e:
-                print(f"Failed to save occlusion map {view_names[i]}: {e}")
     print(f"Projections saved to {args.out}")
-    if save_occlusion:
-        print(f"Occlusion maps saved to {args.out}")
 
 
 if __name__ == "__main__":

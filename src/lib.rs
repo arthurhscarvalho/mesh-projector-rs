@@ -26,7 +26,12 @@ fn generate_projections<'py>(
     flip_uv: bool,
     ignore_opacity: bool,
     verbose: bool,
-) -> PyResult<(Py<PyArray4<u8>>, Py<PyArray4<u8>>)> {
+) -> PyResult<(
+    Py<PyArray4<u8>>,
+    Py<PyArray4<u8>>,
+    Py<PyArray4<u8>>,
+    Py<PyArray4<u8>>,
+)> {
     if verbose {
         logging::init_logger().map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
@@ -66,7 +71,7 @@ fn generate_projections<'py>(
     // Set up projection settings with the mesh's mode
     let settings = ProjectorConfig::new(precision, filtering_radius);
     // Call the backend to compute projections
-    let (projection_results, occlusion_maps, outlier_counts) =
+    let (images, depth_maps, normal_maps, occlusion_maps, outlier_counts) =
         py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
     log::info!("Back-end projections generation complete!");
     // Log outlier filtering results if requested
@@ -84,7 +89,9 @@ fn generate_projections<'py>(
     }
     // Convert the ndarray results directly to numpy arrays and return as a tuple
     Ok((
-        projection_results.into_pyarray(py).into(),
+        images.into_pyarray(py).into(),
+        depth_maps.into_pyarray(py).into(),
+        normal_maps.into_pyarray(py).into(),
         occlusion_maps.into_pyarray(py).into(),
     ))
 }

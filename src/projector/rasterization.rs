@@ -13,12 +13,14 @@ use std::f64;
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
-    mesh: &Mesh,                         // Mesh with material properties
-    triangle_index: usize,               // Index of the current triangle
-    triangle_normals: &Array2<f64>,      // Triangle face normals (M, 3) - Precomputed or provided
-    projection_config: &ViewConfig,      // Configuration for the current projection view
-    z_slice: &mut ArrayViewMut2<f64>,    // Mutable view to the Z-buffer slice
+    mesh: &Mesh,                              // Mesh with material properties
+    triangle_index: usize,                    // Index of the current triangle
+    triangle_normals: &Array2<f64>, // Triangle face normals (M, 3) - Precomputed or provided
+    projection_config: &ViewConfig, // Configuration for the current projection view
+    z_slice: &mut ArrayViewMut2<f64>, // Mutable view to the Z-buffer slice
     image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer slice
+    depth_map_slice: &mut ArrayViewMut3<u8>, // Mutable view to the depth map slice
+    normal_map_slice: &mut ArrayViewMut3<u8>, // Mutable view to the normal map slice
 ) {
     // Back-face Culling
     let geometric_normal_view = triangle_normals.row(triangle_index);
@@ -217,6 +219,36 @@ pub fn rasterize_triangle(
                 image_slice[[row, col, 0]] = r_byte;
                 image_slice[[row, col, 1]] = g_byte;
                 image_slice[[row, col, 2]] = b_byte;
+
+                // Populate Depth Map (assuming further = brighter/higher value)
+                let normalized_depth_factor = if projection_config.is_front_view {
+                    // interpolated_z is positive, e.g., [0, max_bound_f64]
+                    (interpolated_z / projection_config.max_bound_f64).clamp(0.0, 1.0)
+                } else {
+                    // interpolated_z is negative, e.g., [-max_bound_f64, 0]
+                    // Map [-max_bound, 0] to [0, 1] (0 for far, 1 for close to -max_bound plane)
+                    ((interpolated_z + projection_config.max_bound_f64)
+                        / projection_config.max_bound_f64)
+                        .clamp(0.0, 1.0)
+                };
+                let depth_u8 = (normalized_depth_factor * 255.0).round() as u8;
+                depth_map_slice[[row, col, 0]] = depth_u8;
+                depth_map_slice[[row, col, 1]] = depth_u8;
+                depth_map_slice[[row, col, 2]] = depth_u8;
+
+                // Populate Normal Map (map [-1,1] to [0,255])
+                let normal_x_u8 = ((interpolated_normal[0] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let normal_y_u8 = ((interpolated_normal[1] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let normal_z_u8 = ((interpolated_normal[2] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                normal_map_slice[[row, col, 0]] = normal_x_u8;
+                normal_map_slice[[row, col, 1]] = normal_y_u8;
+                normal_map_slice[[row, col, 2]] = normal_z_u8;
             }
         }
     }

@@ -24,11 +24,17 @@ use rayon::prelude::*;
 /// Computes 6 orthographic projections based on the specified mode.
 ///
 /// Returns:
-/// Tuple: (images: Array4<u8>, occlusion_maps: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
+/// Tuple: (Buffers, occlusion_maps: Array4<u8>, outlier_counts: [u64; NUM_IMAGES])
 pub fn compute_mesh_projections(
     mesh: &Mesh,
     settings: &ProjectorConfig,
-) -> (Array4<u8>, Array4<u8>, [u64; NUM_IMAGES]) {
+) -> (
+    Array4<u8>,
+    Array4<u8>,
+    Array4<u8>,
+    Array4<u8>,
+    [u64; NUM_IMAGES],
+) {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -56,8 +62,11 @@ pub fn compute_mesh_projections(
                                                       // Handle empty meshes (this check is kept for robustness)
     if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
+        let empty_buffers = Buffers::new(NUM_IMAGES, rows, cols, NUM_CHANNELS);
         return (
-            Array4::from_elem(shape4d_img, BACKGROUND_BRIGHTNESS),
+            empty_buffers.images,
+            empty_buffers.depth_maps,
+            empty_buffers.normal_maps,
             Array4::zeros(shape4d_occ), // Return empty occlusion map
             [0; NUM_IMAGES],            // Return array of zeros for counts
         );
@@ -75,24 +84,33 @@ pub fn compute_mesh_projections(
     log::info!("Starting rasterization loop for {} views", NUM_IMAGES);
     let mut z_buffer_views: Vec<_> = buffers.z_buffers.axis_iter_mut(Axis(0)).collect();
     let mut image_views: Vec<_> = buffers.images.axis_iter_mut(Axis(0)).collect();
+    let mut depth_map_views: Vec<_> = buffers.depth_maps.axis_iter_mut(Axis(0)).collect();
+    let mut normal_map_views: Vec<_> = buffers.normal_maps.axis_iter_mut(Axis(0)).collect();
+
     z_buffer_views
         .par_iter_mut()
         .zip(image_views.par_iter_mut())
+        .zip(depth_map_views.par_iter_mut())
+        .zip(normal_map_views.par_iter_mut())
         .enumerate()
-        .for_each(|(img_layer, (z_slice, image_slice))| {
-            let projection_config = ViewConfig::new(img_layer);
-            let num_faces = mesh.geometry.triangles.nrows();
-            for triangle_index in 0..num_faces {
-                rasterize_triangle(
-                    mesh,
-                    triangle_index,
-                    &triangle_normals,
-                    &projection_config,
-                    &mut z_slice.view_mut(),
-                    &mut image_slice.view_mut(),
-                );
-            }
-        });
+        .for_each(
+            |(img_layer, (((z_slice, image_slice), depth_slice), normal_slice))| {
+                let projection_config_view = ViewConfig::new(img_layer, max_bound_f64);
+                let num_faces = mesh.geometry.triangles.nrows();
+                for triangle_index in 0..num_faces {
+                    rasterize_triangle(
+                        mesh,
+                        triangle_index,
+                        &triangle_normals,
+                        &projection_config_view,
+                        &mut z_slice.view_mut(),
+                        &mut image_slice.view_mut(),
+                        &mut depth_slice.view_mut(),
+                        &mut normal_slice.view_mut(),
+                    );
+                }
+            },
+        );
     // Apply outlier filtering if enabled
     let (occlusion_maps, outlier_counts) = filter_outliers(
         &mut buffers.images,
@@ -100,5 +118,11 @@ pub fn compute_mesh_projections(
         settings.filtering_window_radius,
         max_bound_f64,
     );
-    (buffers.images, occlusion_maps, outlier_counts)
+    (
+        buffers.images,
+        buffers.depth_maps,
+        buffers.normal_maps,
+        occlusion_maps,
+        outlier_counts,
+    )
 }
