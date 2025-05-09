@@ -17,7 +17,7 @@ use constants::{NUM_CHANNELS, NUM_IMAGES};
 use filtering::filter_outliers;
 use geometry::precompute_triangle_normals;
 use mesh::Mesh;
-use nd::{Array4, Axis};
+use nd::{Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 
@@ -33,7 +33,7 @@ pub fn compute_mesh_projections(
     Array4<u8>, // images
     Array4<u8>, // depth_maps
     Array4<u8>, // normal_maps
-    Array4<u8>, // occupancy_maps (3-channel)
+    Array3<u8>, // occupancy_maps (3-channel)
     [u64; NUM_IMAGES],
 ) {
     log::info!(
@@ -65,7 +65,7 @@ pub fn compute_mesh_projections(
     if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
         let empty_buffers = Buffers::new(NUM_IMAGES, rows, cols, NUM_CHANNELS);
-        let empty_occupancy_map = Array4::<u8>::zeros((NUM_IMAGES, rows, cols, NUM_CHANNELS));
+        let empty_occupancy_map = Array3::<u8>::zeros((NUM_IMAGES, rows, cols));
         return (
             empty_buffers.images,
             empty_buffers.depth_maps,
@@ -126,7 +126,7 @@ pub fn compute_mesh_projections(
 
     // Create occupancy maps (white for occupied, black for empty)
     log::info!("Generating occupancy maps from Z-buffers.");
-    let mut occupancy_maps = Array4::<u8>::zeros((NUM_IMAGES, rows, cols, NUM_CHANNELS));
+    let mut occupancy_maps = Array3::<u8>::zeros((NUM_IMAGES, rows, cols));
     let mut occupancy_map_views: Vec<_> = occupancy_maps.axis_iter_mut(Axis(0)).collect();
     occupancy_map_views
         .par_iter_mut()
@@ -137,7 +137,7 @@ pub fn compute_mesh_projections(
             // Assuming occupancy_slice.dim() gives (slice_rows, slice_cols, slice_channels)
             // and z_slice.dim() gives (slice_rows, slice_cols)
             // These should match rows and cols from the outer scope.
-            let (slice_rows, slice_cols, _slice_channels) = occupancy_slice.dim();
+            let (slice_rows, slice_cols) = occupancy_slice.dim();
 
             for r in 0..slice_rows {
                 for c in 0..slice_cols {
@@ -147,12 +147,8 @@ pub fn compute_mesh_projections(
                     } else {
                         depth_val > f64::NEG_INFINITY && depth_val.is_finite()
                     };
-
                     if is_occupied {
-                        for chan in 0..NUM_CHANNELS {
-                            // NUM_CHANNELS should be 3 for RGB
-                            occupancy_slice[[r, c, chan]] = 255;
-                        }
+                        occupancy_slice[[r, c]] = 255;
                     }
                     // Else: remains 0 (black) from initialization
                 }
@@ -163,7 +159,7 @@ pub fn compute_mesh_projections(
         buffers.images,
         buffers.depth_maps,
         buffers.normal_maps,
-        occupancy_maps, // The new 3-channel occupancy map
+        occupancy_maps,
         outlier_counts,
     )
 }

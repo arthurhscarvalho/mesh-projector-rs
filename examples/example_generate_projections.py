@@ -130,7 +130,7 @@ def main():
             )
             cv2.imwrite(
                 os.path.join(args.out, f"proj_{view_names[i]}_occ.png"),
-                cv2.cvtColor(occlusion, cv2.COLOR_RGB2BGR),
+                cv2.cvtColor(occlusion, cv2.COLOR_GRAY2BGR),
             )
         except Exception as e:
             print(f"Failed to save projection {view_names[i]}: {e}")

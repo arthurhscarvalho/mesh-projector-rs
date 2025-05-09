@@ -8,7 +8,7 @@ extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
 use crate::projector::io;
-use numpy::{IntoPyArray, PyArray4};
+use numpy::{IntoPyArray, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 
@@ -30,7 +30,7 @@ fn generate_projections<'py>(
     Py<PyArray4<u8>>,
     Py<PyArray4<u8>>,
     Py<PyArray4<u8>>,
-    Py<PyArray4<u8>>,
+    Py<PyArray3<u8>>,
 )> {
     if verbose {
         logging::init_logger().map_err(|e| {
