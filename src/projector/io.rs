@@ -74,11 +74,9 @@ pub fn load_mesh_with_mode(
     ignore_opacity: bool,
 ) -> Result<Mesh, String> {
     info!("Loading mesh: {} in mode: {:?}", obj_path, mode);
-    // Check if the OBJ file exists
     if !Path::new(obj_path).exists() {
         return Err(format!("OBJ file not found: {}", obj_path));
     }
-    // Load OBJ file
     let obj_result = tobj::load_obj(
         obj_path,
         &tobj::LoadOptions {
@@ -87,135 +85,257 @@ pub fn load_mesh_with_mode(
             ..Default::default()
         },
     );
-    let models = match obj_result {
-        Ok((models, _materials)) => models,
+    let (obj_models, _obj_materials) = match obj_result {
+        Ok((models, materials)) => (models, materials),
         Err(e) => return Err(format!("Failed to load OBJ file: {}", e)),
     };
-    if models.is_empty() {
+    if obj_models.is_empty() {
         return Err("No models found in the OBJ file".to_string());
     }
-    // We'll work with the first model for simplicity
-    if models.len() > 1 {
-        warn!("Multiple models found in the OBJ file. Using the first one.");
+    let mut models_to_process: Vec<&tobj::Model> = Vec::new();
+    if mode == MeshMode::Full {
+        models_to_process.push(&obj_models[0]);
+        if obj_models.len() > 1 {
+            warn!("Multiple models found in FULL mode. Using only the first one for geometry.");
+        }
+    } else {
+        // ObjOnly or ObjTexture
+        if obj_models.len() > 1 {
+            info!(
+                "Multiple models found ({}). Combining them for {:?} mode.",
+                obj_models.len(),
+                mode
+            );
+        }
+        models_to_process.extend(obj_models.iter());
     }
-    let model = &models[0];
-    let mesh = &model.mesh;
-    // Check if the model has vertices
-    if mesh.positions.is_empty() {
-        return Err("Mesh has no vertices".to_string());
+    let mut combined_positions_vec: Vec<f32> = Vec::new();
+    let mut combined_indices_vec: Vec<u32> = Vec::new();
+    let mut combined_normals_opt_vec: Option<Vec<f32>> = Some(Vec::new());
+    let mut combined_texcoords_opt_vec: Option<Vec<f32>> = Some(Vec::new());
+    let mut combined_vertex_colors_opt_vec: Option<Vec<f32>> = Some(Vec::new());
+    let mut current_vertex_offset: u32 = 0;
+    let mut total_vertex_count: usize = 0;
+    for model in models_to_process {
+        let mesh = &model.mesh;
+        if mesh.positions.is_empty() {
+            warn!("Skipping an empty mesh part (no vertex positions).");
+            continue;
+        }
+        let num_model_vertices = mesh.positions.len() / 3;
+        total_vertex_count += num_model_vertices;
+        combined_positions_vec.extend_from_slice(&mesh.positions);
+        for index in &mesh.indices {
+            combined_indices_vec.push(*index + current_vertex_offset);
+        }
+        // Handle normals
+        if let Some(normals_data) = &mut combined_normals_opt_vec {
+            if !mesh.normals.is_empty() {
+                if mesh.normals.len() == num_model_vertices * 3 {
+                    normals_data.extend_from_slice(&mesh.normals);
+                } else {
+                    warn!("Normals data size mismatch for a mesh part (expected {}*3, got {}). Normals will be recomputed for the combined mesh.", num_model_vertices, mesh.normals.len());
+                    combined_normals_opt_vec = None;
+                }
+            } else {
+                info!("A mesh part is missing normals. Normals will be recomputed for the combined mesh if any part had them, otherwise computed from scratch.");
+                combined_normals_opt_vec = None;
+            }
+        }
+        // Handle texcoords
+        if let Some(texcoords_data) = &mut combined_texcoords_opt_vec {
+            if !mesh.texcoords.is_empty() {
+                if mesh.texcoords.len() == num_model_vertices * 2 {
+                    texcoords_data.extend_from_slice(&mesh.texcoords);
+                } else {
+                    warn!("Texture coordinate data size mismatch for a mesh part (expected {}*2, got {}). UVs may be unusable.", num_model_vertices, mesh.texcoords.len());
+                    combined_texcoords_opt_vec = None;
+                }
+            } else {
+                // If any part is missing texcoords, the combined stream is invalidated for direct use.
+                // Downstream logic will error if texcoords are required but this stream is None.
+                info!("A mesh part is missing texture coordinates. Combined UVs might be unusable if required by mode.");
+                combined_texcoords_opt_vec = None;
+            }
+        }
+        // Handle vertex colors
+        if let Some(vertex_colors_data) = &mut combined_vertex_colors_opt_vec {
+            if !mesh.vertex_color.is_empty() {
+                // Assuming 3 components (RGB) per color. Could be 4 (RGBA) but tobj usually gives 3.
+                if mesh.vertex_color.len() == num_model_vertices * 3 {
+                    vertex_colors_data.extend_from_slice(&mesh.vertex_color);
+                } else {
+                    warn!("Vertex color data size mismatch for a mesh part (expected {}*3, got {}). Vertex colors may be unusable.", num_model_vertices, mesh.vertex_color.len());
+                    combined_vertex_colors_opt_vec = None;
+                }
+            } else {
+                info!("A mesh part is missing vertex colors. Combined vertex colors might be unusable or defaulted.");
+                combined_vertex_colors_opt_vec = None;
+            }
+        }
+        current_vertex_offset += num_model_vertices as u32;
     }
-    // Convert to ndarray format
-    let mut vertices = Array::zeros((mesh.positions.len() / 3, 3));
-    for i in 0..vertices.shape()[0] {
+    if combined_positions_vec.is_empty() {
+        return Err(
+            "No processable geometry found in the OBJ file after filtering parts.".to_string(),
+        );
+    }
+    // Convert positions to ndarray
+    let mut vertices = Array::zeros((total_vertex_count, 3));
+    for i in 0..total_vertex_count {
         for j in 0..3 {
-            vertices[[i, j]] = mesh.positions[i * 3 + j] as f64;
+            vertices[[i, j]] = combined_positions_vec[i * 3 + j] as f64;
         }
     }
-    let mut triangles = Array::zeros((mesh.indices.len() / 3, 3));
+    // Convert indices to ndarray
+    let mut triangles = Array::zeros((combined_indices_vec.len() / 3, 3));
     for i in 0..triangles.shape()[0] {
         for j in 0..3 {
-            triangles[[i, j]] = mesh.indices[i * 3 + j] as usize;
+            triangles[[i, j]] = combined_indices_vec[i * 3 + j] as usize;
         }
     }
-    // Load normals if available
-    let vertex_normals = if !mesh.normals.is_empty() {
-        info!("Mesh has vertex normals");
-        let mut normals = Array::zeros((mesh.normals.len() / 3, 3));
-        for i in 0..normals.shape()[0] {
-            for j in 0..3 {
-                normals[[i, j]] = mesh.normals[i * 3 + j] as f64;
+    // Process normals
+    let vertex_normals = match combined_normals_opt_vec {
+        Some(normals_data)
+            if !normals_data.is_empty() && normals_data.len() == total_vertex_count * 3 =>
+        {
+            info!("Using combined vertex normals from OBJ data.");
+            let mut normals_arr = Array::zeros((total_vertex_count, 3));
+            for i in 0..total_vertex_count {
+                for j in 0..3 {
+                    normals_arr[[i, j]] = normals_data[i * 3 + j] as f64;
+                }
             }
+            normalize_normals(&mut normals_arr);
+            Some(normals_arr)
         }
-        // Normalize normals
-        normalize_normals(&mut normals);
-        Some(normals)
-    } else {
-        // If no normals in the OBJ, compute them
-        warn!("Mesh does not have vertex normals. Computing them.");
-        compute_vertex_normals(&vertices, &triangles)
+        _ => {
+            if combined_normals_opt_vec.is_some()
+                && combined_normals_opt_vec
+                    .as_ref()
+                    .map_or(false, |v| !v.is_empty())
+            {
+                warn!("Vertex normal data was present but inconsistent or incomplete across mesh parts. Recomputing normals.");
+            } else {
+                warn!("Mesh does not have consistent vertex normals. Computing them.");
+            }
+            compute_vertex_normals(&vertices, &triangles)
+        }
     };
-    // Extract vertex colors if available
-    let vertex_colors = if !mesh.vertex_color.is_empty() {
-        info!("Mesh has vertex colors");
-        let mut colors = Array::zeros((mesh.vertex_color.len() / 3, 3));
-        for i in 0..colors.shape()[0] {
-            for j in 0..3 {
-                colors[[i, j]] = mesh.vertex_color[i * 3 + j] as f64;
+    // Process vertex colors
+    let vertex_colors = match combined_vertex_colors_opt_vec {
+        Some(colors_data)
+            if !colors_data.is_empty() && colors_data.len() == total_vertex_count * 3 =>
+        {
+            info!("Using combined vertex colors from OBJ data.");
+            let mut colors_arr = Array::zeros((total_vertex_count, 3));
+            for i in 0..total_vertex_count {
+                for j in 0..3 {
+                    colors_arr[[i, j]] = colors_data[i * 3 + j] as f64;
+                }
+            }
+            Some(colors_arr)
+        }
+        _ => {
+            if mode == MeshMode::ObjOnly {
+                if combined_vertex_colors_opt_vec.is_some()
+                    && combined_vertex_colors_opt_vec
+                        .as_ref()
+                        .map_or(false, |v| !v.is_empty())
+                {
+                    warn!("Vertex color data was present but inconsistent or incomplete. Using defaults for OBJ_ONLY mode.");
+                } else {
+                    info!("No vertex colors found or they were inconsistent. Using defaults for OBJ_ONLY mode.");
+                }
+                Some(Array::zeros((vertices.shape()[0], 3)))
+            } else {
+                if combined_vertex_colors_opt_vec.is_some()
+                    && combined_vertex_colors_opt_vec
+                        .as_ref()
+                        .map_or(false, |v| !v.is_empty())
+                {
+                    warn!("Vertex color data was present but inconsistent or incomplete. Not using vertex colors for mode {:?}.", mode);
+                }
+                None
             }
         }
-        Some(colors)
-    } else if mode == MeshMode::ObjOnly {
-        info!("No vertex colors found. Using defaults for OBJ_ONLY mode.");
-        Some(Array::zeros((vertices.shape()[0], 3)))
-    } else {
-        None
     };
     // Load texture and UVs if required by the mode
     let (texture, triangle_uvs) = if mode == MeshMode::Full || mode == MeshMode::ObjTexture {
-        // Texture is required for these modes
         if texture_path.is_none() {
             return Err(format!(
                 "Texture file is required for mode {:?} but none was provided",
                 mode
             ));
         }
-        // UVs are required for these modes
-        if mesh.texcoords.is_empty() {
-            return Err(format!(
-                "Mesh has no UV coordinates, required for mode {:?}",
-                mode
-            ));
-        }
-        // Load texture
-        let texture_path = texture_path.unwrap();
-        let texture_array = load_texture(texture_path)?;
-        info!(
-            "Texture load successful: {} ({}x{}x{})",
-            texture_path,
-            texture_array.shape()[0],
-            texture_array.shape()[1],
-            texture_array.shape()[2]
-        );
-        // Process UVs
-        let mut uvs = Array::zeros((mesh.texcoords.len() / 2, 2));
-        for i in 0..uvs.shape()[0] {
-            for j in 0..2 {
-                let mut value = mesh.texcoords[i * 2 + j] as f64;
-                // Clamp UVs to [0, 1]
-                value = value.max(0.0).min(1.0);
-                // Flip V coordinate if requested
-                if j == 1 && flip_v_coordinate {
-                    value = 1.0 - value;
+        match combined_texcoords_opt_vec {
+            Some(texcoords_data)
+                if !texcoords_data.is_empty() && texcoords_data.len() == total_vertex_count * 2 =>
+            {
+                info!("Using combined UV coordinates from OBJ data.");
+                let texture_path_str = texture_path.unwrap(); // Safe due to check above
+                let texture_array = load_texture(texture_path_str)?;
+                info!(
+                    "Texture load successful: {} ({}x{}x{})",
+                    texture_path_str,
+                    texture_array.shape()[0],
+                    texture_array.shape()[1],
+                    texture_array.shape()[2]
+                );
+                let mut uvs_arr = Array::zeros((total_vertex_count, 2));
+                for i in 0..total_vertex_count {
+                    for j in 0..2 {
+                        let mut value = texcoords_data[i * 2 + j] as f64;
+                        value = value.max(0.0).min(1.0); // Clamp UVs
+                        if j == 1 && flip_v_coordinate {
+                            value = 1.0 - value;
+                        }
+                        uvs_arr[[i, j]] = value;
+                    }
                 }
-                uvs[[i, j]] = value;
+                // Map UVs to triangles. With single_index: true, tobj::Mesh.texcoord_indices is empty.
+                // The uvs_arr is per-vertex. Triangle indices map directly to these UVs.
+                let num_corners = triangles.shape()[0] * 3;
+                let mut tri_uvs_arr = Array::zeros((num_corners, 2));
+                for i in 0..triangles.shape()[0] {
+                    // For each triangle
+                    for k_vert_of_tri in 0..3 {
+                        // For each vertex of the triangle
+                        let global_vertex_idx = triangles[[i, k_vert_of_tri]];
+                        let corner_idx = i * 3 + k_vert_of_tri;
+                        if global_vertex_idx < uvs_arr.shape()[0] {
+                            tri_uvs_arr[[corner_idx, 0]] = uvs_arr[[global_vertex_idx, 0]];
+                            tri_uvs_arr[[corner_idx, 1]] = uvs_arr[[global_vertex_idx, 1]];
+                        } else {
+                            warn!("Vertex index {} out of bounds for UV mapping (UV array size: {}). Setting UV to (0,0) for this corner.", global_vertex_idx, uvs_arr.shape()[0]);
+                            tri_uvs_arr[[corner_idx, 0]] = 0.0;
+                            tri_uvs_arr[[corner_idx, 1]] = 0.0;
+                        }
+                    }
+                }
+                (Some(texture_array), Some(tri_uvs_arr))
+            }
+            _ => {
+                let reason = if combined_texcoords_opt_vec.is_none() {
+                    "missing from one or more parts"
+                } else if combined_texcoords_opt_vec
+                    .as_ref()
+                    .map_or(true, |v| v.is_empty())
+                {
+                    "entirely missing"
+                } else {
+                    "inconsistent across parts"
+                };
+                warn!(
+                    "Mesh has no usable UV coordinates ({}). Texture mapping will not be possible for mode {:?}.",
+                    reason, mode
+                );
+                return Err(format!(
+                    "Mesh has no usable UV coordinates ({}), required for mode {:?}",
+                    reason, mode
+                ));
             }
         }
-        // Map UVs to triangles if needed
-        let triangle_uvs = if mesh.texcoord_indices.is_empty() {
-            // If there are no explicit texcoord indices, assume they match vertex indices
-            warn!("No explicit texcoord indices found, using vertex indices");
-            let mut tri_uvs = Array::zeros((mesh.indices.len(), 2));
-            for i in 0..mesh.indices.len() {
-                let idx = mesh.indices[i] as usize;
-                if idx < uvs.shape()[0] {
-                    tri_uvs[[i, 0]] = uvs[[idx, 0]];
-                    tri_uvs[[i, 1]] = uvs[[idx, 1]];
-                }
-            }
-            tri_uvs
-        } else {
-            // Use explicit texcoord indices
-            let mut tri_uvs = Array::zeros((mesh.texcoord_indices.len(), 2));
-            for i in 0..mesh.texcoord_indices.len() {
-                let idx = mesh.texcoord_indices[i] as usize;
-                if idx < uvs.shape()[0] {
-                    tri_uvs[[i, 0]] = uvs[[idx, 0]];
-                    tri_uvs[[i, 1]] = uvs[[idx, 1]];
-                }
-            }
-            tri_uvs
-        };
-        (Some(texture_array), Some(triangle_uvs))
     } else {
         // For OBJ_ONLY mode, we don't need texture or UVs
         (None, None)
