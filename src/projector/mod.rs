@@ -9,6 +9,7 @@ mod lighting;
 mod math;
 pub mod mesh;
 mod rasterization;
+pub mod rotation;
 mod sampling;
 
 use buffers::Buffers;

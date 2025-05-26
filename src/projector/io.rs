@@ -591,7 +591,7 @@ fn normalize_normals(normals: &mut Array2<f64>) {
 }
 
 /// Preprocess vertices by scaling them to fit within the target precision
-fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<f64> {
+pub fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<f64> {
     // Get bounding box
     let mut min_bound = [f64::MAX, f64::MAX, f64::MAX];
     let mut max_bound = [f64::MIN, f64::MIN, f64::MIN];

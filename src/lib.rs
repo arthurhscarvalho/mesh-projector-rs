@@ -8,6 +8,7 @@ extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
 use crate::projector::io;
+use crate::projector::rotation::rotate_mesh;
 use numpy::{IntoPyArray, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -42,7 +43,7 @@ fn generate_projections<'py>(
     }
     log::info!("Entering Rust generate_projections backend");
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match io::load_mesh(
+    let mut mesh = match io::load_mesh(
         obj_path,
         texture_path,
         mtl_path,
@@ -70,6 +71,17 @@ fn generate_projections<'py>(
     );
     // Set up projection settings with the mesh's mode
     let settings = ProjectorConfig::new(precision, filtering_radius);
+
+    // Rotate the mesh (45 degrees on all axes)
+    let angle_rad = std::f64::consts::FRAC_PI_4; // 45 degrees in radians
+    rotate_mesh(&mut mesh, angle_rad, angle_rad, angle_rad);
+    log::info!("Mesh rotated by 45 degrees on all axes for testing.");
+
+    // Re-preprocess vertices after rotation
+    mesh.geometry.vertices =
+        io::preprocess_vertices(mesh.geometry.vertices.clone(), precision as u32);
+    log::info!("Vertices re-preprocessed after rotation.");
+
     // Call the backend to compute projections
     let (images, depth_maps, normal_maps, occlusion_maps, outlier_counts) =
         py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
