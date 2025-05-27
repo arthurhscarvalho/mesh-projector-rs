@@ -94,33 +94,39 @@ pub fn filter_outliers(
     z_buffers: &Array3<f64>,
     filtering_window_radius: u64,
     max_bound_f64: f64,
-) -> (Array4<u8>, [u64; NUM_IMAGES]) {
+) -> (Array4<u8>, Vec<u64>) {
     // Return outlier counts array
     let rows = z_buffers.shape()[1];
     let cols = z_buffers.shape()[2];
+    let num_images = z_buffers.shape()[0];
     if filtering_window_radius == 0 {
         log::info!("Outlier filtering disabled.");
-        let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1);
-        return (Array4::zeros(shape4d_occ), [0; NUM_IMAGES]);
+        let shape4d_occ = Ix4(num_images, rows, cols, 1);
+        return (Array4::zeros(shape4d_occ), vec![0; num_images]);
     };
     log::info!(
         "Filtering outliers with window radius {}",
         filtering_window_radius
     );
-    // Initialize occlusion map (NUM_IMAGES, rows, cols, 1 channel)
-    let mut outlier_counts: [u64; NUM_IMAGES] = [0; NUM_IMAGES];
-    let mut occlusion_maps = Array4::<u8>::zeros(Ix4(NUM_IMAGES, rows, cols, 1));
+    // Initialize occlusion map (num_images, rows, cols, 1 channel)
+    let mut outlier_counts = vec![0; num_images];
+    let mut occlusion_maps = Array4::<u8>::zeros(Ix4(num_images, rows, cols, 1));
     let w = filtering_window_radius as usize;
     if rows <= 2 * w || cols <= 2 * w {
         return (occlusion_maps, outlier_counts); // Return empty map and zero counts
     }
     let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f64;
     // Collect results from parallel processing
-    let results: Vec<_> = (0..NUM_IMAGES)
+    let results: Vec<_> = (0..num_images)
         .into_par_iter()
         .map(|k| {
             let z_slice = z_buffers.index_axis(Axis(0), k);
-            let is_front_view = k % 2 == 0;
+            // For rotation-based views, we only use front views
+            let is_front_view = if num_images == NUM_IMAGES {
+                k % 2 == 0
+            } else {
+                true
+            };
             let outlier_coords =
                 find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold, is_front_view);
             let count = outlier_coords.len() as u64;

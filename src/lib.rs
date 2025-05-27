@@ -8,7 +8,6 @@ extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
 use crate::projector::io;
-use crate::projector::rotation::rotate_mesh;
 use numpy::{IntoPyArray, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -42,8 +41,14 @@ fn generate_projections<'py>(
         })?;
     }
     log::info!("Entering Rust generate_projections backend");
+
+    let rotation_steps: Option<u32> = Some(64);
+    let angle_delta_x: Option<f64> = Some(0.0);
+    let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 32.0);
+    let angle_delta_z: Option<f64> = Some(0.0);
+
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mut mesh = match io::load_mesh(
+    let mesh = match io::load_mesh(
         obj_path,
         texture_path,
         mtl_path,
@@ -69,23 +74,24 @@ fn generate_projections<'py>(
         mesh.material.opacity,
         mesh.material.illum
     );
-    // Set up projection settings with the mesh's mode
-    let settings = ProjectorConfig::new(precision, filtering_radius);
 
-    // Rotate the mesh (45 degrees on all axes)
-    let angle_rad = std::f64::consts::FRAC_PI_4; // 45 degrees in radians
-    rotate_mesh(&mut mesh, angle_rad, angle_rad, angle_rad);
-    log::info!("Mesh rotated by 45 degrees on all axes for testing.");
-
-    // Re-preprocess vertices after rotation
-    mesh.geometry.vertices =
-        io::preprocess_vertices(mesh.geometry.vertices.clone(), precision as u32);
-    log::info!("Vertices re-preprocessed after rotation.");
+    // Set up projection settings with rotation config if provided
+    let settings = if let (Some(steps), Some(dx), Some(dy), Some(dz)) =
+        (rotation_steps, angle_delta_x, angle_delta_y, angle_delta_z)
+    {
+        log::info!("Using rotation-based projection with {} steps", steps);
+        log::info!("Rotation deltas: X={}, Y={}, Z={} radians", dx, dy, dz);
+        ProjectorConfig::new_with_rotation(precision, filtering_radius, steps, dx, dy, dz)
+    } else {
+        log::info!("Using standard 6-view orthographic projection");
+        ProjectorConfig::new(precision, filtering_radius)
+    };
 
     // Call the backend to compute projections
     let (images, depth_maps, normal_maps, occlusion_maps, outlier_counts) =
         py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
     log::info!("Back-end projections generation complete!");
+
     // Log outlier filtering results if requested
     if filtering_radius > 0 {
         let total_removed: u64 = outlier_counts.iter().copied().sum();
@@ -99,6 +105,7 @@ fn generate_projections<'py>(
             log::info!("Outlier Filtering: No points removed.");
         }
     }
+
     // Convert the ndarray results directly to numpy arrays and return as a tuple
     Ok((
         images.into_pyarray(py).into(),

@@ -12,17 +12,111 @@ mod rasterization;
 pub mod rotation;
 mod sampling;
 
-use buffers::Buffers;
-use config::{ProjectorConfig, ViewConfig};
-use constants::{NUM_CHANNELS, NUM_IMAGES};
-use filtering::filter_outliers;
-use geometry::precompute_triangle_normals;
+use crate::projector::buffers::Buffers;
+use crate::projector::config::{ProjectorConfig, RotationConfig, ViewConfig};
+use crate::projector::constants::{NUM_CHANNELS, NUM_IMAGES};
+use crate::projector::filtering::filter_outliers;
+use crate::projector::geometry::precompute_triangle_normals;
+use crate::projector::io::preprocess_vertices;
 use mesh::Mesh;
-use nd::{Array3, Array4, Axis};
+use ndarray::{s, Array2, Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
+use std::sync::Arc;
 
-/// Computes 6 orthographic projections based on the specified mode.
+/// Computes a single orthographic projection for the given view configuration.
+fn compute_single_projection(
+    mut mesh: Mesh,
+    settings: &ProjectorConfig,
+    view_config: &ViewConfig,
+) -> (Array4<u8>, Array4<u8>, Array4<u8>, Array3<u8>, u64) {
+    let max_bound: u64 = 1 << settings.precision;
+    let max_bound_f64: f64 = max_bound as f64;
+    let max_bound_u: usize = max_bound as usize;
+    let rows = max_bound_u;
+    let cols = max_bound_u;
+
+    // Precompute triangle normals for this rotated mesh
+    log::info!("Precomputing triangle normals for current view");
+    let triangle_normals = precompute_triangle_normals(
+        mesh.geometry.vertices.view(),
+        mesh.geometry.triangles.view(),
+    );
+
+    // Initialize buffers for a single view
+    let mut buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
+
+    let mut image_view = buffers.images.index_axis_mut(Axis(0), 0);
+    let mut depth_map_view = buffers.depth_maps.index_axis_mut(Axis(0), 0);
+    let mut normal_map_view = buffers.normal_maps.index_axis_mut(Axis(0), 0);
+    let mut z_buffer_view = buffers.z_buffers.index_axis_mut(Axis(0), 0);
+
+    // Rasterize all triangles
+    let num_faces = mesh.geometry.triangles.nrows();
+    for triangle_index in 0..num_faces {
+        rasterize_triangle(
+            &mut mesh,
+            triangle_index,
+            &triangle_normals,
+            view_config,
+            &mut z_buffer_view.view_mut(),
+            &mut image_view.view_mut(),
+            &mut depth_map_view.view_mut(),
+            &mut normal_map_view.view_mut(),
+        );
+    }
+
+    // Apply outlier filtering
+    let (_, outlier_count) = filter_outliers(
+        &mut buffers.images,
+        &buffers.z_buffers,
+        settings.filtering_window_radius,
+        max_bound_f64,
+    );
+
+    // Create occupancy map
+    let mut occupancy_map = Array3::<u8>::zeros((1, rows, cols));
+    let z_slice = buffers.z_buffers.index_axis(Axis(0), 0);
+    for r in 0..rows {
+        for c in 0..cols {
+            let depth_val = z_slice[[r, c]];
+            let is_occupied = if view_config.is_front_view {
+                depth_val < f64::INFINITY && depth_val.is_finite()
+            } else {
+                depth_val > f64::NEG_INFINITY && depth_val.is_finite()
+            };
+            if is_occupied {
+                occupancy_map[[0, r, c]] = 255;
+            }
+        }
+    }
+
+    // Create new 4D arrays with the correct shape
+    let mut single_image = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
+    let mut single_depth = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
+    let mut single_normal = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
+
+    // Copy data from the buffers
+    single_image
+        .slice_mut(s![0, .., .., ..])
+        .assign(&buffers.images.slice(s![0, .., .., ..]));
+    single_depth
+        .slice_mut(s![0, .., .., ..])
+        .assign(&buffers.depth_maps.slice(s![0, .., .., ..]));
+    single_normal
+        .slice_mut(s![0, .., .., ..])
+        .assign(&buffers.normal_maps.slice(s![0, .., .., ..]));
+
+    (
+        single_image,
+        single_depth,
+        single_normal,
+        occupancy_map,
+        outlier_count[0],
+    )
+}
+
+/// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
 /// Returns:
 /// Tuple: (images, depth_maps, normal_maps, occupancy_maps, outlier_counts)
@@ -35,7 +129,7 @@ pub fn compute_mesh_projections(
     Array4<u8>, // depth_maps
     Array4<u8>, // normal_maps
     Array3<u8>, // occupancy_maps (3-channel)
-    [u64; NUM_IMAGES],
+    Vec<u64>,   // outlier_counts
 ) {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
@@ -52,115 +146,129 @@ pub fn compute_mesh_projections(
         mesh.material.opacity,
         mesh.material.illum
     );
+
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
-    // Shape definitions for output
-    // let shape4d_img = Ix4(NUM_IMAGES, rows, cols, NUM_CHANNELS); // Not strictly needed if creating arrays directly
-    // let shape4d_occ = Ix4(NUM_IMAGES, rows, cols, 1); // This was for the old 1-channel map
 
     // Handle empty meshes
     if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
         log::warn!("Empty points or triangles detected. Returning empty buffers.");
-        let empty_buffers = Buffers::new(NUM_IMAGES, rows, cols, NUM_CHANNELS);
-        let empty_occupancy_map = Array3::<u8>::zeros((NUM_IMAGES, rows, cols));
+        let empty_buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
+        let empty_occupancy_map = Array3::<u8>::zeros((1, rows, cols));
         return (
             empty_buffers.images,
             empty_buffers.depth_maps,
             empty_buffers.normal_maps,
             empty_occupancy_map,
-            [0; NUM_IMAGES],
+            vec![0],
         );
     }
-    // Precomputation
-    log::info!("Precomputing triangle normals");
-    let triangle_normals = precompute_triangle_normals(
-        mesh.geometry.vertices.view(),
-        mesh.geometry.triangles.view(),
-    );
-    // Buffer Initialization
-    log::info!("Initializing output buffers");
-    let mut buffers = Buffers::new(NUM_IMAGES, rows, cols, NUM_CHANNELS);
-    // Rasterization (Parallel over Views)
-    log::info!("Starting rasterization loop for {} views", NUM_IMAGES);
-    let mut z_buffer_views: Vec<_> = buffers.z_buffers.axis_iter_mut(Axis(0)).collect();
-    let mut image_views: Vec<_> = buffers.images.axis_iter_mut(Axis(0)).collect();
-    let mut depth_map_views: Vec<_> = buffers.depth_maps.axis_iter_mut(Axis(0)).collect();
-    let mut normal_map_views: Vec<_> = buffers.normal_maps.axis_iter_mut(Axis(0)).collect();
 
-    z_buffer_views
-        .par_iter_mut()
-        .zip(image_views.par_iter_mut())
-        .zip(depth_map_views.par_iter_mut())
-        .zip(normal_map_views.par_iter_mut())
-        .enumerate()
-        .for_each(
-            |(img_layer, (((z_slice, image_slice), depth_slice), normal_slice))| {
-                let projection_config_view = ViewConfig::new(img_layer, max_bound_f64);
-                let num_faces = mesh.geometry.triangles.nrows();
-                for triangle_index in 0..num_faces {
-                    rasterize_triangle(
-                        mesh,
-                        triangle_index,
-                        &triangle_normals,
-                        &projection_config_view,
-                        &mut z_slice.view_mut(),
-                        &mut image_slice.view_mut(),
-                        &mut depth_slice.view_mut(),
-                        &mut normal_slice.view_mut(),
-                    );
-                }
-            },
-        );
+    // Determine number of views and prepare view configurations
+    let (num_views, view_configs) = if let Some(rotation_config) = &settings.rotation_config {
+        // Rotation-based projection
+        let num_steps = rotation_config.num_steps;
+        let mut configs = Vec::with_capacity(num_steps);
 
-    // Apply outlier filtering (modifies buffers.images in place)
-    // The first returned element (outlier_identification_map) is not directly returned by this function anymore.
-    let (_outlier_identification_map, outlier_counts) = filter_outliers(
-        &mut buffers.images,
-        &buffers.z_buffers,
-        settings.filtering_window_radius,
-        max_bound_f64,
-    );
+        // Create view configs for rotation-based projection
+        for _ in 0..num_steps {
+            // Create view config for front view along Z axis
+            configs.push(ViewConfig {
+                depth_axis: 2, // Z axis
+                is_front_view: true,
+                view_dir: (0.0, 0.0, 1.0),
+                p_axis: 0, // X axis
+                q_axis: 1, // Y axis
+                max_bound_f64,
+            });
+        }
+        (num_steps, configs)
+    } else {
+        // Default 6-view orthographic projection
+        let configs: Vec<_> = (0..NUM_IMAGES)
+            .map(|i| ViewConfig::new(i, max_bound_f64))
+            .collect();
+        (NUM_IMAGES, configs)
+    };
 
-    // Create occupancy maps (white for occupied, black for empty)
-    log::info!("Generating occupancy maps from Z-buffers.");
-    let mut occupancy_maps = Array3::<u8>::zeros((NUM_IMAGES, rows, cols));
-    let mut occupancy_map_views: Vec<_> = occupancy_maps.axis_iter_mut(Axis(0)).collect();
-    occupancy_map_views
-        .par_iter_mut()
-        .enumerate()
-        .for_each(|(k, occupancy_slice)| {
-            let z_slice = buffers.z_buffers.index_axis(Axis(0), k);
-            let is_front_view = k % 2 == 0;
-            // Assuming occupancy_slice.dim() gives (slice_rows, slice_cols, slice_channels)
-            // and z_slice.dim() gives (slice_rows, slice_cols)
-            // These should match rows and cols from the outer scope.
-            let (slice_rows, slice_cols) = occupancy_slice.dim();
+    // Compute projections for each view
+    let mut images = Vec::with_capacity(num_views);
+    let mut depth_maps = Vec::with_capacity(num_views);
+    let mut normal_maps = Vec::with_capacity(num_views);
+    let mut occupancy_maps = Vec::with_capacity(num_views);
+    let mut outlier_counts = Vec::with_capacity(num_views);
 
-            for r in 0..slice_rows {
-                for c in 0..slice_cols {
-                    let depth_val = z_slice[[r, c]];
-                    let is_occupied = if is_front_view {
-                        depth_val < f64::INFINITY && depth_val.is_finite()
-                    } else {
-                        depth_val > f64::NEG_INFINITY && depth_val.is_finite()
-                    };
-                    if is_occupied {
-                        occupancy_slice[[r, c]] = 255;
-                    }
-                    // Else: remains 0 (black) from initialization
-                }
+    // Process each view
+    for (i, view_config) in view_configs.iter().enumerate() {
+        log::info!("Computing projection {} of {}", i + 1, num_views);
+
+        // Create a rotated mesh for this view
+        let mut rotated_mesh = mesh.clone();
+        if let Some(rotation_config) = &settings.rotation_config {
+            if i > 0 {
+                let angle_x = rotation_config.angle_delta_x * i as f64;
+                let angle_y = rotation_config.angle_delta_y * i as f64;
+                let angle_z = rotation_config.angle_delta_z * i as f64;
+                rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
+                // Preprocess vertices after rotation to ensure proper scaling
+                rotated_mesh.geometry.vertices =
+                    preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
             }
-        });
+        }
+
+        let (img, depth, normal, occ, outlier) =
+            compute_single_projection(rotated_mesh, settings, view_config);
+
+        images.push(img);
+        depth_maps.push(depth);
+        normal_maps.push(normal);
+        occupancy_maps.push(occ);
+        outlier_counts.push(outlier);
+    }
+
+    // Stack all views into 4D arrays
+    let stacked_images = ndarray::stack(
+        Axis(0),
+        &images
+            .iter()
+            .map(|x| x.slice(s![0, .., .., ..]))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let stacked_depth_maps = ndarray::stack(
+        Axis(0),
+        &depth_maps
+            .iter()
+            .map(|x| x.slice(s![0, .., .., ..]))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let stacked_normal_maps = ndarray::stack(
+        Axis(0),
+        &normal_maps
+            .iter()
+            .map(|x| x.slice(s![0, .., .., ..]))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let stacked_occupancy_maps = ndarray::stack(
+        Axis(0),
+        &occupancy_maps
+            .iter()
+            .map(|x| x.slice(s![0, .., ..]))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
 
     (
-        buffers.images,
-        buffers.depth_maps,
-        buffers.normal_maps,
-        occupancy_maps,
+        stacked_images,
+        stacked_depth_maps,
+        stacked_normal_maps,
+        stacked_occupancy_maps,
         outlier_counts,
     )
 }

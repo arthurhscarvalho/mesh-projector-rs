@@ -590,7 +590,7 @@ fn normalize_normals(normals: &mut Array2<f64>) {
     }
 }
 
-/// Preprocess vertices by scaling them to fit within the target precision
+/// Preprocess vertices by centering the mesh and scaling it to fit within the target precision
 pub fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<f64> {
     // Get bounding box
     let mut min_bound = [f64::MAX, f64::MAX, f64::MAX];
@@ -602,26 +602,32 @@ pub fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<
         }
     }
     info!("Original BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
-    // Shift vertices if any minimum coordinate is negative
-    let shift = [
-        min_bound[0].min(0.0).abs(),
-        min_bound[1].min(0.0).abs(),
-        min_bound[2].min(0.0).abs(),
-    ];
-    if shift[0] > 0.0 || shift[1] > 0.0 || shift[2] > 0.0 {
-        info!("Shifting vertices by: {:?}", shift);
-        for i in 0..vertices.shape()[0] {
-            for j in 0..3 {
-                vertices[[i, j]] += shift[j];
-            }
-        }
-        // Update bounds
-        for j in 0..3 {
-            min_bound[j] += shift[j];
-            max_bound[j] += shift[j];
-        }
-        info!("Shifted BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
+
+    // Calculate center of mass
+    let mut center = [0.0, 0.0, 0.0];
+    for j in 0..3 {
+        center[j] = (min_bound[j] + max_bound[j]) / 2.0;
     }
+    info!("Center of mass: {:?}", center);
+
+    // Center the mesh by translating vertices
+    for i in 0..vertices.shape()[0] {
+        for j in 0..3 {
+            vertices[[i, j]] -= center[j];
+        }
+    }
+
+    // Update bounds after centering
+    min_bound = [f64::MAX, f64::MAX, f64::MAX];
+    max_bound = [f64::MIN, f64::MIN, f64::MIN];
+    for i in 0..vertices.shape()[0] {
+        for j in 0..3 {
+            min_bound[j] = min_bound[j].min(vertices[[i, j]]);
+            max_bound[j] = max_bound[j].max(vertices[[i, j]]);
+        }
+    }
+    info!("Centered BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
+
     // Calculate scale factor based on max dimension
     let mut bbox_size = [
         max_bound[0] - min_bound[0],
@@ -636,18 +642,25 @@ pub fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<
     }
     let max_dim = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
     let target_max_val = (1 << precision) as f64 - 1.0;
-    let scale_factor = target_max_val / max_dim;
+
+    // Add a small safety margin to ensure we have room for centering
+    let safety_margin = 0.95; // Use 95% of the available space
+    let scale_factor = (target_max_val * safety_margin) / max_dim;
     info!(
-        "Scaling vertices. Max dimension: {}, Scale factor: {}",
-        max_dim, scale_factor
+        "Scaling vertices. Max dimension: {}, Scale factor: {} (with {}% safety margin)",
+        max_dim,
+        scale_factor,
+        safety_margin * 100.0
     );
+
     // Scale vertices
     for i in 0..vertices.shape()[0] {
         for j in 0..3 {
             vertices[[i, j]] *= scale_factor;
         }
     }
-    // Calculate new bounds for verification
+
+    // Calculate bounds after scaling
     min_bound = [f64::MAX, f64::MAX, f64::MAX];
     max_bound = [f64::MIN, f64::MIN, f64::MIN];
     for i in 0..vertices.shape()[0] {
@@ -656,7 +669,73 @@ pub fn preprocess_vertices(mut vertices: Array2<f64>, precision: u32) -> Array2<
             max_bound[j] = max_bound[j].max(vertices[[i, j]]);
         }
     }
-    info!("Scaled BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
+
+    // Calculate the center of the bounding cube
+    let cube_center = target_max_val / 2.0;
+
+    // Calculate the current center of the scaled mesh
+    let mut scaled_center = [0.0, 0.0, 0.0];
+    for j in 0..3 {
+        scaled_center[j] = (min_bound[j] + max_bound[j]) / 2.0;
+    }
+
+    // Calculate the shift needed to center the mesh in the cube
+    let shift = [
+        cube_center - scaled_center[0],
+        cube_center - scaled_center[1],
+        cube_center - scaled_center[2],
+    ];
+    info!("Shifting vertices to center in cube by: {:?}", shift);
+
+    // Apply the shift to center the mesh in the cube
+    for i in 0..vertices.shape()[0] {
+        for j in 0..3 {
+            vertices[[i, j]] += shift[j];
+        }
+    }
+
+    // Verify bounds after centering
+    min_bound = [f64::MAX, f64::MAX, f64::MAX];
+    max_bound = [f64::MIN, f64::MIN, f64::MIN];
+    for i in 0..vertices.shape()[0] {
+        for j in 0..3 {
+            min_bound[j] = min_bound[j].min(vertices[[i, j]]);
+            max_bound[j] = max_bound[j].max(vertices[[i, j]]);
+        }
+    }
+
+    // Check if any vertices are out of bounds and clamp if necessary
+    let mut needs_clamping = false;
+    for j in 0..3 {
+        if min_bound[j] < 0.0 || max_bound[j] > target_max_val {
+            needs_clamping = true;
+            break;
+        }
+    }
+
+    if needs_clamping {
+        warn!("Mesh vertices out of bounds after centering. Clamping to valid range.");
+        for i in 0..vertices.shape()[0] {
+            for j in 0..3 {
+                vertices[[i, j]] = vertices[[i, j]].max(0.0).min(target_max_val);
+            }
+        }
+        // Recalculate final bounds after clamping
+        min_bound = [f64::MAX, f64::MAX, f64::MAX];
+        max_bound = [f64::MIN, f64::MIN, f64::MIN];
+        for i in 0..vertices.shape()[0] {
+            for j in 0..3 {
+                min_bound[j] = min_bound[j].min(vertices[[i, j]]);
+                max_bound[j] = max_bound[j].max(vertices[[i, j]]);
+            }
+        }
+    }
+
+    info!("Final BBox Min: {:?}, Max: {:?}", min_bound, max_bound);
+    if needs_clamping {
+        info!("Note: Mesh was clamped to stay within bounds");
+    }
+
     vertices
 }
 

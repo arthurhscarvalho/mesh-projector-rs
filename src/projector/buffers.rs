@@ -1,6 +1,6 @@
 // src/projector/buffers.rs
 use crate::projector::constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
-use nd::{s, Array3, Array4};
+use ndarray::{s, Array3, Array4};
 use std::f64;
 
 /// Holds the output image buffers generated during the projection process:
@@ -27,18 +27,16 @@ impl Buffers {
     ///   (front views check `depth < current_z`, back views check `depth > current_z`).
     /// - Depth maps and Normal maps are initialized to 0.
     pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
-        // Ensure consistency if NUM_IMAGES constant is used elsewhere
-        assert_eq!(
-            num_images, NUM_IMAGES,
-            "Inconsistent number of images requested in Buffers::new"
-        );
         Buffers {
             images: Array4::from_elem((num_images, rows, cols, channels), BACKGROUND_BRIGHTNESS),
             z_buffers: {
                 let mut z = Array3::from_elem((num_images, rows, cols), f64::INFINITY);
                 // Initialize back views (odd indices: 1, 3, 5) with NEG_INFINITY
-                for i in (1..num_images).step_by(2) {
-                    z.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY);
+                // For rotation-based views, we only use front views (all +INFINITY)
+                if num_images == NUM_IMAGES {
+                    for i in (1..num_images).step_by(2) {
+                        z.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY);
+                    }
                 }
                 z
             },

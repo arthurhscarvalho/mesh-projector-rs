@@ -12,6 +12,10 @@ def project_mesh(
     flip_uv=True,
     ignore_opacity=False,
     verbose=False,
+    rotation_steps=None,
+    angle_delta_x=None,
+    angle_delta_y=None,
+    angle_delta_z=None,
 ):
     """
     High-level function to load and generate projections and occlusion maps for a mesh.
@@ -27,12 +31,22 @@ def project_mesh(
                       Defaults to True.
         verbose (bool): Enables detailed logging. Defaults to False.
         ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value. Defaults to False.
+        rotation_steps (int, optional): Number of rotation steps for rotation-based projection.
+                                     If provided along with angle deltas, enables rotation-based projection.
+                                     Defaults to None (uses standard 6-view orthographic projection).
+        angle_delta_x (float, optional): Angle delta for rotation around X axis in radians.
+                                      Required for rotation-based projection.
+        angle_delta_y (float, optional): Angle delta for rotation around Y axis in radians.
+                                      Required for rotation-based projection.
+        angle_delta_z (float, optional): Angle delta for rotation around Z axis in radians.
+                                      Required for rotation-based projection.
 
     Returns:
-        Tuple[List[np.ndarray], List[np.ndarray]]:
-            - A list of 6 numpy arrays, each representing a projection image (H, W, 3).
-            - A list of 6 numpy arrays, each representing an outlier occlusion map (H, W).
-              Value is 1 for filtered outlier pixels, 0 otherwise. Returns empty maps if filtering=0.
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            - Projection images (N, H, W, 3) where N is either 6 (orthographic) or rotation_steps (rotation-based)
+            - Depth maps (N, H, W, 3)
+            - Normal maps (N, H, W, 3)
+            - Occupancy maps (N, H, W) where value is 255 for occupied pixels, 0 otherwise
 
     Raises:
         FileNotFoundError: If required files (OBJ, or Texture/MTL based on mode) are not found.

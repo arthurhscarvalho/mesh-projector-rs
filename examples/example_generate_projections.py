@@ -111,29 +111,28 @@ def main():
         return
     # --- Save Output ---
     os.makedirs(args.out, exist_ok=True)
-    view_names = ["X+", "X-", "Y+", "Y-", "Z+", "Z-"]
     images = zip(projection_array, occlusion_array, depth_array, normal_array)
     for i, (image, occlusion, depth, normal) in enumerate(images):
         # Save image (convert RGB to BGR for OpenCV)
         try:
             cv2.imwrite(
-                os.path.join(args.out, f"proj_{view_names[i]}.png"),
+                os.path.join(args.out, f"{i:04d}.png"),
                 cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
             )
-            cv2.imwrite(
-                os.path.join(args.out, f"proj_{view_names[i]}_depth.png"),
-                cv2.cvtColor(depth, cv2.COLOR_RGB2BGR),
-            )
-            cv2.imwrite(
-                os.path.join(args.out, f"proj_{view_names[i]}_normal.png"),
-                cv2.cvtColor(normal, cv2.COLOR_RGB2BGR),
-            )
-            cv2.imwrite(
-                os.path.join(args.out, f"proj_{view_names[i]}_occ.png"),
-                cv2.cvtColor(occlusion, cv2.COLOR_GRAY2BGR),
-            )
+            # cv2.imwrite(
+            #     os.path.join(args.out, f"proj_{i}_depth.png"),
+            #     cv2.cvtColor(depth, cv2.COLOR_RGB2BGR),
+            # )
+            # cv2.imwrite(
+            #     os.path.join(args.out, f"proj_{i}_normal.png"),
+            #     cv2.cvtColor(normal, cv2.COLOR_RGB2BGR),
+            # )
+            # cv2.imwrite(
+            #     os.path.join(args.out, f"proj_{i}_occ.png"),
+            #     cv2.cvtColor(occlusion, cv2.COLOR_GRAY2BGR),
+            # )
         except Exception as e:
-            print(f"Failed to save projection {view_names[i]}: {e}")
+            print(f"Failed to save projection {i}: {e}")
     print(f"Projections saved to {args.out}")
 
 

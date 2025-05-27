@@ -12,7 +12,7 @@ pub enum MeshMode {
     Full,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MeshGeometry {
     /// Vertex positions (N, 3).
     pub vertices: Array2<f64>,
@@ -22,7 +22,7 @@ pub struct MeshGeometry {
     pub vertex_normals: Option<Array2<f64>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MeshTexture {
     /// Texture image data (optional).
     pub texture: Option<Array3<u8>>,
@@ -38,7 +38,7 @@ pub struct MeshTexture {
     pub width_f64: f64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MeshMaterial {
     pub ka: [f64; 3], // Ambient color
     pub kd: [f64; 3], // Diffuse color
@@ -48,7 +48,7 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Mesh {
     // Geometry
     pub geometry: MeshGeometry,
