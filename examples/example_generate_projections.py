@@ -1,7 +1,4 @@
 import argparse
-import os
-
-import cv2
 
 import mesh_projector as mp
 
@@ -54,13 +51,6 @@ def main():
         help="Path to the input MTL file (for material properties).",
     )
     parser.add_argument(
-        "--out",
-        type=str,
-        default="projections",
-        required=True,
-        help="Directory to save projection images.",
-    )
-    parser.add_argument(
         "--precision", type=int, default=12, help="Precision P (image size 2^P x 2^P)."
     )
     parser.add_argument(
@@ -83,57 +73,17 @@ def main():
     )
     args = parser.parse_args()
     # --- Generate Projections using the combined function ---
-    try:
-        # Mode is automatically inferred based on the provided files
-        projection_array, depth_array, normal_array, occlusion_array = mp.project_mesh(
-            obj_location=args.obj,
-            texture_file=args.texture,
-            mtl_location=args.mtl,
-            precision=args.precision,
-            filtering=args.filtering,
-            flip_uv=args.flip_uv,
-            ignore_opacity=args.ignore_opacity,
-            verbose=args.verbose,
-        )
-        if (
-            projection_array is None
-            or depth_array is None
-            or normal_array is None
-            or occlusion_array is None
-        ):  # Should not happen if exceptions are raised correctly
-            print("Projection generation failed, but no exception was raised.")
-            return
-    except (FileNotFoundError, ValueError, RuntimeError) as e:
-        print(f"Failed to generate projections: {e}")
-        return
-    except Exception as e:  # Catch any unexpected errors
-        print(f"An unexpected error occurred: {e}")
-        return
-    # --- Save Output ---
-    os.makedirs(args.out, exist_ok=True)
-    images = zip(projection_array, occlusion_array, depth_array, normal_array)
-    for i, (image, occlusion, depth, normal) in enumerate(images):
-        # Save image (convert RGB to BGR for OpenCV)
-        try:
-            cv2.imwrite(
-                os.path.join(args.out, f"{i:04d}.png"),
-                cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-            )
-            # cv2.imwrite(
-            #     os.path.join(args.out, f"proj_{i}_depth.png"),
-            #     cv2.cvtColor(depth, cv2.COLOR_RGB2BGR),
-            # )
-            # cv2.imwrite(
-            #     os.path.join(args.out, f"proj_{i}_normal.png"),
-            #     cv2.cvtColor(normal, cv2.COLOR_RGB2BGR),
-            # )
-            # cv2.imwrite(
-            #     os.path.join(args.out, f"proj_{i}_occ.png"),
-            #     cv2.cvtColor(occlusion, cv2.COLOR_GRAY2BGR),
-            # )
-        except Exception as e:
-            print(f"Failed to save projection {i}: {e}")
-    print(f"Projections saved to {args.out}")
+    # Mode is automatically inferred based on the provided files
+    mp.project_mesh(
+        obj_location=args.obj,
+        texture_file=args.texture,
+        mtl_location=args.mtl,
+        precision=args.precision,
+        filtering=args.filtering,
+        flip_uv=args.flip_uv,
+        ignore_opacity=args.ignore_opacity,
+        verbose=args.verbose,
+    )
 
 
 if __name__ == "__main__":

@@ -13,15 +13,16 @@ pub mod rotation;
 mod sampling;
 
 use crate::projector::buffers::Buffers;
-use crate::projector::config::{ProjectorConfig, RotationConfig, ViewConfig};
+use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::{NUM_CHANNELS, NUM_IMAGES};
 use crate::projector::filtering::filter_outliers;
 use crate::projector::geometry::precompute_triangle_normals;
 use crate::projector::io::preprocess_vertices;
 use mesh::Mesh;
-use ndarray::{s, Array2, Array3, Array4, Axis};
+use ndarray::{s, Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
+use std::path::Path;
 use std::sync::Arc;
 
 /// Computes a single orthographic projection for the given view configuration.
@@ -124,13 +125,7 @@ fn compute_single_projection(
 pub fn compute_mesh_projections(
     mesh: &Mesh,
     settings: &ProjectorConfig,
-) -> (
-    Array4<u8>, // images
-    Array4<u8>, // depth_maps
-    Array4<u8>, // normal_maps
-    Array3<u8>, // occupancy_maps (3-channel)
-    Vec<u64>,   // outlier_counts
-) {
+) -> (Array4<u8>, Array4<u8>, Array4<u8>, Array3<u8>, Vec<u64>) {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -209,15 +204,13 @@ pub fn compute_mesh_projections(
         // Create a rotated mesh for this view
         let mut rotated_mesh = mesh.clone();
         if let Some(rotation_config) = &settings.rotation_config {
-            if i > 0 {
-                let angle_x = rotation_config.angle_delta_x * i as f64;
-                let angle_y = rotation_config.angle_delta_y * i as f64;
-                let angle_z = rotation_config.angle_delta_z * i as f64;
-                rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
-                // Preprocess vertices after rotation to ensure proper scaling
-                rotated_mesh.geometry.vertices =
-                    preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
-            }
+            let angle_x = rotation_config.angle_delta_x * i as f64;
+            let angle_y = rotation_config.angle_delta_y * i as f64;
+            let angle_z = rotation_config.angle_delta_z * i as f64;
+            rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
+            // Preprocess vertices after rotation to ensure proper scaling
+            rotated_mesh.geometry.vertices =
+                preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
         }
 
         let (img, depth, normal, occ, outlier) =
@@ -271,4 +264,89 @@ pub fn compute_mesh_projections(
         stacked_occupancy_maps,
         outlier_counts,
     )
+}
+
+/// Computes rotation-based projections and saves them on-the-fly in parallel.
+/// This function does not return any projection data.
+pub fn compute_and_save_rotation_projections(
+    mesh: &Mesh,
+    settings: &ProjectorConfig,
+    output_dir: &Path,
+) {
+    log::info!(
+        "Initializing rotation-based projector. Precision: {}, Filtering: {}",
+        settings.precision,
+        settings.filtering_window_radius
+    );
+
+    let rotation_config = match &settings.rotation_config {
+        Some(config) => config,
+        None => {
+            log::warn!(
+                "Rotation configuration is not provided. Skipping rotation-based projection."
+            );
+            return;
+        }
+    };
+
+    // Setup & Validation
+    let max_bound: u64 = 1 << settings.precision;
+    let max_bound_f64: f64 = max_bound as f64;
+
+    // Handle empty meshes
+    if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
+        log::warn!("Empty points or triangles detected. Skipping projection.");
+        return;
+    }
+
+    let num_steps = rotation_config.num_steps;
+    let mut view_configs = Vec::with_capacity(num_steps);
+
+    // Create view configs for rotation-based projection
+    for _ in 0..num_steps {
+        // Create view config for front view along Z axis
+        view_configs.push(ViewConfig {
+            depth_axis: 2, // Z axis
+            is_front_view: true,
+            view_dir: (0.0, 0.0, 1.0),
+            p_axis: 0, // X axis
+            q_axis: 1, // Y axis
+            max_bound_f64,
+        });
+    }
+
+    // Use Arc for sharing mesh and settings data across threads
+    let mesh = Arc::new(mesh.clone());
+    let settings = Arc::new(settings);
+    let output_dir = Arc::new(output_dir.to_path_buf());
+
+    // Compute projections for each view in parallel and save them on-the-fly
+    view_configs
+        .par_iter()
+        .enumerate()
+        .for_each(|(i, view_config)| {
+            log::info!("Computing projection {} of {}", i + 1, num_steps);
+
+            // Clone mesh for each thread to ensure mutability in compute_single_projection
+            let mut rotated_mesh = Arc::clone(&mesh).as_ref().clone();
+
+            // Apply rotation
+            let angle_x = rotation_config.angle_delta_x * i as f64;
+            let angle_y = rotation_config.angle_delta_y * i as f64;
+            let angle_z = rotation_config.angle_delta_z * i as f64;
+            rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
+            // Preprocess vertices after rotation to ensure proper scaling
+            rotated_mesh.geometry.vertices =
+                preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
+
+            let (img, _, _, _, _) = compute_single_projection(rotated_mesh, &settings, view_config);
+
+            // Save the projection data for the current view
+            // let view_output_dir = output_dir.join(format!("view_{:04}", i));
+            if let Err(e) = io::save_projection_data(&img, &output_dir, i, true) {
+                log::error!("Failed to save data for view {}: {}", i, e);
+            }
+        });
+
+    log::info!("Finished computing and saving all rotation-based projections.");
 }

@@ -1,8 +1,10 @@
 // src/projector/io.rs
 //! Module for loading and preprocessing 3D mesh data.
 use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
+use image::{ImageBuffer, Rgb};
 use log::{info, warn};
-use ndarray::{Array, Array2, Array3};
+use ndarray::{s, Array, Array2, Array3, Array4, Axis};
+use std::fs;
 use std::path::Path;
 use tobj;
 
@@ -780,4 +782,62 @@ fn infer_projection_mode(texture_path: Option<&str>, mtl_path: Option<&str>) -> 
             MeshMode::ObjOnly
         }
     }
+}
+
+/// Saves projection data for a single view to specified files.
+/// Assumes the input arrays are 4D with shape (1, rows, cols, channels)
+/// or 3D with shape (1, rows, cols) for occupancy.
+pub fn save_projection_data(
+    image: &Array4<u8>,
+    output_dir: &Path,
+    view_index: usize,
+    flip_vertical: bool,
+) -> Result<(), String> {
+    if image.shape()[0] != 1 {
+        return Err("Input array for saving must have a batch size of 1.".to_string());
+    }
+    let rows = image.shape()[1];
+    let cols = image.shape()[2];
+
+    // Ensure output directory exists
+    if let Err(e) = fs::create_dir_all(output_dir) {
+        return Err(format!(
+            "Failed to create output directory {:?}: {}",
+            output_dir, e
+        ));
+    }
+
+    // Save Image (RGB)
+    if image.shape()[3] == 3 || image.shape()[3] == 4 {
+        let image_slice = image.slice(s![0, .., .., ..]);
+
+        let final_image_slice = if flip_vertical {
+            // Manually create a vertically flipped buffer
+            let mut flipped = Array3::<u8>::zeros(image_slice.raw_dim());
+            for (i, row) in image_slice.outer_iter().rev().enumerate() {
+                flipped.index_axis_mut(Axis(0), i).assign(&row);
+            }
+            flipped
+        } else {
+            image_slice.into_owned()
+        };
+
+        let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(
+            cols as u32,
+            rows as u32,
+            final_image_slice.into_raw_vec_and_offset().0,
+        )
+        .ok_or("Failed to create image buffer for image.")?;
+        let image_path = output_dir.join(format!("image_{:04}.png", view_index));
+        if let Err(e) = buffer.save(&image_path) {
+            warn!("Failed to save image {:?}: {}", image_path, e);
+        }
+    } else {
+        warn!(
+            "Image array has unsupported number of channels: {}. Skipping save.",
+            image.shape()[3]
+        );
+    }
+
+    Ok(())
 }
