@@ -1,6 +1,5 @@
 // src/projector/config.rs
 //! Projection settings and related structures.
-use crate::projector::constants::NUM_IMAGES;
 
 /// Contains settings for controlling mesh rotation during projection.
 #[derive(Debug, Clone)]
@@ -93,45 +92,4 @@ pub struct ViewConfig {
     pub q_axis: usize,
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
-}
-
-impl ViewConfig {
-    /// Creates projection settings based on the image layer index (0 to NUM_IMAGES - 1).
-    /// Layers 0, 2, 4 are front views (+X, +Y, +Z).
-    /// Layers 1, 3, 5 are back views (-X, -Y, -Z).
-    pub fn new(img_layer: usize, max_bound_f64: f64) -> Self {
-        assert!(
-            img_layer < NUM_IMAGES,
-            "Invalid image layer index: {}",
-            img_layer
-        );
-        let depth_axis = img_layer / 2; // 0 for X, 1 for Y, 2 for Z
-        let view_type = img_layer % 2; // 0 for front, 1 for back
-        let is_front_view = view_type == 0;
-        // Determine view direction based on axis and front/back type
-        let view_dir = match (depth_axis, is_front_view) {
-            (0, true) => (1.0, 0.0, 0.0),   // +X
-            (0, false) => (-1.0, 0.0, 0.0), // -X
-            (1, true) => (0.0, 1.0, 0.0),   // +Y
-            (1, false) => (0.0, -1.0, 0.0), // -Y
-            (2, true) => (0.0, 0.0, 1.0),   // +Z
-            (2, false) => (0.0, 0.0, -1.0), // -Z
-            _ => unreachable!(),            // Should be covered by the assert above
-        };
-        // Define the axes used for the 2D projection plane (P, Q) based on the depth axis
-        // If depth is X (0), plane is YZ (1, 2) -> p=Y, q=Z
-        // If depth is Y (1), plane is XZ (0, 2) -> p=X, q=Z
-        // If depth is Z (2), plane is XY (0, 1) -> p=X, q=Y
-        // Note: The order (p, q) maps to (cols, rows) typically.
-        const PROJECTION_PLANE_AXES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
-        let (p_axis, q_axis) = PROJECTION_PLANE_AXES[depth_axis];
-        ViewConfig {
-            depth_axis,
-            is_front_view,
-            view_dir,
-            p_axis,
-            q_axis,
-            max_bound_f64,
-        }
-    }
 }
