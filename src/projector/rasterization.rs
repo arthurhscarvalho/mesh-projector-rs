@@ -5,52 +5,101 @@ use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::lighting::calculate_lighting;
-use crate::projector::math::normalize_vec3;
+use crate::projector::math::{normalize_vec3, rotate_vertex};
 use crate::projector::mesh::{Mesh, MeshMode};
 use crate::projector::sampling::sample_texture_color_bilinear;
-use nd::{Array2, ArrayViewMut2, ArrayViewMut3};
+use nd::{Array1, ArrayView1, ArrayViewMut2, ArrayViewMut3};
 use std::f64;
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
-    mesh: &Mesh,                              // Mesh with material properties
-    triangle_index: usize,                    // Index of the current triangle
-    triangle_normals: &Array2<f64>, // Triangle face normals (M, 3) - Precomputed or provided
-    projection_config: &ViewConfig, // Configuration for the current projection view
+    mesh: &Mesh, // Mesh with material properties (contains world-space, pre-scaled vertices)
+    triangle_index: usize, // Index of the current triangle
+    current_face_normal_ws: ArrayView1<f64>, // Precomputed world-space face normal for this triangle
+    projection_config: &ViewConfig, // Configuration for the current projection view (contains rotation_matrix)
     z_slice: &mut ArrayViewMut2<f64>, // Mutable view to the Z-buffer slice
     image_slice: &mut ArrayViewMut3<u8>, // Mutable view to the color image buffer slice
     depth_map_slice: &mut ArrayViewMut3<u8>, // Mutable view to the depth map slice
     normal_map_slice: &mut ArrayViewMut3<u8>, // Mutable view to the normal map slice
 ) {
-    // Back-face Culling
-    let geometric_normal_view = triangle_normals.row(triangle_index);
-    let face_normal = [
-        geometric_normal_view[0],
-        geometric_normal_view[1],
-        geometric_normal_view[2],
+    // World-space face normal for the current triangle (already precomputed)
+    let face_normal_ws_arr = [
+        current_face_normal_ws[0],
+        current_face_normal_ws[1],
+        current_face_normal_ws[2],
     ];
+
+    // Back-face Culling (using world-space face normal and world-space view direction)
     if !is_triangle_visible(
-        face_normal[0],
-        face_normal[1],
-        face_normal[2],
-        projection_config.view_dir,
+        face_normal_ws_arr[0],
+        face_normal_ws_arr[1],
+        face_normal_ws_arr[2],
+        projection_config.view_dir, // This is the world-space normal of the projection plane
     ) {
         return;
     }
-    // Get Vertex Data Indices & Positions
-    let points = mesh.geometry.vertices.view();
+
+    // Define projection plane axes from the rotation matrix (these are view-space axes in world coordinates)
+    // u_axis_ws = rotation_matrix.column(0) (new X in world)
+    // v_axis_ws = rotation_matrix.column(1) (new Y in world)
+    // normal_ws = rotation_matrix.column(2) (new Z in world - same as projection_config.view_dir)
+    let rot_mat = &projection_config.rotation_matrix;
+    let u_axis_ws = Array1::from_vec(vec![rot_mat[[0, 0]], rot_mat[[1, 0]], rot_mat[[2, 0]]]);
+    let v_axis_ws = Array1::from_vec(vec![rot_mat[[0, 1]], rot_mat[[1, 1]], rot_mat[[2, 1]]]);
+    let plane_normal_ws = Array1::from_vec(vec![
+        projection_config.view_dir.0,
+        projection_config.view_dir.1,
+        projection_config.view_dir.2,
+    ]);
+
+    // Calculate the scalar coordinate of the center of the target projection cube
+    let cube_center_coord = (projection_config.max_bound_f64 - 1.0) / 2.0;
+    let c_cube_vec = Array1::from_vec(vec![
+        cube_center_coord,
+        cube_center_coord,
+        cube_center_coord,
+    ]);
+
+    // Calculate the offset needed to ensure C_cube projects to (cube_center_coord, cube_center_coord)
+    let offset_u_on_plane = c_cube_vec.dot(&u_axis_ws) - cube_center_coord;
+    let offset_v_on_plane = c_cube_vec.dot(&v_axis_ws) - cube_center_coord;
+    // Depth offset is not applied to keep depth values consistent with current normalization
+    // let offset_z_on_plane = c_cube_vec.dot(&plane_normal_ws);
+
+    // Get Vertex Data Indices & Original (world-space, pre-scaled) Positions
+    let world_vertices = mesh.geometry.vertices.view();
     let triangles = mesh.geometry.triangles.view();
     let tri_indices = triangles.row(triangle_index);
     let i0 = tri_indices[0];
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
-    let p0 = points.row(i0);
-    let p1 = points.row(i1);
-    let p2 = points.row(i2);
+
+    let p0_ws = world_vertices.row(i0);
+    let p1_ws = world_vertices.row(i1);
+    let p2_ws = world_vertices.row(i2);
+
+    // Project world-space vertices onto the view plane, adjusting for the desired center
+    let p0_proj_x = p0_ws.dot(&u_axis_ws) - offset_u_on_plane;
+    let p0_proj_y = p0_ws.dot(&v_axis_ws) - offset_v_on_plane;
+    let z0 = p0_ws.dot(&plane_normal_ws); // Depth calculation remains absolute
+
+    let p1_proj_x = p1_ws.dot(&u_axis_ws) - offset_u_on_plane;
+    let p1_proj_y = p1_ws.dot(&v_axis_ws) - offset_v_on_plane;
+    let z1 = p1_ws.dot(&plane_normal_ws);
+
+    let p2_proj_x = p2_ws.dot(&u_axis_ws) - offset_u_on_plane;
+    let p2_proj_y = p2_ws.dot(&v_axis_ws) - offset_v_on_plane;
+    let z2 = p2_ws.dot(&plane_normal_ws);
+
+    // Projected 2D points
+    let p0_proj = (p0_proj_x, p0_proj_y);
+    let p1_proj = (p1_proj_x, p1_proj_y);
+    let p2_proj = (p2_proj_x, p2_proj_y);
+
     // Setup Data for Interpolation
-    let z0 = p0[projection_config.depth_axis];
-    let z1 = p1[projection_config.depth_axis];
-    let z2 = p2[projection_config.depth_axis];
+    let z0 = z0;
+    let z1 = z1;
+    let z2 = z2;
     // Store raw attributes for linear interpolation
     let mut n0 = (0.0, 0.0, 0.0);
     let mut n1 = (0.0, 0.0, 0.0);
@@ -64,15 +113,21 @@ pub fn rasterize_triangle(
     let mut c2 = (1.0, 1.0, 1.0);
     let mut has_normals = false;
     // Setup normals if available
-    if let Some(v_normals) = &mesh.geometry.vertex_normals {
-        let v_normals_view = v_normals.view();
-        let n0v = v_normals_view.row(i0);
-        let n1v = v_normals_view.row(i1);
-        let n2v = v_normals_view.row(i2);
-        // Store raw normals
-        n0 = (n0v[0], n0v[1], n0v[2]);
-        n1 = (n1v[0], n1v[1], n1v[2]);
-        n2 = (n2v[0], n2v[1], n2v[2]);
+    if let Some(v_normals_ws) = &mesh.geometry.vertex_normals {
+        // These are world-space normals
+        let v_normals_ws_view = v_normals_ws.view();
+        let n0_ws_vec = v_normals_ws_view.row(i0);
+        let n1_ws_vec = v_normals_ws_view.row(i1);
+        let n2_ws_vec = v_normals_ws_view.row(i2);
+
+        // Rotate world-space vertex normals to view-space for lighting
+        let n0_vs_arr = rotate_vertex(&n0_ws_vec, rot_mat);
+        let n1_vs_arr = rotate_vertex(&n1_ws_vec, rot_mat);
+        let n2_vs_arr = rotate_vertex(&n2_ws_vec, rot_mat);
+
+        n0 = (n0_vs_arr[0], n0_vs_arr[1], n0_vs_arr[2]);
+        n1 = (n1_vs_arr[0], n1_vs_arr[1], n1_vs_arr[2]);
+        n2 = (n2_vs_arr[0], n2_vs_arr[1], n2_vs_arr[2]);
         has_normals = true;
     }
     // Setup UVs if available (required for texture modes)
@@ -108,11 +163,6 @@ pub fn rasterize_triangle(
         }
         // If None, the default white setup (1,1,1) remains.
     }
-    // Project Vertices to 2D
-    let p0_proj = (p0[projection_config.p_axis], p0[projection_config.q_axis]);
-    let p1_proj = (p1[projection_config.p_axis], p1[projection_config.q_axis]);
-    let p2_proj = (p2[projection_config.p_axis], p2[projection_config.q_axis]);
-
     // Calculate Bounding Box
     let (rows, cols) = (z_slice.shape()[0], z_slice.shape()[1]);
     let Some((min_row, max_row, min_col, max_col)) =
@@ -143,19 +193,29 @@ pub fn rasterize_triangle(
             };
             if depth_test_passed {
                 // Interpolate Attributes
-                let interpolated_normal = if has_normals {
+                let interpolated_normal_vs = if has_normals {
+                    // These are now view-space normals
                     let bw0 = w0;
                     let bw1 = w1;
                     let bw2 = w2;
-                    // Linear interpolation of normals
+                    // Linear interpolation of view-space normals
                     let nx = bw0 * n0.0 + bw1 * n1.0 + bw2 * n2.0;
                     let ny = bw0 * n0.1 + bw1 * n1.1 + bw2 * n2.1;
                     let nz = bw0 * n0.2 + bw1 * n1.2 + bw2 * n2.2;
-                    let mut norm = [nx, ny, nz];
-                    normalize_vec3(&mut norm);
-                    norm
+                    let mut norm_vs = [nx, ny, nz];
+                    normalize_vec3(&mut norm_vs); // Normalize the interpolated view-space normal
+                    norm_vs
                 } else {
-                    face_normal
+                    // Rotate the world-space face normal to view-space for lighting
+                    let face_normal_ws_nd = Array1::from_vec(face_normal_ws_arr.to_vec());
+                    let face_normal_vs_nd = rotate_vertex(&face_normal_ws_nd.view(), rot_mat);
+                    let mut norm_vs = [
+                        face_normal_vs_nd[0],
+                        face_normal_vs_nd[1],
+                        face_normal_vs_nd[2],
+                    ];
+                    normalize_vec3(&mut norm_vs); // Ensure it's normalized
+                    norm_vs
                 };
                 let (interpolated_u, interpolated_v) =
                     if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
@@ -195,16 +255,45 @@ pub fn rasterize_triangle(
                     }
                 };
                 // Calculate Final Color (Lighting)
-                let view_dir_tuple = projection_config.view_dir;
-                let view_dir_array = [view_dir_tuple.0, view_dir_tuple.1, view_dir_tuple.2];
-                let light_dir_array = [-view_dir_array[0], -view_dir_array[1], -view_dir_array[2]];
-                let light_color = DEFAULT_LIGHT_COLOR;
+                // For lighting, view direction in view-space is always (0,0,1) if using standard view transform.
+                // Light direction also needs to be in view-space.
+                // Assuming a directional light that is always opposite to the view direction *in world space*.
+                // So, light_dir_ws = -projection_config.view_dir.
+                // We need to transform this light_dir_ws to view-space.
+                // view_matrix * light_dir_ws. If rotation_matrix is view_to_world, then its transpose (or inverse for ortho) is world_to_view.
+                // Since rot_mat is world -> view orientation (cols are view axes in world),
+                // to transform a world vector V_w to view vector V_v: V_v = rot_mat_transpose * V_w.
+                // rot_mat_transpose is rot_mat.t() in ndarray.
+
+                let view_dir_vs = [0.0, 0.0, 1.0]; // In view space, camera looks along positive Z.
+
+                // Light direction in world space (opposite to camera's Z / view direction)
+                let light_dir_ws_tuple = (
+                    -projection_config.view_dir.0,
+                    -projection_config.view_dir.1,
+                    -projection_config.view_dir.2,
+                );
+                let light_dir_ws_nd = Array1::from_vec(vec![
+                    light_dir_ws_tuple.0,
+                    light_dir_ws_tuple.1,
+                    light_dir_ws_tuple.2,
+                ]);
+
+                // Transform light direction from world to view space
+                let rot_mat_transpose = rot_mat.t();
+                let light_dir_vs_nd = rot_mat_transpose.dot(&light_dir_ws_nd);
+                let mut light_dir_vs_arr =
+                    [light_dir_vs_nd[0], light_dir_vs_nd[1], light_dir_vs_nd[2]];
+                normalize_vec3(&mut light_dir_vs_arr);
+
+                let light_color = DEFAULT_LIGHT_COLOR; // Assuming light color is constant
+
                 let final_linear_color = calculate_lighting(
                     &mesh.material,
                     linear_base_color,
-                    interpolated_normal,
-                    view_dir_array,
-                    light_dir_array,
+                    interpolated_normal_vs, // This is now in view-space
+                    view_dir_vs,            // View direction in view-space
+                    light_dir_vs_arr,       // Light direction in view-space
                     light_color,
                 );
                 // Convert linear to sRGB and quantize to [0, 255]
@@ -239,13 +328,17 @@ pub fn rasterize_triangle(
                 depth_map_slice[[row, col, 2]] = depth_u8;
 
                 // Populate Normal Map (map [-1,1] to [0,255])
-                let normal_x_u8 = ((interpolated_normal[0] + 1.0) / 2.0 * 255.0)
+                // Normals should be saved in a consistent space. If they are view-space normals,
+                // then the interpretation of the normal map needs to be consistent.
+                // Typically, normal maps store object-space or tangent-space normals.
+                // For simplicity here, we'll save the view-space normals.
+                let normal_x_u8 = ((interpolated_normal_vs[0] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
-                let normal_y_u8 = ((interpolated_normal[1] + 1.0) / 2.0 * 255.0)
+                let normal_y_u8 = ((interpolated_normal_vs[1] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
-                let normal_z_u8 = ((interpolated_normal[2] + 1.0) / 2.0 * 255.0)
+                let normal_z_u8 = ((interpolated_normal_vs[2] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
                 normal_map_slice[[row, col, 0]] = normal_x_u8;

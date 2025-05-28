@@ -2,6 +2,8 @@
 //! Vector math operations for 3D geometry calculations.
 //! Provides basic operations like dot product, vector scaling, subtraction, reflection, etc.
 
+use ndarray::{array, Array2};
+
 /// Calculates the dot product of two vector slices.
 pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
@@ -46,4 +48,41 @@ pub fn normalize_vec3(v: &mut [f64; 3]) {
         v[1] *= inv_length;
         v[2] *= inv_length;
     }
+}
+
+/// Creates a 3x3 rotation matrix for rotation around the X-axis.
+pub fn rotation_matrix_x(angle_rad: f64) -> Array2<f64> {
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    array![[1.0, 0.0, 0.0], [0.0, cos_a, -sin_a], [0.0, sin_a, cos_a]]
+}
+
+/// Creates a 3x3 rotation matrix for rotation around the Y-axis.
+pub fn rotation_matrix_y(angle_rad: f64) -> Array2<f64> {
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    array![[cos_a, 0.0, sin_a], [0.0, 1.0, 0.0], [-sin_a, 0.0, cos_a]]
+}
+
+/// Creates a 3x3 rotation matrix for rotation around the Z-axis.
+pub fn rotation_matrix_z(angle_rad: f64) -> Array2<f64> {
+    let cos_a = angle_rad.cos();
+    let sin_a = angle_rad.sin();
+    array![[cos_a, -sin_a, 0.0], [sin_a, cos_a, 0.0], [0.0, 0.0, 1.0]]
+}
+
+/// Combines three rotation matrices (Rx, Ry, Rz) by multiplication in the order Rz * Ry * Rx.
+pub fn combine_rotations(rx: &Array2<f64>, ry: &Array2<f64>, rz: &Array2<f64>) -> Array2<f64> {
+    rz.dot(ry).dot(rx)
+}
+
+/// Rotates a 3D vertex (represented as a 1x3 row vector) using a 3x3 rotation matrix.
+/// Returns the rotated vertex as a 1x3 row vector.
+pub fn rotate_vertex(
+    vertex: &ndarray::ArrayView1<f64>,
+    rotation_matrix: &Array2<f64>,
+) -> ndarray::Array1<f64> {
+    // Ensure the vertex is treated as a row vector for matrix multiplication: rotation_matrix * vertex_column_vector
+    // However, ndarray's dot product for Array2.dot(Array1) treats Array1 as a column vector.
+    rotation_matrix.dot(vertex)
 }

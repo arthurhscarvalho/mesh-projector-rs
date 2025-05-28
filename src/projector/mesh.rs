@@ -20,6 +20,8 @@ pub struct MeshGeometry {
     pub triangles: Array2<usize>,
     /// Vertex normals (optional).
     pub vertex_normals: Option<Array2<f64>>,
+    /// Precomputed triangle face normals (M, 3), in world space (derived from scaled vertices).
+    pub face_normals: Array2<f64>,
 }
 
 #[derive(Debug, Clone)]

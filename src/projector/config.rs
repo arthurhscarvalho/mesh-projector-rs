@@ -1,6 +1,8 @@
 // src/projector/config.rs
 //! Projection settings and related structures.
 
+use ndarray::Array2;
+
 /// Contains settings for controlling mesh rotation during projection.
 #[derive(Debug, Clone)]
 pub struct RotationConfig {
@@ -77,19 +79,14 @@ impl ProjectorConfig {
 /// Encapsulates parameters for a single orthographic projection view (camera settings).
 #[derive(Debug)]
 pub struct ViewConfig {
-    /// The axis representing depth relative to the mesh (0=X, 1=Y, 2=Z).
-    pub depth_axis: usize,
-    /// True if this is a front view (looking along the positive direction of `depth_axis`),
+    /// True if this is a front view (looking along the positive direction of the transformed Z-axis),
     /// false if it's a back view (looking along the negative direction).
     pub is_front_view: bool,
-    /// Normalized view direction vector corresponding to this projection.
+    /// Normalized view direction vector corresponding to this projection
+    /// (this will be the new Z-axis after transformation).
     pub view_dir: (f64, f64, f64),
-    /// The primary axis index for the 2D projection plane (e.g., Y if depth is X).
-    /// This typically corresponds to the image's column index.
-    pub p_axis: usize,
-    /// The secondary axis index for the 2D projection plane (e.g., Z if depth is X).
-    /// This typically corresponds to the image's row index.
-    pub q_axis: usize,
+    /// Rotation matrix to orient the mesh for this view.
+    pub rotation_matrix: Array2<f64>,
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
 }

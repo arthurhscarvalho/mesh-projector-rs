@@ -9,15 +9,15 @@ mod lighting;
 mod math;
 pub mod mesh;
 mod rasterization;
-pub mod rotation;
 mod sampling;
 
 use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
 use crate::projector::filtering::filter_outliers;
-use crate::projector::geometry::precompute_triangle_normals;
-use crate::projector::io::preprocess_vertices;
+use crate::projector::math::{
+    combine_rotations, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
+};
 use mesh::Mesh;
 use ndarray::{s, Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 /// Computes a single orthographic projection for the given view configuration.
 fn compute_single_projection(
-    mut mesh: Mesh,
+    mesh: &Mesh,
     settings: &ProjectorConfig,
     view_config: &ViewConfig,
 ) -> (Array4<u8>, Array4<u8>, Array4<u8>, Array3<u8>, u64) {
@@ -37,12 +37,9 @@ fn compute_single_projection(
     let rows = max_bound_u;
     let cols = max_bound_u;
 
-    // Precompute triangle normals for this rotated mesh
-    log::info!("Precomputing triangle normals for current view");
-    let triangle_normals = precompute_triangle_normals(
-        mesh.geometry.vertices.view(),
-        mesh.geometry.triangles.view(),
-    );
+    // Vertices are already scaled (preprocessed) and in world space.
+    // Face normals are already precomputed and in world space.
+    // The view_config.rotation_matrix defines the projection plane.
 
     // Initialize buffers for a single view
     let mut buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
@@ -55,10 +52,15 @@ fn compute_single_projection(
     // Rasterize all triangles
     let num_faces = mesh.geometry.triangles.nrows();
     for triangle_index in 0..num_faces {
+        // Pass the pre-scaled world-space vertices and precomputed world-space face normals.
+        // rasterize_triangle will handle projecting vertices onto the view plane defined by view_config.
+        let face_normal_view = mesh.geometry.face_normals.row(triangle_index);
         rasterize_triangle(
-            &mut mesh,
+            mesh, // Pass the full mesh for materials, UVs, original vertex normals etc.
             triangle_index,
-            &triangle_normals,
+            // transformed_vertices is removed, rasterize_triangle will use mesh.geometry.vertices directly
+            // and project them using view_config.rotation_matrix.
+            face_normal_view, // Pass the precomputed face normal for this triangle
             view_config,
             &mut z_buffer_view.view_mut(),
             &mut image_view.view_mut(),
@@ -185,20 +187,32 @@ pub fn compute_mesh_projections(
     let num_views = rotation_config.num_steps;
     let mut view_configs = Vec::with_capacity(num_views);
 
-    // Create view configs for rotation-based projection (front view along Z axis)
-    for _ in 0..num_views {
+    // Create view configs for rotation-based projection
+    for i in 0..num_views {
+        let angle_x = rotation_config.angle_delta_x * i as f64;
+        let angle_y = rotation_config.angle_delta_y * i as f64;
+        let angle_z = rotation_config.angle_delta_z * i as f64;
+
+        let rx = rotation_matrix_x(angle_x);
+        let ry = rotation_matrix_y(angle_y);
+        let rz = rotation_matrix_z(angle_z);
+        let rotation_matrix = combine_rotations(&rx, &ry, &rz);
+
+        // The view direction is the Z-axis of the transformed coordinate system (third column of rotation matrix)
+        let view_dir = (
+            rotation_matrix[[0, 2]],
+            rotation_matrix[[1, 2]],
+            rotation_matrix[[2, 2]],
+        );
+
         view_configs.push(ViewConfig {
-            depth_axis: 2, // Z axis
             is_front_view: true,
-            view_dir: (0.0, 0.0, 1.0),
-            p_axis: 0, // X axis
-            q_axis: 1, // Y axis
+            view_dir,
+            rotation_matrix,
             max_bound_f64,
         });
     }
 
-    // Use Arc for sharing mesh and settings data across threads
-    let mesh = Arc::new(mesh.clone());
     let settings = Arc::new(settings);
     let mut projections = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
     let mut depth_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
@@ -227,22 +241,9 @@ pub fn compute_mesh_projections(
                 let view_config = &view_configs[i];
                 log::info!("Computing projection {} of {}", i + 1, num_views);
 
-                // Clone mesh for each thread to ensure mutability in compute_single_projection
-                let mut rotated_mesh = Arc::clone(&mesh).as_ref().clone();
-
-                // Apply rotation
-                let angle_x = rotation_config.angle_delta_x * i as f64;
-                let angle_y = rotation_config.angle_delta_y * i as f64;
-                let angle_z = rotation_config.angle_delta_z * i as f64;
-                rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
-
-                // Preprocess vertices after rotation to ensure proper scaling
-                rotated_mesh.geometry.vertices =
-                    preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
-
                 // Compute projection for this view
                 let (img, depth, normal, occ, outlier) =
-                    compute_single_projection(rotated_mesh, &settings, view_config);
+                    compute_single_projection(&mesh, &settings, view_config);
 
                 // Store results in the 5D array and other containers
                 projection.assign(&img);
@@ -299,14 +300,28 @@ pub fn compute_and_save_rotation_projections(
     let mut view_configs = Vec::with_capacity(num_steps);
 
     // Create view configs for rotation-based projection
-    for _ in 0..num_steps {
-        // Create view config for front view along Z axis
+    for i in 0..num_steps {
+        let angle_x = rotation_config.angle_delta_x * i as f64;
+        let angle_y = rotation_config.angle_delta_y * i as f64;
+        let angle_z = rotation_config.angle_delta_z * i as f64;
+
+        let rx = rotation_matrix_x(angle_x);
+        let ry = rotation_matrix_y(angle_y);
+        let rz = rotation_matrix_z(angle_z);
+        let rotation_matrix = combine_rotations(&rx, &ry, &rz);
+
+        // The view direction is the Z-axis of the transformed coordinate system (third column of rotation matrix)
+        let view_dir = (
+            rotation_matrix[[0, 2]],
+            rotation_matrix[[1, 2]],
+            rotation_matrix[[2, 2]],
+        );
+
+        // Create view config for front view
         view_configs.push(ViewConfig {
-            depth_axis: 2, // Z axis
             is_front_view: true,
-            view_dir: (0.0, 0.0, 1.0),
-            p_axis: 0, // X axis
-            q_axis: 1, // Y axis
+            view_dir,
+            rotation_matrix,
             max_bound_f64,
         });
     }
@@ -323,22 +338,16 @@ pub fn compute_and_save_rotation_projections(
         .for_each(|(i, view_config)| {
             log::info!("Computing projection {} of {}", i + 1, num_steps);
 
-            // Clone mesh for each thread to ensure mutability in compute_single_projection
-            let mut rotated_mesh = Arc::clone(&mesh).as_ref().clone();
+            // Mesh is no longer rotated here. Transformation happens in compute_single_projection.
+            let current_mesh_for_projection = Arc::clone(&mesh).as_ref().clone();
 
-            // Apply rotation
-            let angle_x = rotation_config.angle_delta_x * i as f64;
-            let angle_y = rotation_config.angle_delta_y * i as f64;
-            let angle_z = rotation_config.angle_delta_z * i as f64;
-            rotation::rotate_mesh(&mut rotated_mesh, angle_x, angle_y, angle_z);
-            // Preprocess vertices after rotation to ensure proper scaling
-            rotated_mesh.geometry.vertices =
-                preprocess_vertices(rotated_mesh.geometry.vertices, settings.precision as u32);
+            // Preprocessing is now handled inside compute_single_projection after vertex transformation.
+            // So, remove explicit rotation and preprocessing calls here.
 
-            let (img, _, _, _, _) = compute_single_projection(rotated_mesh, &settings, view_config);
+            let (img, _, _, _, _) =
+                compute_single_projection(&current_mesh_for_projection, &settings, view_config);
 
             // Save the projection data for the current view
-            // let view_output_dir = output_dir.join(format!("view_{:04}", i));
             if let Err(e) = io::save_projection_data(&img, &output_dir, i, true) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }

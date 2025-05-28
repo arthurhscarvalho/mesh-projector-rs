@@ -1,5 +1,6 @@
 // src/projector/io.rs
 //! Module for loading and preprocessing 3D mesh data.
+use crate::projector::geometry::precompute_triangle_normals;
 use crate::projector::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
 use image::{ImageBuffer, Rgb};
 use log::{info, warn};
@@ -375,6 +376,10 @@ pub fn load_mesh_with_mode(
     };
     // Preprocess the mesh (scale vertices to fit in the target precision)
     let vertices = preprocess_vertices(vertices, precision);
+
+    // Precompute face normals using the scaled vertices
+    let face_normals = precompute_triangle_normals(vertices.view(), triangles.view());
+
     // Get texture dimensions if texture exists
     let (texture_channels, texture_height, texture_width) = if let Some(ref tex) = texture {
         (tex.shape()[2], tex.shape()[0] as f64, tex.shape()[1] as f64)
@@ -387,6 +392,7 @@ pub fn load_mesh_with_mode(
             vertices,
             triangles,
             vertex_normals,
+            face_normals,
         },
         texture: MeshTexture {
             texture,
