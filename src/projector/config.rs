@@ -87,12 +87,48 @@ pub struct ViewConfig {
     pub view_dir: (f64, f64, f64),
     /// Rotation matrix to orient the mesh for this view.
     pub rotation_matrix: Array2<f64>,
+    /// View matrix that transforms from world space to view space.
+    /// For orthographic projection, this transforms world coordinates so the
+    /// view direction becomes the Z axis, with the projection plane at the origin.
+    pub view_matrix: Array2<f64>,
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
-    /// Light direction in view-space.
-    pub light_dir_vs: [f64; 3],
-    /// View (camera) position in view-space.
-    pub view_pos_vs: [f64; 3],
-    /// Color of the light source.
-    pub light_color: [f64; 3],
+    /// Lighting configuration
+    pub lighting_config: LightingConfig,
+}
+
+/// Defines the source of the light.
+#[derive(Debug, Clone, Copy)]
+pub enum LightSource {
+    /// Light is fixed in world coordinates.
+    World([f64; 3]),
+    /// Light originates from the camera.
+    Camera,
+}
+
+/// Configuration for the lighting system.
+#[derive(Debug, Clone, Copy)]
+pub struct LightingConfig {
+    /// The source of the light.
+    pub light_source: LightSource,
+    /// Ambient light color.
+    pub ambient_color: [f64; 3],
+    /// Diffuse light color.
+    pub diffuse_color: [f64; 3],
+    /// Specular light color.
+    pub specular_color: [f64; 3],
+    /// Shininess factor for specular highlights.
+    pub shininess: f64,
+}
+
+impl Default for LightingConfig {
+    fn default() -> Self {
+        LightingConfig {
+            light_source: LightSource::Camera, // Default to camera light
+            ambient_color: [0.1, 0.1, 0.1],
+            diffuse_color: [0.8, 0.8, 0.8],
+            specular_color: [1.0, 1.0, 1.0],
+            shininess: 32.0,
+        }
+    }
 }

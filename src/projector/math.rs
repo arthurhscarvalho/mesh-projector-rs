@@ -86,3 +86,35 @@ pub fn rotate_vertex(
     // However, ndarray's dot product for Array2.dot(Array1) treats Array1 as a column vector.
     rotation_matrix.dot(vertex)
 }
+
+/// Transforms a 3D point (x, y, z) by a 4x4 matrix.
+/// Assumes the input point has a w-component of 1.0.
+/// Returns the transformed point [x', y', z'].
+pub fn transform_point_3d(point: [f64; 3], matrix: &Array2<f64>) -> [f64; 3] {
+    let point_homogeneous = ndarray::arr1(&[point[0], point[1], point[2], 1.0]);
+    let transformed_homogeneous = matrix.dot(&point_homogeneous);
+    [
+        transformed_homogeneous[0] / transformed_homogeneous[3],
+        transformed_homogeneous[1] / transformed_homogeneous[3],
+        transformed_homogeneous[2] / transformed_homogeneous[3],
+    ]
+}
+
+/// Transforms a 3D vector (x, y, z) by a 4x4 matrix.
+/// Assumes the input vector has a w-component of 0.0.
+/// Returns the transformed vector [x', y', z'].
+pub fn transform_vector_3d(vector: [f64; 3], matrix: &Array2<f64>) -> [f64; 3] {
+    let vector_homogeneous = ndarray::arr1(&[vector[0], vector[1], vector[2], 0.0]);
+    let transformed_homogeneous = matrix.dot(&vector_homogeneous);
+    // No perspective division for vectors
+    [
+        transformed_homogeneous[0],
+        transformed_homogeneous[1],
+        transformed_homogeneous[2],
+    ]
+}
+
+/// Subtracts vector `b` from `a` and returns the result as a new vector.
+pub fn subtract_vec3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}

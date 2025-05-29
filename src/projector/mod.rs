@@ -13,17 +13,37 @@ mod sampling;
 
 use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
-use crate::projector::constants::{DEFAULT_LIGHT_COLOR, GLOBAL_AMBIENT, NUM_CHANNELS};
+use crate::projector::constants::NUM_CHANNELS;
 use crate::projector::filtering::filter_outliers;
 use crate::projector::math::{
     combine_rotations, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
 };
 use mesh::Mesh;
-use ndarray::{s, Array3, Array4, Axis};
+use ndarray::{array, s, Array2, Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
+
+/// Creates a 4x4 view matrix from a 3x3 rotation matrix.
+/// For orthographic projection, the camera is the projection plane itself.
+/// This creates a view matrix that transforms from world space to view space,
+/// where the view direction becomes the Z axis.
+fn create_view_matrix(rotation_matrix: &Array2<f64>) -> Array2<f64> {
+    // In orthographic projection, we don't position the camera at a distance
+    // Instead, the projection plane itself acts as the camera
+    // The rotation matrix should already be set up to transform the view direction to the Z axis
+    let r = rotation_matrix;
+
+    // Create the 4x4 view matrix without translation component
+    // The rotation part ensures the view direction is transformed to the Z axis
+    array![
+        [r[[0, 0]], r[[0, 1]], r[[0, 2]], 0.0],
+        [r[[1, 0]], r[[1, 1]], r[[1, 2]], 0.0],
+        [r[[2, 0]], r[[2, 1]], r[[2, 2]], 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ]
+}
 
 /// Computes a single orthographic projection for the given view configuration.
 fn compute_single_projection(
@@ -204,42 +224,19 @@ pub fn compute_mesh_projections(
             rotation_matrix[[2, 2]],
         );
 
-        // Light should come from the projection plane towards the mesh
-        // In view space, the projection plane is perpendicular to [0,0,1]
-        // So in world space, the light direction is the negative of the view direction
-        let light_dir_ws = [-view_dir_tuple.0, -view_dir_tuple.1, -view_dir_tuple.2];
-
-        // Transform light direction from world space to view space
-        let light_dir_vs = light_dir_ws;
-        // let light_dir_vs = [
-        //     rotation_matrix[[0, 0]] * light_dir_ws[0]
-        //         + rotation_matrix[[0, 1]] * light_dir_ws[1]
-        //         + rotation_matrix[[0, 2]] * light_dir_ws[2],
-        //     rotation_matrix[[1, 0]] * light_dir_ws[0]
-        //         + rotation_matrix[[1, 1]] * light_dir_ws[1]
-        //         + rotation_matrix[[1, 2]] * light_dir_ws[2],
-        //     rotation_matrix[[2, 0]] * light_dir_ws[0]
-        //         + rotation_matrix[[2, 1]] * light_dir_ws[1]
-        //         + rotation_matrix[[2, 2]] * light_dir_ws[2],
-        // ];
-
-        let view_pos_vs = [0.0, 0.0, 1.0];
-
         view_configs.push(ViewConfig {
             is_front_view: true,
             view_dir: view_dir_tuple,
-            rotation_matrix,
+            rotation_matrix: rotation_matrix.clone(),
+            view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
-            light_dir_vs,
-            view_pos_vs,
-            light_color: DEFAULT_LIGHT_COLOR,
+            lighting_config: config::LightingConfig::default(),
         });
     }
 
-    let settings_arc = Arc::new(settings.clone());
+    let settings_arc = Arc::new(settings);
     let mesh_arc = Arc::new(mesh.clone());
 
-    let settings = Arc::new(settings);
     let mut projections = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
     let mut depth_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
     let mut normal_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
@@ -347,39 +344,18 @@ pub fn compute_and_save_rotation_projections(
             rotation_matrix[[2, 2]],
         );
 
-        // Light should come from the projection plane towards the mesh
-        // In view space, the projection plane is perpendicular to [0,0,1]
-        // So in world space, the light direction is the negative of the view direction
-        let light_dir_ws = [-view_dir_tuple.0, -view_dir_tuple.1, -view_dir_tuple.2];
-
-        // Transform light direction from world space to view space
-        let light_dir_vs = [
-            rotation_matrix[[0, 0]] * light_dir_ws[0]
-                + rotation_matrix[[0, 1]] * light_dir_ws[1]
-                + rotation_matrix[[0, 2]] * light_dir_ws[2],
-            rotation_matrix[[1, 0]] * light_dir_ws[0]
-                + rotation_matrix[[1, 1]] * light_dir_ws[1]
-                + rotation_matrix[[1, 2]] * light_dir_ws[2],
-            rotation_matrix[[2, 0]] * light_dir_ws[0]
-                + rotation_matrix[[2, 1]] * light_dir_ws[1]
-                + rotation_matrix[[2, 2]] * light_dir_ws[2],
-        ];
-
-        let view_pos_vs = [0.0, 0.0, 1.0];
-
         view_configs.push(ViewConfig {
             is_front_view: true,
             view_dir: view_dir_tuple,
-            rotation_matrix,
+            rotation_matrix: rotation_matrix.clone(),
+            view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
-            light_dir_vs,
-            view_pos_vs,
-            light_color: DEFAULT_LIGHT_COLOR,
+            lighting_config: config::LightingConfig::default(),
         });
     }
 
     let mesh_arc = Arc::new(mesh.clone());
-    let settings_arc = Arc::new(settings.clone());
+    let settings_arc = Arc::new(settings);
     let output_dir_arc = Arc::new(output_dir.to_path_buf());
 
     view_configs

@@ -1,11 +1,11 @@
 // src/projector/rasterization.rs
 use crate::projector::config::ViewConfig;
-use crate::projector::constants::{DEFAULT_LIGHT_COLOR, DEFAULT_MISSING_TEXTURE_COLOR};
+use crate::projector::constants::DEFAULT_MISSING_TEXTURE_COLOR;
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::lighting::calculate_lighting;
-use crate::projector::math::{normalize_vec3, rotate_vertex};
+use crate::projector::math::normalize_vec3;
 use crate::projector::mesh::{MeshGeometry, MeshMaterial, MeshMode, MeshTexture};
 use crate::projector::sampling::sample_texture_color_bilinear;
 use nd::{Array1, ArrayView1, ArrayViewMut2, ArrayViewMut3};
@@ -70,56 +70,61 @@ pub fn rasterize_triangle(
     let i1 = tri_indices[1];
     let i2 = tri_indices[2];
 
-    let p0_ws = world_vertices.row(i0);
-    let p1_ws = world_vertices.row(i1);
-    let p2_ws = world_vertices.row(i2);
+    let p0_ws_vec = world_vertices.row(i0);
+    let p1_ws_vec = world_vertices.row(i1);
+    let p2_ws_vec = world_vertices.row(i2);
+
+    // Convert ArrayView1 to [f64; 3] for functions expecting it and for dot products
+    let p0_ws_arr_nd = Array1::from_vec(vec![p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]]);
+    let p1_ws_arr_nd = Array1::from_vec(vec![p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]]);
+    let p2_ws_arr_nd = Array1::from_vec(vec![p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]]);
+
+    let p0_ws_arr = [p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]];
+    let p1_ws_arr = [p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]];
+    let p2_ws_arr = [p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]];
 
     // Project world-space vertices onto the view plane
-    let p0_proj_x = p0_ws.dot(&u_axis_ws) - offset_u_on_plane;
-    let p0_proj_y = p0_ws.dot(&v_axis_ws) - offset_v_on_plane;
-    let z0 = p0_ws.dot(&plane_normal_ws);
+    let p0_proj_x = p0_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
+    let p0_proj_y = p0_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
+    let z0 = p0_ws_arr_nd.dot(&plane_normal_ws);
 
-    let p1_proj_x = p1_ws.dot(&u_axis_ws) - offset_u_on_plane;
-    let p1_proj_y = p1_ws.dot(&v_axis_ws) - offset_v_on_plane;
-    let z1 = p1_ws.dot(&plane_normal_ws);
+    let p1_proj_x = p1_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
+    let p1_proj_y = p1_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
+    let z1 = p1_ws_arr_nd.dot(&plane_normal_ws);
 
-    let p2_proj_x = p2_ws.dot(&u_axis_ws) - offset_u_on_plane;
-    let p2_proj_y = p2_ws.dot(&v_axis_ws) - offset_v_on_plane;
-    let z2 = p2_ws.dot(&plane_normal_ws);
+    let p2_proj_x = p2_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
+    let p2_proj_y = p2_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
+    let z2 = p2_ws_arr_nd.dot(&plane_normal_ws);
 
     let p0_proj = (p0_proj_x, p0_proj_y);
     let p1_proj = (p1_proj_x, p1_proj_y);
     let p2_proj = (p2_proj_x, p2_proj_y);
 
     // Setup Data for Interpolation
-    let mut n0 = (0.0, 0.0, 0.0);
-    let mut n1 = (0.0, 0.0, 0.0);
-    let mut n2 = (0.0, 0.0, 0.0);
     let mut uv0 = (0.0, 0.0);
     let mut uv1 = (0.0, 0.0);
     let mut uv2 = (0.0, 0.0);
     let mut c0 = (1.0, 1.0, 1.0);
     let mut c1 = (1.0, 1.0, 1.0);
     let mut c2 = (1.0, 1.0, 1.0);
-    let mut has_normals = false;
+
+    let mut n0_ws_arr = face_normal_ws_arr; // Default to face normal
+    let mut n1_ws_arr = face_normal_ws_arr;
+    let mut n2_ws_arr = face_normal_ws_arr;
 
     if let Some(v_normals_ws) = &submesh_geometry.vertex_normals {
         let v_normals_ws_view = v_normals_ws.view();
-        let n0_ws_vec = v_normals_ws_view.row(i0);
-        let n1_ws_vec = v_normals_ws_view.row(i1);
-        let n2_ws_vec = v_normals_ws_view.row(i2);
-        let n0_vs_arr = rotate_vertex(&n0_ws_vec, rot_mat);
-        let n1_vs_arr = rotate_vertex(&n1_ws_vec, rot_mat);
-        let n2_vs_arr = rotate_vertex(&n2_ws_vec, rot_mat);
-        n0 = (n0_vs_arr[0], n0_vs_arr[1], n0_vs_arr[2]);
-        n1 = (n1_vs_arr[0], n1_vs_arr[1], n1_vs_arr[2]);
-        n2 = (n2_vs_arr[0], n2_vs_arr[1], n2_vs_arr[2]);
-        has_normals = true;
+        let n0_v_ws = v_normals_ws_view.row(i0);
+        let n1_v_ws = v_normals_ws_view.row(i1);
+        let n2_v_ws = v_normals_ws_view.row(i2);
+        // Store world-space normals for later interpolation
+        n0_ws_arr = [n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]];
+        n1_ws_arr = [n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]];
+        n2_ws_arr = [n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]];
     }
 
     if mesh_mode == MeshMode::Full || mesh_mode == MeshMode::ObjTexture {
         if let Some(uvs) = &shared_texture.triangle_uvs {
-            let uvs_view = uvs.view();
             // Use uv_triangle_id for indexing into the global shared_texture.triangle_uvs
             // Each entry in triangle_uvs is (U,V) for one corner. So, 3 entries per triangle.
             let uv_idx_base = uv_triangle_id * 3;
@@ -194,24 +199,21 @@ pub fn rasterize_triangle(
             };
 
             if depth_test_passed {
-                let interpolated_normal_vs = if has_normals {
-                    let nx = w0 * n0.0 + w1 * n1.0 + w2 * n2.0;
-                    let ny = w0 * n0.1 + w1 * n1.1 + w2 * n2.1;
-                    let nz = w0 * n0.2 + w1 * n1.2 + w2 * n2.2;
-                    let mut norm_vs = [nx, ny, nz];
-                    normalize_vec3(&mut norm_vs);
-                    norm_vs
-                } else {
-                    let face_normal_ws_nd = Array1::from_vec(face_normal_ws_arr.to_vec());
-                    let face_normal_vs_nd = rotate_vertex(&face_normal_ws_nd.view(), rot_mat);
-                    let mut norm_vs = [
-                        face_normal_vs_nd[0],
-                        face_normal_vs_nd[1],
-                        face_normal_vs_nd[2],
-                    ];
-                    normalize_vec3(&mut norm_vs);
-                    norm_vs
-                };
+                // Interpolate world-space vertex position for the current pixel
+                let interpolated_vx_ws = w0 * p0_ws_arr[0] + w1 * p1_ws_arr[0] + w2 * p2_ws_arr[0];
+                let interpolated_vy_ws = w0 * p0_ws_arr[1] + w1 * p1_ws_arr[1] + w2 * p2_ws_arr[1];
+                let interpolated_vz_ws = w0 * p0_ws_arr[2] + w1 * p1_ws_arr[2] + w2 * p2_ws_arr[2];
+                let interpolated_vertex_pos_ws =
+                    [interpolated_vx_ws, interpolated_vy_ws, interpolated_vz_ws];
+
+                // Interpolate world-space normal for the current pixel
+                // nX_ws_arr is either per-vertex normal or face normal based on `has_normals` logic path above
+                let interpolated_nx_ws = w0 * n0_ws_arr[0] + w1 * n1_ws_arr[0] + w2 * n2_ws_arr[0];
+                let interpolated_ny_ws = w0 * n0_ws_arr[1] + w1 * n1_ws_arr[1] + w2 * n2_ws_arr[1];
+                let interpolated_nz_ws = w0 * n0_ws_arr[2] + w1 * n1_ws_arr[2] + w2 * n2_ws_arr[2];
+                let mut interpolated_normal_ws =
+                    [interpolated_nx_ws, interpolated_ny_ws, interpolated_nz_ws];
+                normalize_vec3(&mut interpolated_normal_ws);
 
                 let (interpolated_u, interpolated_v) =
                     if mesh_mode == MeshMode::Full || mesh_mode == MeshMode::ObjTexture {
@@ -253,14 +255,33 @@ pub fn rasterize_triangle(
                     }
                 };
 
+                // For orthographic projection, the camera is on the projection plane
+                // Get the view direction from the config
+                let view_dir_ws = [
+                    projection_config.view_dir.0,
+                    projection_config.view_dir.1,
+                    projection_config.view_dir.2,
+                ];
+
+                // Calculate camera position - a point along the view direction from the current vertex
+                // The camera is effectively the projection plane itself
+                let camera_dist = 100.0; // Large enough to ensure light comes from the projection plane
+                let camera_position_ws = [
+                    interpolated_vertex_pos_ws[0] - camera_dist * view_dir_ws[0],
+                    interpolated_vertex_pos_ws[1] - camera_dist * view_dir_ws[1],
+                    interpolated_vertex_pos_ws[2] - camera_dist * view_dir_ws[2],
+                ];
+
                 let final_color_linear = calculate_lighting(
                     linear_base_color,
-                    interpolated_normal_vs,
-                    projection_config.light_dir_vs, // View-space light direction
-                    projection_config.view_pos_vs, // View-space view position (usually 0,0,Z_near or 0,0,0 for ortho)
-                    submesh_material,              // Use submesh_material for lighting parameters
+                    interpolated_vertex_pos_ws,
+                    interpolated_normal_ws,
+                    &projection_config.view_matrix,
+                    camera_position_ws,
+                    view_dir_ws,
+                    submesh_material,
                     mesh_mode,
-                    projection_config.light_color,
+                    &projection_config.lighting_config,
                 );
 
                 let final_color_srgb = [
@@ -293,12 +314,17 @@ pub fn rasterize_triangle(
                 depth_map_slice_param[[row, col, 2]] = depth_byte; // Use renamed param
 
                 // Normal map (view-space normals, scaled to 0-255)
+                let interpolated_normal_vs_for_map = crate::projector::math::transform_vector_3d(
+                    interpolated_normal_ws,
+                    &projection_config.view_matrix,
+                );
+
                 normal_map_slice[[row, col, 0]] =
-                    ((interpolated_normal_vs[0] * 0.5 + 0.5) * 255.0).round() as u8;
+                    ((interpolated_normal_vs_for_map[0] * 0.5 + 0.5) * 255.0).round() as u8;
                 normal_map_slice[[row, col, 1]] =
-                    ((interpolated_normal_vs[1] * 0.5 + 0.5) * 255.0).round() as u8;
+                    ((interpolated_normal_vs_for_map[1] * 0.5 + 0.5) * 255.0).round() as u8;
                 normal_map_slice[[row, col, 2]] =
-                    ((interpolated_normal_vs[2] * 0.5 + 0.5) * 255.0).round() as u8;
+                    ((interpolated_normal_vs_for_map[2] * 0.5 + 0.5) * 255.0).round() as u8;
             }
         }
     }

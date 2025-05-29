@@ -139,7 +139,7 @@ fn generate_projections_rotation<'py>(
     log::info!("Entering Rust generate_projections backend");
 
     let rotation_steps: Option<u32> = Some(32);
-    let angle_delta_x: Option<f64> = Some(std::f64::consts::PI / 4.0);
+    let angle_delta_x: Option<f64> = Some(0.0);
     let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 4.0);
     let angle_delta_z: Option<f64> = Some(0.0);
 
