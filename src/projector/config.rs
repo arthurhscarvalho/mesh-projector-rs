@@ -89,4 +89,10 @@ pub struct ViewConfig {
     pub rotation_matrix: Array2<f64>,
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
+    /// Light direction in view-space.
+    pub light_dir_vs: [f64; 3],
+    /// View (camera) position in view-space.
+    pub view_pos_vs: [f64; 3],
+    /// Color of the light source.
+    pub light_color: [f64; 3],
 }

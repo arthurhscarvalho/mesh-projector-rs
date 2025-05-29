@@ -65,16 +65,16 @@ fn generate_projections<'py>(
             )));
         }
     };
-    // Log material properties
-    log::info!(
-        "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
-        mesh.material.ka,
-        mesh.material.kd,
-        mesh.material.ks,
-        mesh.material.ns,
-        mesh.material.opacity,
-        mesh.material.illum
-    );
+    // Log material properties - REMOVED as material is now per-submesh
+    // log::info!(
+    //     "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
+    //     mesh.material.ka,
+    //     mesh.material.kd,
+    //     mesh.material.ks,
+    //     mesh.material.ns,
+    //     mesh.material.opacity,
+    //     mesh.material.illum
+    // );
 
     // Set up projection settings with rotation config if provided
     let settings = if let (Some(steps), Some(dx), Some(dy), Some(dz)) =
@@ -138,9 +138,9 @@ fn generate_projections_rotation<'py>(
     }
     log::info!("Entering Rust generate_projections backend");
 
-    let rotation_steps: Option<u32> = Some(120);
-    let angle_delta_x: Option<f64> = Some(0.0);
-    let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 120.0);
+    let rotation_steps: Option<u32> = Some(32);
+    let angle_delta_x: Option<f64> = Some(std::f64::consts::PI / 4.0);
+    let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 4.0);
     let angle_delta_z: Option<f64> = Some(0.0);
 
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)

@@ -13,7 +13,7 @@ mod sampling;
 
 use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
-use crate::projector::constants::NUM_CHANNELS;
+use crate::projector::constants::{DEFAULT_LIGHT_COLOR, GLOBAL_AMBIENT, NUM_CHANNELS};
 use crate::projector::filtering::filter_outliers;
 use crate::projector::math::{
     combine_rotations, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
@@ -37,10 +37,6 @@ fn compute_single_projection(
     let rows = max_bound_u;
     let cols = max_bound_u;
 
-    // Vertices are already scaled (preprocessed) and in world space.
-    // Face normals are already precomputed and in world space.
-    // The view_config.rotation_matrix defines the projection plane.
-
     // Initialize buffers for a single view
     let mut buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
 
@@ -49,24 +45,30 @@ fn compute_single_projection(
     let mut normal_map_view = buffers.normal_maps.index_axis_mut(Axis(0), 0);
     let mut z_buffer_view = buffers.z_buffers.index_axis_mut(Axis(0), 0);
 
-    // Rasterize all triangles
-    let num_faces = mesh.geometry.triangles.nrows();
-    for triangle_index in 0..num_faces {
-        // Pass the pre-scaled world-space vertices and precomputed world-space face normals.
-        // rasterize_triangle will handle projecting vertices onto the view plane defined by view_config.
-        let face_normal_view = mesh.geometry.face_normals.row(triangle_index);
-        rasterize_triangle(
-            mesh, // Pass the full mesh for materials, UVs, original vertex normals etc.
-            triangle_index,
-            // transformed_vertices is removed, rasterize_triangle will use mesh.geometry.vertices directly
-            // and project them using view_config.rotation_matrix.
-            face_normal_view, // Pass the precomputed face normal for this triangle
-            view_config,
-            &mut z_buffer_view.view_mut(),
-            &mut image_view.view_mut(),
-            &mut depth_map_view.view_mut(),
-            &mut normal_map_view.view_mut(),
-        );
+    let mut global_triangle_offset = 0;
+    // Rasterize all triangles from all submeshes
+    for submesh in &mesh.submeshes {
+        let num_faces = submesh.geometry.triangles.nrows();
+        for triangle_index in 0..num_faces {
+            // triangle_index is local to the submesh
+            let face_normal_view = submesh.geometry.face_normals.row(triangle_index);
+            let uv_lookup_triangle_id = global_triangle_offset + triangle_index;
+            rasterize_triangle(
+                &submesh.geometry,
+                &submesh.material,
+                &mesh.texture,
+                mesh.mode,
+                triangle_index,        // Local triangle index for geometry
+                uv_lookup_triangle_id, // Global triangle ID for UVs
+                face_normal_view,
+                view_config,
+                &mut z_buffer_view.view_mut(),
+                &mut image_view.view_mut(),
+                &mut depth_map_view.view_mut(),
+                &mut normal_map_view.view_mut(),
+            );
+        }
+        global_triangle_offset += num_faces;
     }
 
     // Apply outlier filtering
@@ -134,15 +136,6 @@ pub fn compute_mesh_projections(
         settings.precision,
         settings.filtering_window_radius
     );
-    log::info!(
-        "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
-        mesh.material.ka,
-        mesh.material.kd,
-        mesh.material.ks,
-        mesh.material.ns,
-        mesh.material.opacity,
-        mesh.material.illum
-    );
 
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
@@ -152,8 +145,15 @@ pub fn compute_mesh_projections(
     let cols = max_bound_u;
 
     // Handle empty meshes
-    if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
-        log::warn!("Empty points or triangles detected. Returning empty buffers.");
+    if mesh.submeshes.is_empty()
+        || mesh
+            .submeshes
+            .iter()
+            .all(|sm| sm.geometry.vertices.is_empty() || sm.geometry.triangles.is_empty())
+    {
+        log::warn!(
+            "Empty mesh (no submeshes or no geometry in submeshes). Returning empty buffers."
+        );
         let empty_buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
         let empty_occupancy_map = Array3::<u8>::zeros((1, rows, cols));
         return (
@@ -198,20 +198,45 @@ pub fn compute_mesh_projections(
         let rz = rotation_matrix_z(angle_z);
         let rotation_matrix = combine_rotations(&rx, &ry, &rz);
 
-        // The view direction is the Z-axis of the transformed coordinate system (third column of rotation matrix)
-        let view_dir = (
+        let view_dir_tuple = (
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
 
+        // Light should come from the projection plane towards the mesh
+        // In view space, the projection plane is perpendicular to [0,0,1]
+        // So in world space, the light direction is the negative of the view direction
+        let light_dir_ws = [-view_dir_tuple.0, -view_dir_tuple.1, -view_dir_tuple.2];
+
+        // Transform light direction from world space to view space
+        let light_dir_vs = [
+            rotation_matrix[[0, 0]] * light_dir_ws[0]
+                + rotation_matrix[[0, 1]] * light_dir_ws[1]
+                + rotation_matrix[[0, 2]] * light_dir_ws[2],
+            rotation_matrix[[1, 0]] * light_dir_ws[0]
+                + rotation_matrix[[1, 1]] * light_dir_ws[1]
+                + rotation_matrix[[1, 2]] * light_dir_ws[2],
+            rotation_matrix[[2, 0]] * light_dir_ws[0]
+                + rotation_matrix[[2, 1]] * light_dir_ws[1]
+                + rotation_matrix[[2, 2]] * light_dir_ws[2],
+        ];
+
+        let view_pos_vs = [0.0, 0.0, 1.0];
+
         view_configs.push(ViewConfig {
             is_front_view: true,
-            view_dir,
+            view_dir: view_dir_tuple,
             rotation_matrix,
             max_bound_f64,
+            light_dir_vs,
+            view_pos_vs,
+            light_color: DEFAULT_LIGHT_COLOR,
         });
     }
+
+    let settings_arc = Arc::new(settings.clone());
+    let mesh_arc = Arc::new(mesh.clone());
 
     let settings = Arc::new(settings);
     let mut projections = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
@@ -243,7 +268,7 @@ pub fn compute_mesh_projections(
 
                 // Compute projection for this view
                 let (img, depth, normal, occ, outlier) =
-                    compute_single_projection(&mesh, &settings, view_config);
+                    compute_single_projection(&mesh_arc, &settings_arc, view_config);
 
                 // Store results in the 5D array and other containers
                 projection.assign(&img);
@@ -290,9 +315,14 @@ pub fn compute_and_save_rotation_projections(
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
 
-    // Handle empty meshes
-    if mesh.geometry.vertices.is_empty() || mesh.geometry.triangles.is_empty() {
-        log::warn!("Empty points or triangles detected. Skipping projection.");
+    // Handle empty meshes - CORRECTED
+    if mesh.submeshes.is_empty()
+        || mesh
+            .submeshes
+            .iter()
+            .all(|sm| sm.geometry.vertices.is_empty() || sm.geometry.triangles.is_empty())
+    {
+        log::warn!("Empty mesh (no submeshes or no geometry in submeshes). Skipping projection.");
         return;
     }
 
@@ -310,28 +340,47 @@ pub fn compute_and_save_rotation_projections(
         let rz = rotation_matrix_z(angle_z);
         let rotation_matrix = combine_rotations(&rx, &ry, &rz);
 
-        // The view direction is the Z-axis of the transformed coordinate system (third column of rotation matrix)
-        let view_dir = (
+        let view_dir_tuple = (
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
 
-        // Create view config for front view
+        // Light should come from the projection plane towards the mesh
+        // In view space, the projection plane is perpendicular to [0,0,1]
+        // So in world space, the light direction is the negative of the view direction
+        let light_dir_ws = [-view_dir_tuple.0, -view_dir_tuple.1, -view_dir_tuple.2];
+
+        // Transform light direction from world space to view space
+        let light_dir_vs = [
+            rotation_matrix[[0, 0]] * light_dir_ws[0]
+                + rotation_matrix[[0, 1]] * light_dir_ws[1]
+                + rotation_matrix[[0, 2]] * light_dir_ws[2],
+            rotation_matrix[[1, 0]] * light_dir_ws[0]
+                + rotation_matrix[[1, 1]] * light_dir_ws[1]
+                + rotation_matrix[[1, 2]] * light_dir_ws[2],
+            rotation_matrix[[2, 0]] * light_dir_ws[0]
+                + rotation_matrix[[2, 1]] * light_dir_ws[1]
+                + rotation_matrix[[2, 2]] * light_dir_ws[2],
+        ];
+
+        let view_pos_vs = [0.0, 0.0, 1.0];
+
         view_configs.push(ViewConfig {
             is_front_view: true,
-            view_dir,
+            view_dir: view_dir_tuple,
             rotation_matrix,
             max_bound_f64,
+            light_dir_vs,
+            view_pos_vs,
+            light_color: DEFAULT_LIGHT_COLOR,
         });
     }
 
-    // Use Arc for sharing mesh and settings data across threads
-    let mesh = Arc::new(mesh.clone());
-    let settings = Arc::new(settings);
-    let output_dir = Arc::new(output_dir.to_path_buf());
+    let mesh_arc = Arc::new(mesh.clone());
+    let settings_arc = Arc::new(settings.clone());
+    let output_dir_arc = Arc::new(output_dir.to_path_buf());
 
-    // Compute projections for each view in parallel and save them on-the-fly
     view_configs
         .par_iter()
         .enumerate()
@@ -339,16 +388,13 @@ pub fn compute_and_save_rotation_projections(
             log::info!("Computing projection {} of {}", i + 1, num_steps);
 
             // Mesh is no longer rotated here. Transformation happens in compute_single_projection.
-            let current_mesh_for_projection = Arc::clone(&mesh).as_ref().clone();
-
-            // Preprocessing is now handled inside compute_single_projection after vertex transformation.
-            // So, remove explicit rotation and preprocessing calls here.
+            let current_mesh_for_projection = Arc::clone(&mesh_arc).as_ref().clone();
 
             let (img, _, _, _, _) =
-                compute_single_projection(&current_mesh_for_projection, &settings, view_config);
+                compute_single_projection(&current_mesh_for_projection, &settings_arc, view_config);
 
             // Save the projection data for the current view
-            if let Err(e) = io::save_projection_data(&img, &output_dir, i, true) {
+            if let Err(e) = io::save_projection_data(&img, &output_dir_arc, i, true) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }
         });

@@ -22,6 +22,8 @@ pub struct MeshGeometry {
     pub vertex_normals: Option<Array2<f64>>,
     /// Precomputed triangle face normals (M, 3), in world space (derived from scaled vertices).
     pub face_normals: Array2<f64>,
+    /// Vertex colors (N, 3) (optional, primarily for ObjOnly mode).
+    pub vertex_colors: Option<Array2<f64>>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,13 +53,17 @@ pub struct MeshMaterial {
 }
 
 #[derive(Debug, Clone)]
-pub struct Mesh {
-    // Geometry
+pub struct SubMesh {
     pub geometry: MeshGeometry,
-    // Texture
-    pub texture: MeshTexture,
-    // Material
     pub material: MeshMaterial,
+}
+
+#[derive(Debug, Clone)]
+pub struct Mesh {
+    // Submeshes: each submesh has its own geometry, texture, material, and mode
+    pub submeshes: Vec<SubMesh>,
+    // Texture: shared texture for all submeshes
+    pub texture: MeshTexture,
     // Rendering mode
     pub mode: MeshMode,
 }
