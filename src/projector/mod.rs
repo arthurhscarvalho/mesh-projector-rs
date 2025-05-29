@@ -210,17 +210,18 @@ pub fn compute_mesh_projections(
         let light_dir_ws = [-view_dir_tuple.0, -view_dir_tuple.1, -view_dir_tuple.2];
 
         // Transform light direction from world space to view space
-        let light_dir_vs = [
-            rotation_matrix[[0, 0]] * light_dir_ws[0]
-                + rotation_matrix[[0, 1]] * light_dir_ws[1]
-                + rotation_matrix[[0, 2]] * light_dir_ws[2],
-            rotation_matrix[[1, 0]] * light_dir_ws[0]
-                + rotation_matrix[[1, 1]] * light_dir_ws[1]
-                + rotation_matrix[[1, 2]] * light_dir_ws[2],
-            rotation_matrix[[2, 0]] * light_dir_ws[0]
-                + rotation_matrix[[2, 1]] * light_dir_ws[1]
-                + rotation_matrix[[2, 2]] * light_dir_ws[2],
-        ];
+        let light_dir_vs = light_dir_ws;
+        // let light_dir_vs = [
+        //     rotation_matrix[[0, 0]] * light_dir_ws[0]
+        //         + rotation_matrix[[0, 1]] * light_dir_ws[1]
+        //         + rotation_matrix[[0, 2]] * light_dir_ws[2],
+        //     rotation_matrix[[1, 0]] * light_dir_ws[0]
+        //         + rotation_matrix[[1, 1]] * light_dir_ws[1]
+        //         + rotation_matrix[[1, 2]] * light_dir_ws[2],
+        //     rotation_matrix[[2, 0]] * light_dir_ws[0]
+        //         + rotation_matrix[[2, 1]] * light_dir_ws[1]
+        //         + rotation_matrix[[2, 2]] * light_dir_ws[2],
+        // ];
 
         let view_pos_vs = [0.0, 0.0, 1.0];
 
