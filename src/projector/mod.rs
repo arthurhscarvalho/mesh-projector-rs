@@ -20,9 +20,6 @@ use crate::projector::math::{
 };
 use mesh::{Mesh, MeshMode};
 use ndarray::{array, s, Array2, Array3, Array4, Axis};
-use rand::Rng;
-use rand::SeedableRng;
-use rand_pcg::Pcg64;
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 use std::path::Path;
