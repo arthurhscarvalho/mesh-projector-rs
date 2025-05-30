@@ -1,6 +1,6 @@
 // src/projector/filtering.rs
 use crate::projector::constants::{
-    BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS, NUM_IMAGES,
+    BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS,
 };
 use nd::{Array3, Array4, ArrayView2, Axis, Ix4};
 use rayon::prelude::*;
@@ -14,7 +14,6 @@ fn find_outliers_for_layer(
     rows: usize,              // Total rows
     cols: usize,              // Total columns
     filter_threshold: f64,    // Depth difference threshold
-    is_front_view: bool,      // Flag for view direction
 ) -> Vec<(usize, usize)> {
     let row_start = w;
     let col_start = w;
@@ -32,9 +31,7 @@ fn find_outliers_for_layer(
                 let c = col_start + c_offset;
                 let center_depth = z_slice[[r, c]];
                 // Skip if the center pixel depth is invalid (background).
-                if (is_front_view && center_depth == f64::INFINITY)
-                    || (!is_front_view && center_depth == f64::NEG_INFINITY)
-                {
+                if center_depth == f64::INFINITY || center_depth == f64::NEG_INFINITY {
                     continue;
                 }
                 // Also skip NaNs just in case
@@ -55,11 +52,8 @@ fn find_outliers_for_layer(
                         }
                         let neighbor_depth = z_slice[[nr, nc]];
                         // Check if neighbor is valid (not background and finite)
-                        let is_valid_neighbor = if is_front_view {
-                            neighbor_depth < f64::INFINITY && neighbor_depth.is_finite()
-                        } else {
-                            neighbor_depth > f64::NEG_INFINITY && neighbor_depth.is_finite()
-                        };
+                        let is_valid_neighbor =
+                            neighbor_depth < f64::INFINITY && neighbor_depth.is_finite();
                         if is_valid_neighbor {
                             sum_depth += neighbor_depth;
                             count_neighbors += 1.0;
@@ -70,11 +64,7 @@ fn find_outliers_for_layer(
                 if count_neighbors > 0.0 {
                     let avg_neighbor_depth = sum_depth / count_neighbors;
                     let depth_diff = center_depth - avg_neighbor_depth;
-                    let is_outlier = if is_front_view {
-                        depth_diff > filter_threshold
-                    } else {
-                        depth_diff < -filter_threshold
-                    };
+                    let is_outlier = depth_diff > filter_threshold;
                     if is_outlier {
                         row_outlier_coords.push((r, c));
                     }
@@ -121,14 +111,7 @@ pub fn filter_outliers(
         .into_par_iter()
         .map(|k| {
             let z_slice = z_buffers.index_axis(Axis(0), k);
-            // For rotation-based views, we only use front views
-            let is_front_view = if num_images == NUM_IMAGES {
-                k % 2 == 0
-            } else {
-                true
-            };
-            let outlier_coords =
-                find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold, is_front_view);
+            let outlier_coords = find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold);
             let count = outlier_coords.len() as u64;
             (k, outlier_coords, count) // Return index, coords, and count
         })

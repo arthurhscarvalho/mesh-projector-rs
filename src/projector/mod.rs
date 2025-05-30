@@ -105,11 +105,7 @@ fn compute_single_projection(
     for r in 0..rows {
         for c in 0..cols {
             let depth_val = z_slice[[r, c]];
-            let is_occupied = if view_config.is_front_view {
-                depth_val < f64::INFINITY && depth_val.is_finite()
-            } else {
-                depth_val > f64::NEG_INFINITY && depth_val.is_finite()
-            };
+            let is_occupied = depth_val < f64::INFINITY && depth_val.is_finite();
             if is_occupied {
                 occupancy_map[[0, r, c]] = 255;
             }
@@ -209,7 +205,6 @@ pub fn compute_mesh_projections(
         );
 
         view_configs.push(ViewConfig {
-            is_front_view: true,
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),
@@ -321,7 +316,6 @@ pub fn compute_and_save_rotation_projections(
         );
 
         view_configs.push(ViewConfig {
-            is_front_view: true,
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),

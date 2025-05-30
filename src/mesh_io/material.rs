@@ -54,49 +54,42 @@ pub fn load_material_from_mtl(mtl_path: &str, ignore_opacity: bool) -> MeshResul
 pub fn process_materials_from_obj(
     obj_materials_result: Result<Vec<tobj::Material>, tobj::LoadError>,
     mtl_path: Option<&str>,
+    mode: MeshMode,
     ignore_opacity: bool,
 ) -> MeshResult<Vec<MeshMaterial>> {
-    match obj_materials_result {
-        Ok(materials) if !materials.is_empty() => {
-            info!(
-                "Loaded {} materials from .mtl files linked in OBJ.",
-                materials.len()
-            );
-            Ok(materials
-                .into_iter()
-                .map(|mtl| convert_tobj_material(mtl, ignore_opacity))
-                .collect())
+    match mode {
+        MeshMode::ObjOnly => {
+            // Always use hardcoded material for ObjOnly mode
+            info!("Using hardcoded material for ObjOnly mode");
+            Ok(vec![MeshMaterial {
+                ka: [0.0, 0.0, 0.0], // No Ambient term from material
+                kd: [1.0, 1.0, 1.0], // Base color modulation (vertex color is base)
+                ks: [0.0, 0.0, 0.0], // No Specular
+                ns: 10.0,
+                opacity: 1.0,
+                illum: 0, // Color = ShadingColor (no lighting calculation)
+            }])
         }
-        Err(e) => {
-            // OBJ parsing failed, try fallback if available
-            if let Some(path) = mtl_path {
-                if Path::new(path).exists() {
-                    info!(
-                        "OBJ-linked materials failed to load ({}). Attempting fallback MTL: {}",
-                        e, path
-                    );
-                    Ok(vec![load_material_from_mtl(path, ignore_opacity)?])
-                } else {
-                    Err(MeshError::MaterialProcessingError(format!(
-                        "OBJ materials failed to load and fallback MTL path '{}' not found. Error: {}",
-                        path, e
-                    )))
-                }
-            } else {
-                Err(MeshError::MaterialProcessingError(format!(
-                    "OBJ materials failed to load and no fallback MTL path provided. Error: {}",
-                    e
-                )))
-            }
+        MeshMode::ObjTexture => {
+            // Always use hardcoded material for ObjTexture mode
+            info!("Using hardcoded material for ObjTexture mode");
+            Ok(vec![MeshMaterial {
+                ka: [0.0, 0.0, 0.0], // No Ambient
+                kd: [1.0, 1.0, 1.0], // Base color modulation (texture is base)
+                ks: [0.0, 0.0, 0.0], // No Specular
+                ns: 10.0,            // Default Shininess
+                opacity: 1.0,        // Fully Opaque
+                illum: 0,            // Color = ShadingColor (no lighting calc)
+            }])
         }
-        Ok(_) => {
-            // Empty materials, try fallback
-            handle_fallback_material_loading(mtl_path, ignore_opacity)
+        MeshMode::Full => {
+            // Load materials from MTL file and map based on OBJ material references
+            process_materials_for_full_mode(obj_materials_result, mtl_path, ignore_opacity)
         }
     }
 }
 
-/// Get appropriate material for a submesh based on mode and material index
+/// Get appropriate material for a submesh based on material index
 pub fn get_submesh_material(
     material_idx_opt: Option<usize>,
     materials: &[MeshMaterial],
@@ -110,12 +103,31 @@ pub fn get_submesh_material(
         }
         Some(idx) => {
             warn!(
-                "Material index {} out of bounds for model '{}' ({} materials loaded). Using default material.",
+                "Material index {} out of bounds for model '{}' ({} materials loaded). Using first available material.",
                 idx, model_name, materials.len()
             );
-            DEFAULT_MATERIAL
+            if !materials.is_empty() {
+                materials[0].clone()
+            } else {
+                DEFAULT_MATERIAL
+            }
         }
-        None => get_mode_specific_default_material(mode, model_name),
+        None => {
+            // For modes with predefined materials, use the first (and likely only) material
+            if !materials.is_empty() {
+                info!(
+                    "Model '{}' has no material assigned in OBJ. Using first available material for mode {:?}.",
+                    model_name, mode
+                );
+                materials[0].clone()
+            } else {
+                warn!(
+                    "Model '{}' has no material assigned and no materials loaded. Using default material.",
+                    model_name
+                );
+                DEFAULT_MATERIAL
+            }
+        }
     }
 }
 
@@ -206,41 +218,6 @@ fn handle_fallback_material_loading(
     }
 }
 
-/// Get mode-specific default material when no material is assigned
-fn get_mode_specific_default_material(mode: MeshMode, model_name: &str) -> MeshMaterial {
-    if mode == MeshMode::Full {
-        warn!(
-            "Model '{}' has no material assigned in OBJ. Using default material.",
-            model_name
-        );
-    } else {
-        info!(
-            "Model '{}' has no material assigned in OBJ. Using mode-specific default.",
-            model_name
-        );
-    }
-
-    match mode {
-        MeshMode::Full => DEFAULT_MATERIAL,
-        MeshMode::ObjTexture => MeshMaterial {
-            ka: [0.0, 0.0, 0.0],
-            kd: [1.0, 1.0, 1.0],
-            ks: [0.0, 0.0, 0.0],
-            ns: 10.0,
-            opacity: 1.0,
-            illum: 0, // illum 0: Color = ShadingColor
-        },
-        MeshMode::ObjOnly => MeshMaterial {
-            ka: [0.0, 0.0, 0.0],
-            kd: [1.0, 1.0, 1.0],
-            ks: [0.0, 0.0, 0.0],
-            ns: 10.0,
-            opacity: 1.0,
-            illum: 0,
-        },
-    }
-}
-
 /// Log material assignment information
 fn log_material_assignment(material: &MeshMaterial, idx: usize, model_name: &str) {
     info!(
@@ -254,4 +231,50 @@ fn log_material_assignment(material: &MeshMaterial, idx: usize, model_name: &str
         idx,
         model_name
     );
+}
+
+/// Process materials for Full mode: load from MTL file and map based on OBJ material references
+fn process_materials_for_full_mode(
+    obj_materials_result: Result<Vec<tobj::Material>, tobj::LoadError>,
+    mtl_path: Option<&str>,
+    ignore_opacity: bool,
+) -> MeshResult<Vec<MeshMaterial>> {
+    match obj_materials_result {
+        Ok(materials) if !materials.is_empty() => {
+            info!(
+                "Loaded {} materials from .mtl files linked in OBJ for Full mode.",
+                materials.len()
+            );
+            Ok(materials
+                .into_iter()
+                .map(|mtl| convert_tobj_material(mtl, ignore_opacity))
+                .collect())
+        }
+        Err(e) => {
+            // OBJ parsing failed, try fallback if available
+            if let Some(path) = mtl_path {
+                if Path::new(path).exists() {
+                    info!(
+                        "OBJ-linked materials failed to load ({}). Attempting fallback MTL: {}",
+                        e, path
+                    );
+                    Ok(vec![load_material_from_mtl(path, ignore_opacity)?])
+                } else {
+                    Err(MeshError::MaterialProcessingError(format!(
+                        "OBJ materials failed to load and fallback MTL path '{}' not found. Error: {}",
+                        path, e
+                    )))
+                }
+            } else {
+                Err(MeshError::MaterialProcessingError(format!(
+                    "OBJ materials failed to load and no fallback MTL path provided. Error: {}",
+                    e
+                )))
+            }
+        }
+        Ok(_) => {
+            // Empty materials, try fallback
+            handle_fallback_material_loading(mtl_path, ignore_opacity)
+        }
+    }
 }

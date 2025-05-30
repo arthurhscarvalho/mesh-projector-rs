@@ -1,16 +1,14 @@
 // src/projector/buffers.rs
-use crate::projector::constants::{BACKGROUND_BRIGHTNESS, NUM_IMAGES};
-use ndarray::{s, Array3, Array4};
+use crate::projector::constants::BACKGROUND_BRIGHTNESS;
+use ndarray::{Array3, Array4};
 use std::f64;
 
-/// Holds the output image buffers generated during the projection process:
-/// the color images, Z-buffers, depth maps, and normal maps for each of the `NUM_IMAGES` views.
+/// Holds the output image buffers generated during the projection process.
 #[derive(Debug)]
 pub struct Buffers {
     /// The rendered color images (NUM_IMAGES, H, W, C). Initialized to `BACKGROUND_BRIGHTNESS`.
     pub images: Array4<u8>,
     /// Z-buffers (raw depth values) (NUM_IMAGES, H, W). Stores the depth of the closest fragment.
-    /// Initialized to +/- INFINITY depending on the view direction for correct depth testing.
     pub z_buffers: Array3<f64>,
     /// The rendered depth maps (NUM_IMAGES, H, W, C), scaled to `u8`. Initialized to 0.
     pub depth_maps: Array4<u8>,
@@ -20,12 +18,7 @@ pub struct Buffers {
 
 impl Buffers {
     /// Creates new buffers sized according to the specified dimensions and number of images.
-    /// Initializes the buffers appropriately for the projection process:
-    /// - Images are set to `BACKGROUND_BRIGHTNESS`.
-    /// - Z-buffers are initialized to +INFINITY for front views and -INFINITY for back views.
-    ///   This ensures the first depth test always passes correctly based on view direction
-    ///   (front views check `depth < current_z`, back views check `depth > current_z`).
-    /// - Depth maps and Normal maps are initialized to 0.
+    /// Initializes the buffers appropriately for the projection process.
     pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
         Buffers {
             images: Array4::from_elem((num_images, rows, cols, channels), BACKGROUND_BRIGHTNESS),

@@ -67,9 +67,6 @@ impl ProjectorConfig {
 
 /// Encapsulates parameters for a single orthographic projection view (camera settings).
 pub struct ViewConfig {
-    /// True if this is a front view (looking along the positive direction of the transformed Z-axis),
-    /// false if it's a back view (looking along the negative direction).
-    pub is_front_view: bool,
     /// Normalized view direction vector corresponding to this projection
     /// (this will be the new Z-axis after transformation).
     pub view_dir: (f64, f64, f64),

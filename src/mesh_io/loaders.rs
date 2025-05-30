@@ -27,7 +27,7 @@ pub fn load_mesh_with_mode(
 ) -> MeshResult<Mesh> {
     info!("Loading mesh: {} in mode: {:?}", obj_path, mode);
 
-    // Validate precision
+    // Validate precision (This limit is set just to set consistent bounds)
     if precision < 8 || precision > 16 {
         return Err(MeshError::PrecisionError(format!(
             "Invalid precision value: {}. Must be between 8 and 16.",
@@ -46,7 +46,7 @@ pub fn load_mesh_with_mode(
     }
 
     // Process materials
-    let materials = process_materials_from_obj(materials_result, mtl_path, ignore_opacity)?;
+    let materials = process_materials_from_obj(materials_result, mtl_path, mode, ignore_opacity)?;
 
     // Process texture if needed
     let shared_texture = process_texture_data(&models, texture_path, mode, flip_v_coordinate)?;

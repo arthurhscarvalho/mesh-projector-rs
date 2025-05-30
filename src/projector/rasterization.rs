@@ -192,11 +192,7 @@ pub fn rasterize_triangle(
             }
             let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
             let current_z = z_slice[[row, col]];
-            let depth_test_passed = if projection_config.is_front_view {
-                interpolated_z < current_z
-            } else {
-                interpolated_z > current_z
-            };
+            let depth_test_passed = interpolated_z < current_z;
 
             if depth_test_passed {
                 // Interpolate world-space vertex position for the current pixel
