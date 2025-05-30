@@ -7,13 +7,13 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
-use crate::projector::io;
 use numpy::{IntoPyArray, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use std::path::Path;
 
 mod logging;
+mod mesh_io;
 mod projector;
 
 #[pyfunction]
@@ -49,7 +49,7 @@ fn generate_projections<'py>(
     let angle_delta_z: Option<f64> = Some(0.0);
 
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match io::load_mesh(
+    let mesh = match mesh_io::load_mesh_auto(
         obj_path,
         texture_path,
         mtl_path,
@@ -144,7 +144,7 @@ fn generate_projections_rotation<'py>(
     let angle_delta_z: Option<f64> = Some(0.0);
 
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match io::load_mesh(
+    let mesh = match mesh_io::load_mesh_auto(
         obj_path,
         texture_path,
         mtl_path,

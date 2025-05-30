@@ -3,14 +3,14 @@ mod buffers;
 pub mod config;
 mod constants;
 mod filtering;
-mod geometry;
-pub mod io;
+pub mod geometry;
 mod lighting;
 mod math;
 pub mod mesh;
 mod rasterization;
 mod sampling;
 
+use crate::mesh_io::save_image_data;
 use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
@@ -371,7 +371,7 @@ pub fn compute_and_save_rotation_projections(
                 compute_single_projection(&current_mesh_for_projection, &settings_arc, view_config);
 
             // Save the projection data for the current view
-            if let Err(e) = io::save_projection_data(&img, &output_dir_arc, i, true) {
+            if let Err(e) = save_image_data(&img, &output_dir_arc, i, true) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }
         });
