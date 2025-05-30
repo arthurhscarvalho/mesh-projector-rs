@@ -7,7 +7,7 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
-use numpy::{IntoPyArray, PyArray3, PyArray4};
+use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
 use std::path::Path;
@@ -84,6 +84,7 @@ fn generate_projections<'py>(
         angle_delta_x,
         angle_delta_y,
         angle_delta_z,
+        1.0,
     );
 
     // Call the backend to compute projections
@@ -177,6 +178,7 @@ fn generate_projections_rotation<'py>(
         angle_delta_x,
         angle_delta_y,
         angle_delta_z,
+        1.0,
     );
 
     // Call the backend to compute projections
@@ -188,9 +190,83 @@ fn generate_projections_rotation<'py>(
     Ok(())
 }
 
+#[pyfunction]
+fn generate_point_cloud<'py>(
+    py: Python<'py>,
+    obj_path: &str,
+    texture_path: Option<&str>,
+    mtl_path: Option<&str>,
+    precision: u64,
+    filtering_radius: u64,
+    flip_uv: bool,
+    ignore_opacity: bool,
+    verbose: bool,
+) -> PyResult<(Py<PyArray2<f64>>, Py<PyArray2<u8>>)> {
+    if verbose {
+        logging::init_logger().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to initialize logger: {}",
+                e
+            ))
+        })?;
+    }
+    log::info!("Entering Rust generate_point_cloud backend");
+
+    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
+    let mesh = match mesh_io::load_mesh_auto(
+        obj_path,
+        texture_path,
+        mtl_path,
+        precision as u32,
+        flip_uv,
+        ignore_opacity,
+    ) {
+        Ok(mesh) => mesh,
+        Err(e) => {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Failed to load mesh: {}",
+                e
+            )));
+        }
+    };
+
+    // Set up projection settings
+    // Note: rotation parameters aren't used for point cloud generation,
+    // but we need to provide them for the ProjectorConfig
+    let rotation_steps: u32 = 1; // Only need one step for point cloud
+    let angle_delta_x: f64 = 0.0;
+    let angle_delta_y: f64 = 0.0;
+    let angle_delta_z: f64 = 0.0;
+
+    let settings = ProjectorConfig::new(
+        precision,
+        filtering_radius,
+        rotation_steps,
+        angle_delta_x,
+        angle_delta_y,
+        angle_delta_z,
+        1.0,
+    );
+
+    // Call the backend to generate the point cloud
+    let (points, colors) =
+        py.allow_threads(|| projector::discretize_mesh_to_point_cloud(&mesh, &settings));
+    log::info!(
+        "Back-end point cloud generation complete! Generated {} points",
+        points.shape()[0]
+    );
+
+    // Convert the ndarray results directly to numpy arrays and return as a tuple
+    Ok((
+        points.into_pyarray(py).into(),
+        colors.into_pyarray(py).into(),
+    ))
+}
+
 #[pymodule]
 fn mesh_projector(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(generate_projections, m)?)?;
     m.add_function(wrap_pyfunction!(generate_projections_rotation, m)?)?;
+    m.add_function(wrap_pyfunction!(generate_point_cloud, m)?)?;
     Ok(())
 }
