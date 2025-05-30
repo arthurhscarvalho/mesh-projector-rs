@@ -1,6 +1,29 @@
 from .mesh_projector import (
     generate_projections_rotation as _internal_generate_projections,
 )
+from .mesh_projector import generate_point_cloud as _internal_generate_point_cloud
+
+
+def generate_point_cloud(
+    obj_path,
+    texture_path=None,
+    mtl_path=None,
+    precision=12,
+    filtering_radius=0,
+    flip_uv=True,
+    ignore_opacity=False,
+    verbose=False,
+):
+    return _internal_generate_point_cloud(
+        obj_path,
+        texture_path,
+        mtl_path,
+        precision,
+        filtering_radius,
+        flip_uv,
+        ignore_opacity,
+        verbose,
+    )
 
 
 def project_mesh(
