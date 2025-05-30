@@ -199,6 +199,7 @@ fn generate_point_cloud<'py>(
     precision: u64,
     filtering_radius: u64,
     flip_uv: bool,
+    point_cloud_density_factor: f64,
     ignore_opacity: bool,
     verbose: bool,
 ) -> PyResult<(Py<PyArray2<f64>>, Py<PyArray2<u8>>)> {
@@ -245,7 +246,7 @@ fn generate_point_cloud<'py>(
         angle_delta_x,
         angle_delta_y,
         angle_delta_z,
-        1.0,
+        point_cloud_density_factor,
     );
 
     // Call the backend to generate the point cloud

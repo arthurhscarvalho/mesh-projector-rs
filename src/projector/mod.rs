@@ -503,7 +503,10 @@ pub fn discretize_mesh_to_point_cloud(
             // Number of points per triangle is roughly 0.5 * n_subdiv^2.
             // With n_subdiv = (triangle_area * density).sqrt(),
             // points per triangle becomes ~ 0.5 * triangle_area * density.
-            let n_subdiv = (triangle_area * density).sqrt().ceil() as usize;
+            // Using .floor() allows n_subdiv to be 0 for triangles that don't meet
+            // the threshold for even one subdivision step at the current density,
+            // leading to fewer points at low precision settings.
+            let n_subdiv = (triangle_area * density).sqrt().floor() as usize;
 
             if n_subdiv == 0 {
                 continue;

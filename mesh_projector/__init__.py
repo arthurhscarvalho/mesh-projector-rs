@@ -11,6 +11,7 @@ def generate_point_cloud(
     precision=12,
     filtering_radius=0,
     flip_uv=True,
+    point_cloud_density_factor=1.0,
     ignore_opacity=False,
     verbose=False,
 ):
@@ -21,6 +22,7 @@ def generate_point_cloud(
         precision,
         filtering_radius,
         flip_uv,
+        point_cloud_density_factor,
         ignore_opacity,
         verbose,
     )
