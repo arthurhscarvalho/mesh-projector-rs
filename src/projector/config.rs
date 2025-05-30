@@ -4,7 +4,6 @@
 use ndarray::Array2;
 
 /// Contains settings for controlling mesh rotation during projection.
-#[derive(Debug, Clone)]
 pub struct RotationConfig {
     /// Angle delta for rotation around X axis (in radians)
     pub angle_delta_x: f64,
@@ -34,28 +33,18 @@ impl RotationConfig {
 }
 
 /// Contains all the settings for controlling the projection process.
-#[derive(Debug)]
 pub struct ProjectorConfig {
     /// The precision/resolution of the output images (log2 of dimensions).
     pub precision: u64,
     /// Radius for outlier filtering (0 = disabled).
     pub filtering_window_radius: u64,
     /// Optional rotation configuration. If None, uses default 6-view orthographic projection.
-    pub rotation_config: Option<RotationConfig>,
+    pub rotation_config: RotationConfig,
 }
 
 impl ProjectorConfig {
-    /// Creates a new projection settings object with default 6-view orthographic projection.
-    pub fn new(precision: u64, filtering_window_radius: u64) -> Self {
-        ProjectorConfig {
-            precision,
-            filtering_window_radius,
-            rotation_config: None,
-        }
-    }
-
     /// Creates a new projection settings object with rotation-based projection.
-    pub fn new_with_rotation(
+    pub fn new(
         precision: u64,
         filtering_window_radius: u64,
         num_steps: u32,
@@ -66,18 +55,17 @@ impl ProjectorConfig {
         ProjectorConfig {
             precision,
             filtering_window_radius,
-            rotation_config: Some(RotationConfig::new(
+            rotation_config: RotationConfig::new(
                 angle_delta_x,
                 angle_delta_y,
                 angle_delta_z,
                 num_steps as usize,
-            )),
+            ),
         }
     }
 }
 
 /// Encapsulates parameters for a single orthographic projection view (camera settings).
-#[derive(Debug)]
 pub struct ViewConfig {
     /// True if this is a front view (looking along the positive direction of the transformed Z-axis),
     /// false if it's a back view (looking along the negative direction).
@@ -94,41 +82,13 @@ pub struct ViewConfig {
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
     /// Lighting configuration
-    pub lighting_config: LightingConfig,
+    pub light_source: LightSource,
 }
 
 /// Defines the source of the light.
-#[derive(Debug, Clone, Copy)]
 pub enum LightSource {
     /// Light is fixed in world coordinates.
     World([f64; 3]),
     /// Light originates from the camera.
     Camera,
-}
-
-/// Configuration for the lighting system.
-#[derive(Debug, Clone, Copy)]
-pub struct LightingConfig {
-    /// The source of the light.
-    pub light_source: LightSource,
-    /// Ambient light color.
-    pub ambient_color: [f64; 3],
-    /// Diffuse light color.
-    pub diffuse_color: [f64; 3],
-    /// Specular light color.
-    pub specular_color: [f64; 3],
-    /// Shininess factor for specular highlights.
-    pub shininess: f64,
-}
-
-impl Default for LightingConfig {
-    fn default() -> Self {
-        LightingConfig {
-            light_source: LightSource::Camera, // Default to camera light
-            ambient_color: [0.1, 0.1, 0.1],
-            diffuse_color: [0.8, 0.8, 0.8],
-            specular_color: [1.0, 1.0, 1.0],
-            shininess: 32.0,
-        }
-    }
 }

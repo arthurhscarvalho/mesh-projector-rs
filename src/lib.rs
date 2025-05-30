@@ -43,10 +43,10 @@ fn generate_projections<'py>(
     }
     log::info!("Entering Rust generate_projections backend");
 
-    let rotation_steps: Option<u32> = Some(64);
-    let angle_delta_x: Option<f64> = Some(0.0);
-    let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 32.0);
-    let angle_delta_z: Option<f64> = Some(0.0);
+    let rotation_steps: u32 = 64;
+    let angle_delta_x: f64 = 0.0;
+    let angle_delta_y: f64 = std::f64::consts::PI / 32.0;
+    let angle_delta_z: f64 = 0.0;
 
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
     let mesh = match mesh_io::load_mesh_auto(
@@ -65,28 +65,26 @@ fn generate_projections<'py>(
             )));
         }
     };
-    // Log material properties - REMOVED as material is now per-submesh
-    // log::info!(
-    //     "Material Properties: Ka={:?}, Kd={:?}, Ks={:?}, Ns={}, Opacity={}, Illum={}",
-    //     mesh.material.ka,
-    //     mesh.material.kd,
-    //     mesh.material.ks,
-    //     mesh.material.ns,
-    //     mesh.material.opacity,
-    //     mesh.material.illum
-    // );
 
     // Set up projection settings with rotation config if provided
-    let settings = if let (Some(steps), Some(dx), Some(dy), Some(dz)) =
-        (rotation_steps, angle_delta_x, angle_delta_y, angle_delta_z)
-    {
-        log::info!("Using rotation-based projection with {} steps", steps);
-        log::info!("Rotation deltas: X={}, Y={}, Z={} radians", dx, dy, dz);
-        ProjectorConfig::new_with_rotation(precision, filtering_radius, steps, dx, dy, dz)
-    } else {
-        log::info!("Using standard 6-view orthographic projection");
-        ProjectorConfig::new(precision, filtering_radius)
-    };
+    log::info!(
+        "Using rotation-based projection with {} steps",
+        rotation_steps
+    );
+    log::info!(
+        "Rotation deltas: X={}, Y={}, Z={} radians",
+        angle_delta_x,
+        angle_delta_y,
+        angle_delta_z
+    );
+    let settings = ProjectorConfig::new(
+        precision,
+        filtering_radius,
+        rotation_steps,
+        angle_delta_x,
+        angle_delta_y,
+        angle_delta_z,
+    );
 
     // Call the backend to compute projections
     let (images, depth_maps, normal_maps, occlusion_maps, outlier_counts) =
@@ -138,10 +136,10 @@ fn generate_projections_rotation<'py>(
     }
     log::info!("Entering Rust generate_projections backend");
 
-    let rotation_steps: Option<u32> = Some(32);
-    let angle_delta_x: Option<f64> = Some(0.0);
-    let angle_delta_y: Option<f64> = Some(std::f64::consts::PI / 4.0);
-    let angle_delta_z: Option<f64> = Some(0.0);
+    let rotation_steps: u32 = 32;
+    let angle_delta_x: f64 = 0.0;
+    let angle_delta_y: f64 = std::f64::consts::PI / 4.0;
+    let angle_delta_z: f64 = 0.0;
 
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
     let mesh = match mesh_io::load_mesh_auto(
@@ -162,16 +160,24 @@ fn generate_projections_rotation<'py>(
     };
 
     // Set up projection settings with rotation config if provided
-    let settings = if let (Some(steps), Some(dx), Some(dy), Some(dz)) =
-        (rotation_steps, angle_delta_x, angle_delta_y, angle_delta_z)
-    {
-        log::info!("Using rotation-based projection with {} steps", steps);
-        log::info!("Rotation deltas: X={}, Y={}, Z={} radians", dx, dy, dz);
-        ProjectorConfig::new_with_rotation(precision, filtering_radius, steps, dx, dy, dz)
-    } else {
-        log::info!("Using standard 6-view orthographic projection");
-        ProjectorConfig::new(precision, filtering_radius)
-    };
+    log::info!(
+        "Using rotation-based projection with {} steps",
+        rotation_steps
+    );
+    log::info!(
+        "Rotation deltas: X={}, Y={}, Z={} radians",
+        angle_delta_x,
+        angle_delta_y,
+        angle_delta_z
+    );
+    let settings = ProjectorConfig::new(
+        precision,
+        filtering_radius,
+        rotation_steps,
+        angle_delta_x,
+        angle_delta_y,
+        angle_delta_z,
+    );
 
     // Call the backend to compute projections
     let output_dir = Path::new("projections");

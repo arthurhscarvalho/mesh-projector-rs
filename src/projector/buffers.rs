@@ -29,17 +29,7 @@ impl Buffers {
     pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
         Buffers {
             images: Array4::from_elem((num_images, rows, cols, channels), BACKGROUND_BRIGHTNESS),
-            z_buffers: {
-                let mut z = Array3::from_elem((num_images, rows, cols), f64::INFINITY);
-                // Initialize back views (odd indices: 1, 3, 5) with NEG_INFINITY
-                // For rotation-based views, we only use front views (all +INFINITY)
-                if num_images == NUM_IMAGES {
-                    for i in (1..num_images).step_by(2) {
-                        z.slice_mut(s![i, .., ..]).fill(f64::NEG_INFINITY);
-                    }
-                }
-                z
-            },
+            z_buffers: Array3::from_elem((num_images, rows, cols), f64::INFINITY),
             depth_maps: Array4::from_elem((num_images, rows, cols, channels), 0u8),
             normal_maps: Array4::from_elem((num_images, rows, cols, channels), 0u8),
         }

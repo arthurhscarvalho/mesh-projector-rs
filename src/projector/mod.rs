@@ -186,23 +186,7 @@ pub fn compute_mesh_projections(
     }
 
     // Determine number of views and prepare view configurations
-    let rotation_config = match &settings.rotation_config {
-        Some(config) => config,
-        None => {
-            log::warn!(
-                "Rotation configuration is not provided. Skipping rotation-based projection."
-            );
-            let empty_buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
-            let empty_occupancy_map = Array3::<u8>::zeros((1, rows, cols));
-            return (
-                empty_buffers.images,
-                empty_buffers.depth_maps,
-                empty_buffers.normal_maps,
-                empty_occupancy_map,
-                vec![0],
-            );
-        }
-    };
+    let rotation_config = &settings.rotation_config;
 
     let num_views = rotation_config.num_steps;
     let mut view_configs = Vec::with_capacity(num_views);
@@ -230,7 +214,7 @@ pub fn compute_mesh_projections(
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
-            lighting_config: config::LightingConfig::default(),
+            light_source: config::LightSource::Camera,
         });
     }
 
@@ -299,15 +283,7 @@ pub fn compute_and_save_rotation_projections(
         settings.filtering_window_radius
     );
 
-    let rotation_config = match &settings.rotation_config {
-        Some(config) => config,
-        None => {
-            log::warn!(
-                "Rotation configuration is not provided. Skipping rotation-based projection."
-            );
-            return;
-        }
-    };
+    let rotation_config = &settings.rotation_config;
 
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
@@ -350,7 +326,7 @@ pub fn compute_and_save_rotation_projections(
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
-            lighting_config: config::LightingConfig::default(),
+            light_source: config::LightSource::Camera,
         });
     }
 

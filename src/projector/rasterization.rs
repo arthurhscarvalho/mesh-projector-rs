@@ -263,25 +263,15 @@ pub fn rasterize_triangle(
                     projection_config.view_dir.2,
                 ];
 
-                // Calculate camera position - a point along the view direction from the current vertex
-                // The camera is effectively the projection plane itself
-                let camera_dist = 100.0; // Large enough to ensure light comes from the projection plane
-                let camera_position_ws = [
-                    interpolated_vertex_pos_ws[0] - camera_dist * view_dir_ws[0],
-                    interpolated_vertex_pos_ws[1] - camera_dist * view_dir_ws[1],
-                    interpolated_vertex_pos_ws[2] - camera_dist * view_dir_ws[2],
-                ];
-
                 let final_color_linear = calculate_lighting(
                     linear_base_color,
                     interpolated_vertex_pos_ws,
                     interpolated_normal_ws,
                     &projection_config.view_matrix,
-                    camera_position_ws,
                     view_dir_ws,
                     submesh_material,
                     mesh_mode,
-                    &projection_config.lighting_config,
+                    &projection_config.light_source,
                 );
 
                 let final_color_srgb = [
