@@ -170,7 +170,7 @@ pub fn rasterize_triangle(
             }
         } else {
             // No vertex colors provided for this submesh, default white is used.
-            // log::debug!("No vertex colors for submesh in ObjOnly mode, using default white.");
+            log::debug!("No vertex colors for submesh in ObjOnly mode, using default white.");
         }
     }
 

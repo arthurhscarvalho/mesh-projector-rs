@@ -30,8 +30,6 @@ pub struct MeshGeometry {
 pub struct MeshTexture {
     /// Texture image data (optional).
     pub texture: Option<Array3<u8>>,
-    /// Vertex colors (optional).
-    pub vertex_colors: Option<Array2<f64>>,
     /// Triangle UV coordinates (optional).
     pub triangle_uvs: Option<Array2<f64>>,
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).

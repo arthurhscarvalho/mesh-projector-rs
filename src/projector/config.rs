@@ -85,6 +85,7 @@ pub struct ViewConfig {
 /// Defines the source of the light.
 pub enum LightSource {
     /// Light is fixed in world coordinates.
+    #[allow(dead_code)] // Temporary while we don't parametrize the light source
     World([f64; 3]),
     /// Light originates from the camera.
     Camera,

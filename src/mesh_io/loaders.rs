@@ -134,7 +134,6 @@ fn process_texture_for_mode(
 
     Ok(MeshTexture {
         texture: Some(texture_data.clone()),
-        vertex_colors: None,
         triangle_uvs: Some(triangle_uvs),
         channels: texture_data.shape()[2],
         height_f64: texture_data.shape()[0] as f64,
@@ -146,7 +145,6 @@ fn process_texture_for_mode(
 fn create_empty_texture() -> MeshTexture {
     MeshTexture {
         texture: None,
-        vertex_colors: None,
         triangle_uvs: None,
         channels: 0,
         height_f64: 0.0,

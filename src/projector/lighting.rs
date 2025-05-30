@@ -73,16 +73,14 @@ pub fn calculate_lighting(
     let mut view_dir_vs = subtract_vec3([0.0, 0.0, 0.0], vertex_position_vs);
     normalize_vec3(&mut view_dir_vs);
 
-    let mut final_color_linear = [0.0f64; 3];
-
-    match material.illum {
+    let mut final_color_linear = match material.illum {
         0 => {
             // Constant color - ambient only, modulated by base color
-            final_color_linear = [
+            [
                 base_color_linear[0] * linear_ka[0],
                 base_color_linear[1] * linear_ka[1],
                 base_color_linear[2] * linear_ka[2],
-            ];
+            ]
         }
         1 => {
             // Ambient + Diffuse
@@ -102,11 +100,11 @@ pub fn calculate_lighting(
                 base_color_linear[2] * linear_kd[2] * dot_nl * light_color[2],
             ];
 
-            final_color_linear = [
+            [
                 ambient_comp[0] + diffuse_comp[0],
                 ambient_comp[1] + diffuse_comp[1],
                 ambient_comp[2] + diffuse_comp[2],
-            ];
+            ]
         }
         _ => {
             // Full model: Ambient + Diffuse + Specular (illum >= 2)
@@ -147,13 +145,13 @@ pub fn calculate_lighting(
                 linear_ks[2] * specular_intensity * light_color[2],
             ];
 
-            final_color_linear = [
+            [
                 ambient_comp[0] + diffuse_comp[0] + specular_comp[0],
                 ambient_comp[1] + diffuse_comp[1] + specular_comp[1],
                 ambient_comp[2] + diffuse_comp[2] + specular_comp[2],
-            ];
+            ]
         }
-    }
+    };
 
     // Clamp to valid range
     final_color_linear[0] = final_color_linear[0].max(0.0).min(1.0);

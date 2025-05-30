@@ -9,36 +9,6 @@ pub fn dot_product(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-/// Subtracts vector slice `b` from `a` and stores the result in `out`.
-pub fn vec_sub(a: &[f64], b: &[f64], out: &mut [f64]) {
-    for i in 0..out.len().min(a.len()).min(b.len()) {
-        out[i] = a[i] - b[i];
-    }
-}
-
-/// Scales a vector slice `a` by a scalar `s` and stores the result in `out`.
-pub fn vec_scale(a: &[f64], s: f64, out: &mut [f64]) {
-    for i in 0..out.len().min(a.len()) {
-        out[i] = a[i] * s;
-    }
-}
-
-/// Calculates the reflection of vector `neg_l` (pointing away from surface) about normal `n`.
-/// Result is stored in `out`.
-pub fn reflect(neg_l: &[f64], n: &[f64], out: &mut [f64]) {
-    // Assumes neg_l, n, out are 3D vectors
-    if out.len() != 3 || neg_l.len() != 3 || n.len() != 3 {
-        // Handle error or return early if dimensions mismatch
-        return;
-    }
-    let dot_nl_neg = dot_product(n, neg_l);
-    // R = L - 2 * dot(N, L) * N => Using neg_l = -L => R = -neg_l - 2 * dot(N, -neg_l) * N
-    // Simplified R = 2 * dot(N, neg_l) * N - neg_l, which points away from the surface
-    let mut temp = [0.0f64; 3];
-    vec_scale(n, 2.0 * dot_nl_neg, &mut temp);
-    vec_sub(&temp, neg_l, out);
-}
-
 /// Normalizes a 3D vector in-place.
 pub fn normalize_vec3(v: &mut [f64; 3]) {
     let length_squared = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
@@ -74,17 +44,6 @@ pub fn rotation_matrix_z(angle_rad: f64) -> Array2<f64> {
 /// Combines three rotation matrices (Rx, Ry, Rz) by multiplication in the order Rz * Ry * Rx.
 pub fn combine_rotations(rx: &Array2<f64>, ry: &Array2<f64>, rz: &Array2<f64>) -> Array2<f64> {
     rz.dot(ry).dot(rx)
-}
-
-/// Rotates a 3D vertex (represented as a 1x3 row vector) using a 3x3 rotation matrix.
-/// Returns the rotated vertex as a 1x3 row vector.
-pub fn rotate_vertex(
-    vertex: &ndarray::ArrayView1<f64>,
-    rotation_matrix: &Array2<f64>,
-) -> ndarray::Array1<f64> {
-    // Ensure the vertex is treated as a row vector for matrix multiplication: rotation_matrix * vertex_column_vector
-    // However, ndarray's dot product for Array2.dot(Array1) treats Array1 as a column vector.
-    rotation_matrix.dot(vertex)
 }
 
 /// Transforms a 3D point (x, y, z) by a 4x4 matrix.
