@@ -7,7 +7,8 @@ use crate::mesh_io::{
     utils::{
         aggregate_model_data, convert_triangle_indices, convert_vertex_colors,
         convert_vertex_normals, convert_vertex_positions, create_global_triangle_indices,
-        create_triangle_uvs, load_texture, process_uv_coordinates, validate_file_exists,
+        create_triangle_uvs, create_triangle_uvs_from_indices, has_separate_texcoord_indices,
+        load_texture, process_uv_coordinates, validate_file_exists,
     },
 };
 use crate::projector::geometry::precompute_triangle_normals;
@@ -74,7 +75,7 @@ fn load_obj_file(
 )> {
     let load_options = tobj::LoadOptions {
         triangulate: true,
-        single_index: true,
+        single_index: false,
         ..Default::default()
     };
 
@@ -109,16 +110,6 @@ fn process_texture_for_mode(
         MeshError::MissingRequiredData("Texture file is required but none was provided".to_string())
     })?;
 
-    let (_, all_texcoords, total_vertex_count) = aggregate_model_data(models);
-
-    if all_texcoords.is_empty() || all_texcoords.len() != total_vertex_count * 2 {
-        return Err(MeshError::InvalidUvData(
-            "Mesh has no usable UV coordinates for shared texture".to_string(),
-        ));
-    }
-
-    info!("Using combined UV coordinates from all OBJ models for shared texture.");
-
     let texture_data = load_texture(tex_path)?;
     info!(
         "Shared texture load successful: {} ({}x{}x{})",
@@ -128,9 +119,25 @@ fn process_texture_for_mode(
         texture_data.shape()[2]
     );
 
-    let vertex_uvs = process_uv_coordinates(&all_texcoords, total_vertex_count, flip_v_coordinate)?;
-    let global_triangle_indices = create_global_triangle_indices(models);
-    let triangle_uvs = create_triangle_uvs(&vertex_uvs, &global_triangle_indices)?;
+    // Check if we have separate texture coordinate indices (single_index: false)
+    let triangle_uvs = if has_separate_texcoord_indices(models) {
+        info!("Using separate texture coordinate indices from OBJ models for shared texture.");
+        create_triangle_uvs_from_indices(models, flip_v_coordinate)?
+    } else {
+        info!("Using vertex-based UV coordinates from all OBJ models for shared texture.");
+        let (_, all_texcoords, total_vertex_count) = aggregate_model_data(models);
+
+        if all_texcoords.is_empty() || all_texcoords.len() != total_vertex_count * 2 {
+            return Err(MeshError::InvalidUvData(
+                "Mesh has no usable UV coordinates for shared texture".to_string(),
+            ));
+        }
+
+        let vertex_uvs =
+            process_uv_coordinates(&all_texcoords, total_vertex_count, flip_v_coordinate)?;
+        let global_triangle_indices = create_global_triangle_indices(models);
+        create_triangle_uvs(&vertex_uvs, &global_triangle_indices)?
+    };
 
     Ok(MeshTexture {
         texture: Some(texture_data.clone()),
