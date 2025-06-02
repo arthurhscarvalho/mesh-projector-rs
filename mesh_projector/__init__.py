@@ -2,6 +2,9 @@ from .mesh_projector import (
     generate_projections_rotation as _internal_generate_projections,
 )
 from .mesh_projector import generate_point_cloud as _internal_generate_point_cloud
+from .mesh_projector import (
+    generate_cube_projections as _internal_generate_cube_projections,
+)
 
 
 def generate_point_cloud(
@@ -81,6 +84,32 @@ def project_mesh(
     try:
         # The mode is automatically inferred in the Rust backend based on provided files
         _internal_generate_projections(
+            obj_location,
+            texture_file,
+            mtl_location,
+            precision,
+            filtering,
+            flip_uv,
+            ignore_opacity,
+            verbose,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Rust backend failed during projection generation: {e}")
+
+
+def project_mesh_cube(
+    obj_location,
+    texture_file=None,
+    mtl_location=None,
+    precision=12,
+    filtering=0,
+    flip_uv=True,
+    ignore_opacity=False,
+    verbose=False,
+):
+    try:
+        # The mode is automatically inferred in the Rust backend based on provided files
+        return _internal_generate_cube_projections(
             obj_location,
             texture_file,
             mtl_location,

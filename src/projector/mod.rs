@@ -19,28 +19,62 @@ use crate::projector::math::{
     combine_rotations, normalize_vec3, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
 };
 use mesh::{Mesh, MeshMode};
-use ndarray::{array, s, Array2, Array3, Array4, Axis};
+use ndarray::{array, Array2, Array3, Array4, Axis};
 use rasterization::rasterize_triangle;
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
 
-/// Creates a 4x4 view matrix from a 3x3 rotation matrix.
+/// Creates a 4x4 view matrix from a 3x3 rotation matrix and optional position.
 /// For orthographic projection, the camera is the projection plane itself.
 /// This creates a view matrix that transforms from world space to view space,
 /// where the view direction becomes the Z axis.
-fn create_view_matrix(rotation_matrix: &Array2<f64>) -> Array2<f64> {
+fn create_view_matrix(rotation_matrix: &Array2<f64>, position: [f64; 3]) -> Array2<f64> {
+    // The input 'rotation_matrix' (let's call it r_cam_to_world) defines the camera's orientation in world space.
+    // Its columns are the camera's X, Y, Z axes in world coordinates.
+    // The view matrix's rotation part should be r_cam_to_world.transpose().
+    let r_cam_to_world = rotation_matrix;
+    let r_world_to_cam = r_cam_to_world.t().into_owned(); // Transpose for the rotation part of the view matrix
+
     // In orthographic projection, we don't position the camera at a distance
     // Instead, the projection plane itself acts as the camera
     // The rotation matrix should already be set up to transform the view direction to the Z axis
-    let r = rotation_matrix;
+    // The r_cam_to_world input is the camera's orientation. r_world_to_cam is its transpose.
 
-    // Create the 4x4 view matrix without translation component
-    // The rotation part ensures the view direction is transformed to the Z axis
+    // Calculate translation component: - (r_world_to_cam * P_world)
+    // which is also - (r_cam_to_world.transpose() * P_world).
+    // The original calculation was equivalent to this:
+    // tx = -(r_cam_to_world[[0,0]]*P_x + r_cam_to_world[[1,0]]*P_y + r_cam_to_world[[2,0]]*P_z) == -dot(P_world, cam_X_axis_world)
+    // ty = -(r_cam_to_world[[0,1]]*P_x + r_cam_to_world[[1,1]]*P_y + r_cam_to_world[[2,1]]*P_z) == -dot(P_world, cam_Y_axis_world)
+    // tz = -(r_cam_to_world[[0,2]]*P_x + r_cam_to_world[[1,2]]*P_y + r_cam_to_world[[2,2]]*P_z) == -dot(P_world, cam_Z_axis_world)
+    // These are the components of -r_cam_to_world.transpose() * position_vector.
+    let p_vec = array![position[0], position[1], position[2]];
+    let translation_vec = -r_world_to_cam.dot(&p_vec);
+
+    let tx = translation_vec[0];
+    let ty = translation_vec[1];
+    let tz = translation_vec[2];
+
+    // Create the 4x4 view matrix with the corrected rotation and translation components
     array![
-        [r[[0, 0]], r[[0, 1]], r[[0, 2]], 0.0],
-        [r[[1, 0]], r[[1, 1]], r[[1, 2]], 0.0],
-        [r[[2, 0]], r[[2, 1]], r[[2, 2]], 0.0],
+        [
+            r_world_to_cam[[0, 0]],
+            r_world_to_cam[[0, 1]],
+            r_world_to_cam[[0, 2]],
+            tx
+        ],
+        [
+            r_world_to_cam[[1, 0]],
+            r_world_to_cam[[1, 1]],
+            r_world_to_cam[[1, 2]],
+            ty
+        ],
+        [
+            r_world_to_cam[[2, 0]],
+            r_world_to_cam[[2, 1]],
+            r_world_to_cam[[2, 2]],
+            tz
+        ],
         [0.0, 0.0, 0.0, 1.0]
     ]
 }
@@ -111,23 +145,10 @@ fn compute_single_projection(
             }
         }
     }
-
-    // Create new 4D arrays with the correct shape
-    let mut single_image = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
-    let mut single_depth = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
-    let mut single_normal = Array4::<u8>::zeros((1, rows, cols, NUM_CHANNELS));
-
-    // Copy data from the buffers
-    single_image
-        .slice_mut(s![0, .., .., ..])
-        .assign(&buffers.images.slice(s![0, .., .., ..]));
-    single_depth
-        .slice_mut(s![0, .., .., ..])
-        .assign(&buffers.depth_maps.slice(s![0, .., .., ..]));
-    single_normal
-        .slice_mut(s![0, .., .., ..])
-        .assign(&buffers.normal_maps.slice(s![0, .., .., ..]));
-
+    // Return from buffers
+    let single_image = buffers.images;
+    let single_depth = buffers.depth_maps;
+    let single_normal = buffers.normal_maps;
     (
         single_image,
         single_depth,
@@ -189,9 +210,21 @@ pub fn compute_mesh_projections(
 
     // Create view configs for rotation-based projection
     for i in 0..num_views {
-        let angle_x = rotation_config.angle_delta_x * i as f64;
-        let angle_y = rotation_config.angle_delta_y * i as f64;
-        let angle_z = rotation_config.angle_delta_z * i as f64;
+        let (angle_x, angle_y, angle_z) = if num_views == 1 {
+            // For a single view, use the deltas as absolute rotation angles
+            (
+                rotation_config.angle_delta_x,
+                rotation_config.angle_delta_y,
+                rotation_config.angle_delta_z,
+            )
+        } else {
+            // For multiple views (rotational sweep), treat deltas as increments
+            (
+                rotation_config.angle_delta_x * i as f64,
+                rotation_config.angle_delta_y * i as f64,
+                rotation_config.angle_delta_z * i as f64,
+            )
+        };
 
         let rx = rotation_matrix_x(angle_x);
         let ry = rotation_matrix_y(angle_y);
@@ -207,7 +240,7 @@ pub fn compute_mesh_projections(
         view_configs.push(ViewConfig {
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix),
+            view_matrix: create_view_matrix(&rotation_matrix, settings.camera_position),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });
@@ -248,10 +281,10 @@ pub fn compute_mesh_projections(
                     compute_single_projection(&mesh_arc, &settings_arc, view_config);
 
                 // Store results in the 5D array and other containers
-                projection.assign(&img);
-                depth_map.assign(&depth);
-                normal_map.assign(&normal);
-                occupancy_map.assign(&occ);
+                projection.assign(&img.index_axis(Axis(0), 0));
+                depth_map.assign(&depth.index_axis(Axis(0), 0));
+                normal_map.assign(&normal.index_axis(Axis(0), 0));
+                occupancy_map.assign(&occ.index_axis(Axis(0), 0));
                 *outlier_count = outlier;
             },
         );
@@ -318,7 +351,7 @@ pub fn compute_and_save_rotation_projections(
         view_configs.push(ViewConfig {
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix),
+            view_matrix: create_view_matrix(&rotation_matrix, settings.camera_position),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });
@@ -367,6 +400,7 @@ pub fn discretize_mesh_to_point_cloud(
     );
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
+    let density_factor = settings.point_cloud_density_factor.unwrap_or(1.0);
 
     if mesh.submeshes.is_empty()
         || mesh
@@ -410,9 +444,7 @@ pub fn discretize_mesh_to_point_cloud(
         }
     }
 
-    // Density calculation remains, using max_bound_f64 and total_mesh_area (calculated from pre-scaled verts)
-    let density = (settings.point_cloud_density_factor * max_bound_f64 * max_bound_f64)
-        / total_mesh_area.max(1e-9);
+    let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
 
     let mut global_triangle_offset = 0;
     for submesh in &mesh.submeshes {
@@ -578,14 +610,7 @@ pub fn discretize_mesh_to_point_cloud(
                     let g_srgb = (final_color[1].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     let b_srgb = (final_color[2].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
 
-                    // Points are used directly as they are assumed to be in the target [0, max_bound_f64] range.
-                    // Scaling step is removed:
-                    // let scaled_x = (x - min_x) / (max_x - min_x) * max_bound_f64;
-                    // let scaled_y = (y - min_y) / (max_y - min_y) * max_bound_f64;
-                    // let scaled_z = (z - min_z) / (max_z - min_z) * max_bound_f64;
-                    // point_cloud_points.push([scaled_x, scaled_y, scaled_z]);
-                    point_cloud_points.push([x, y, z]); // Use x, y, z directly
-
+                    point_cloud_points.push([x, y, z]);
                     point_cloud_colors.push([r_srgb, g_srgb, b_srgb]);
                 }
             }
