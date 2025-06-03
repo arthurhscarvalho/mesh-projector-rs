@@ -7,156 +7,22 @@ pub mod geometry;
 mod lighting;
 mod math;
 pub mod mesh;
+mod projection;
 mod rasterization;
 mod sampling;
 
 use crate::mesh_io::save_image_data;
-use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::{DEFAULT_MISSING_TEXTURE_COLOR, NUM_CHANNELS};
-use crate::projector::filtering::filter_outliers;
 use crate::projector::math::{
-    combine_rotations, normalize_vec3, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
+    combine_rotations, create_view_matrix, normalize_vec3, rotation_matrix_x, rotation_matrix_y,
+    rotation_matrix_z,
 };
 use mesh::{Mesh, MeshMode};
-use ndarray::{array, Array2, Array3, Array4, Axis};
-use rasterization::rasterize_triangle;
+use ndarray::{Array3, Array4, Axis};
 use rayon::prelude::*;
 use std::path::Path;
 use std::sync::Arc;
-
-/// Creates a 4x4 view matrix from a 3x3 rotation matrix and optional position.
-/// For orthographic projection, the camera is the projection plane itself.
-/// This creates a view matrix that transforms from world space to view space,
-/// where the view direction becomes the Z axis.
-fn create_view_matrix(rotation_matrix: &Array2<f64>, position: [f64; 3]) -> Array2<f64> {
-    // The input 'rotation_matrix' (let's call it r_cam_to_world) defines the camera's orientation in world space.
-    // Its columns are the camera's X, Y, Z axes in world coordinates.
-    // The view matrix's rotation part should be r_cam_to_world.transpose().
-    let r_cam_to_world = rotation_matrix;
-    let r_world_to_cam = r_cam_to_world.t().into_owned(); // Transpose for the rotation part of the view matrix
-
-    // In orthographic projection, we don't position the camera at a distance
-    // Instead, the projection plane itself acts as the camera
-    // The rotation matrix should already be set up to transform the view direction to the Z axis
-    // The r_cam_to_world input is the camera's orientation. r_world_to_cam is its transpose.
-
-    // Calculate translation component: - (r_world_to_cam * P_world)
-    // which is also - (r_cam_to_world.transpose() * P_world).
-    // The original calculation was equivalent to this:
-    // tx = -(r_cam_to_world[[0,0]]*P_x + r_cam_to_world[[1,0]]*P_y + r_cam_to_world[[2,0]]*P_z) == -dot(P_world, cam_X_axis_world)
-    // ty = -(r_cam_to_world[[0,1]]*P_x + r_cam_to_world[[1,1]]*P_y + r_cam_to_world[[2,1]]*P_z) == -dot(P_world, cam_Y_axis_world)
-    // tz = -(r_cam_to_world[[0,2]]*P_x + r_cam_to_world[[1,2]]*P_y + r_cam_to_world[[2,2]]*P_z) == -dot(P_world, cam_Z_axis_world)
-    // These are the components of -r_cam_to_world.transpose() * position_vector.
-    let p_vec = array![position[0], position[1], position[2]];
-    let translation_vec = -r_world_to_cam.dot(&p_vec);
-
-    let tx = translation_vec[0];
-    let ty = translation_vec[1];
-    let tz = translation_vec[2];
-
-    // Create the 4x4 view matrix with the corrected rotation and translation components
-    array![
-        [
-            r_world_to_cam[[0, 0]],
-            r_world_to_cam[[0, 1]],
-            r_world_to_cam[[0, 2]],
-            tx
-        ],
-        [
-            r_world_to_cam[[1, 0]],
-            r_world_to_cam[[1, 1]],
-            r_world_to_cam[[1, 2]],
-            ty
-        ],
-        [
-            r_world_to_cam[[2, 0]],
-            r_world_to_cam[[2, 1]],
-            r_world_to_cam[[2, 2]],
-            tz
-        ],
-        [0.0, 0.0, 0.0, 1.0]
-    ]
-}
-
-/// Computes a single orthographic projection for the given view configuration.
-fn compute_single_projection(
-    mesh: &Mesh,
-    settings: &ProjectorConfig,
-    view_config: &ViewConfig,
-) -> (Array4<u8>, Array4<u8>, Array4<u8>, Array3<u8>, u64) {
-    let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
-    let max_bound_u: usize = max_bound as usize;
-    let rows = max_bound_u;
-    let cols = max_bound_u;
-
-    // Initialize buffers for a single view
-    let mut buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
-
-    let mut image_view = buffers.images.index_axis_mut(Axis(0), 0);
-    let mut depth_map_view = buffers.depth_maps.index_axis_mut(Axis(0), 0);
-    let mut normal_map_view = buffers.normal_maps.index_axis_mut(Axis(0), 0);
-    let mut z_buffer_view = buffers.z_buffers.index_axis_mut(Axis(0), 0);
-
-    let mut global_triangle_offset = 0;
-    // Rasterize all triangles from all submeshes
-    for submesh in &mesh.submeshes {
-        let num_faces = submesh.geometry.triangles.nrows();
-        for triangle_index in 0..num_faces {
-            // triangle_index is local to the submesh
-            let face_normal_view = submesh.geometry.face_normals.row(triangle_index);
-            let uv_lookup_triangle_id = global_triangle_offset + triangle_index;
-            rasterize_triangle(
-                &submesh.geometry,
-                &submesh.material,
-                &mesh.texture,
-                mesh.mode,
-                triangle_index,        // Local triangle index for geometry
-                uv_lookup_triangle_id, // Global triangle ID for UVs
-                face_normal_view,
-                view_config,
-                &mut z_buffer_view.view_mut(),
-                &mut image_view.view_mut(),
-                &mut depth_map_view.view_mut(),
-                &mut normal_map_view.view_mut(),
-            );
-        }
-        global_triangle_offset += num_faces;
-    }
-
-    // Apply outlier filtering
-    let (_, outlier_count) = filter_outliers(
-        &mut buffers.images,
-        &buffers.z_buffers,
-        settings.filtering_window_radius,
-        max_bound_f64,
-    );
-
-    // Create occupancy map
-    let mut occupancy_map = Array3::<u8>::zeros((1, rows, cols));
-    let z_slice = buffers.z_buffers.index_axis(Axis(0), 0);
-    for r in 0..rows {
-        for c in 0..cols {
-            let depth_val = z_slice[[r, c]];
-            let is_occupied = depth_val < f64::INFINITY && depth_val.is_finite();
-            if is_occupied {
-                occupancy_map[[0, r, c]] = 255;
-            }
-        }
-    }
-    // Return from buffers
-    let single_image = buffers.images;
-    let single_depth = buffers.depth_maps;
-    let single_normal = buffers.normal_maps;
-    (
-        single_image,
-        single_depth,
-        single_normal,
-        occupancy_map,
-        outlier_count[0],
-    )
-}
 
 /// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
@@ -180,7 +46,16 @@ pub fn compute_mesh_projections(
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
-
+    // Determine number of views and prepare view configurations
+    let rotation_config = &settings.rotation_config;
+    let num_views = rotation_config.num_steps;
+    let mut view_configs = Vec::with_capacity(num_views);
+    // Initialize all arrays
+    let mut projections = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
+    let mut depth_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
+    let mut normal_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
+    let mut occupancy_maps = Array3::<u8>::zeros((num_views, rows, cols));
+    let mut outlier_counts = vec![0; num_views];
     // Handle empty meshes
     if mesh.submeshes.is_empty()
         || mesh
@@ -191,23 +66,14 @@ pub fn compute_mesh_projections(
         log::warn!(
             "Empty mesh (no submeshes or no geometry in submeshes). Returning empty buffers."
         );
-        let empty_buffers = Buffers::new(1, rows, cols, NUM_CHANNELS);
-        let empty_occupancy_map = Array3::<u8>::zeros((1, rows, cols));
         return (
-            empty_buffers.images,
-            empty_buffers.depth_maps,
-            empty_buffers.normal_maps,
-            empty_occupancy_map,
-            vec![0],
+            projections,
+            depth_maps,
+            normal_maps,
+            occupancy_maps,
+            outlier_counts,
         );
     }
-
-    // Determine number of views and prepare view configurations
-    let rotation_config = &settings.rotation_config;
-
-    let num_views = rotation_config.num_steps;
-    let mut view_configs = Vec::with_capacity(num_views);
-
     // Create view configs for rotation-based projection
     for i in 0..num_views {
         let (angle_x, angle_y, angle_z) = if num_views == 1 {
@@ -225,18 +91,15 @@ pub fn compute_mesh_projections(
                 rotation_config.angle_delta_z * i as f64,
             )
         };
-
         let rx = rotation_matrix_x(angle_x);
         let ry = rotation_matrix_y(angle_y);
         let rz = rotation_matrix_z(angle_z);
         let rotation_matrix = combine_rotations(&rx, &ry, &rz);
-
         let view_dir_tuple = (
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
-
         view_configs.push(ViewConfig {
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
@@ -245,16 +108,8 @@ pub fn compute_mesh_projections(
             light_source: config::LightSource::Camera,
         });
     }
-
     let settings_arc = Arc::new(settings);
-    let mesh_arc = Arc::new(mesh.clone());
-
-    let mut projections = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
-    let mut depth_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
-    let mut normal_maps = Array4::<u8>::zeros((num_views, rows, cols, NUM_CHANNELS));
-    let mut occupancy_maps = Array3::<u8>::zeros((num_views, rows, cols));
-    let mut outlier_counts = vec![0; num_views];
-
+    let mesh_arc = Arc::new(mesh);
     // Compute projections for each view in parallel
     projections
         .axis_iter_mut(Axis(0))
@@ -275,20 +130,17 @@ pub fn compute_mesh_projections(
             )| {
                 let view_config = &view_configs[i];
                 log::info!("Computing projection {} of {}", i + 1, num_views);
-
                 // Compute projection for this view
                 let (img, depth, normal, occ, outlier) =
-                    compute_single_projection(&mesh_arc, &settings_arc, view_config);
-
+                    projection::compute_projection(&mesh_arc, &settings_arc, view_config);
                 // Store results in the 5D array and other containers
-                projection.assign(&img.index_axis(Axis(0), 0));
-                depth_map.assign(&depth.index_axis(Axis(0), 0));
-                normal_map.assign(&normal.index_axis(Axis(0), 0));
-                occupancy_map.assign(&occ.index_axis(Axis(0), 0));
+                projection.assign(&img);
+                depth_map.assign(&depth);
+                normal_map.assign(&normal);
+                occupancy_map.assign(&occ);
                 *outlier_count = outlier;
             },
         );
-
     (
         projections,
         depth_maps,
@@ -370,15 +222,17 @@ pub fn compute_and_save_rotation_projections(
             // Mesh is no longer rotated here. Transformation happens in compute_single_projection.
             let current_mesh_for_projection = Arc::clone(&mesh_arc).as_ref().clone();
 
-            let (img, _, _, _, _) =
-                compute_single_projection(&current_mesh_for_projection, &settings_arc, view_config);
+            let (img, _, _, _, _) = projection::compute_projection(
+                &current_mesh_for_projection,
+                &settings_arc,
+                view_config,
+            );
 
             // Save the projection data for the current view
             if let Err(e) = save_image_data(&img, &output_dir_arc, i, true) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }
         });
-
     log::info!("Finished computing and saving all rotation-based projections.");
 }
 

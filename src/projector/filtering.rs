@@ -1,19 +1,20 @@
 // src/projector/filtering.rs
+use crate::projector::buffers::Buffers;
 use crate::projector::constants::{
     BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS,
 };
-use nd::{Array3, Array4, ArrayView2, Axis, Ix4};
+use nd::Array2;
 use rayon::prelude::*;
 use std::f64;
 
 /// Finds outlier pixels by comparing depth to neighbors.
 /// Now uses z-buffer validity instead of occlusion map.
 fn find_outliers_for_layer(
-    z_slice: ArrayView2<f64>, // Z-buffer for the current layer
-    w: usize,                 // Filter window radius
-    rows: usize,              // Total rows
-    cols: usize,              // Total columns
-    filter_threshold: f64,    // Depth difference threshold
+    z_buffer: &Array2<f64>, // Z-buffer for the current layer
+    w: usize,               // Filter window radius
+    rows: usize,            // Total rows
+    cols: usize,            // Total columns
+    filter_threshold: f64,  // Depth difference threshold
 ) -> Vec<(usize, usize)> {
     let row_start = w;
     let col_start = w;
@@ -29,7 +30,7 @@ fn find_outliers_for_layer(
             let mut row_outlier_coords = Vec::new();
             for c_offset in 0..num_inner_cols {
                 let c = col_start + c_offset;
-                let center_depth = z_slice[[r, c]];
+                let center_depth = z_buffer[[r, c]];
                 // Skip if the center pixel depth is invalid (background).
                 if center_depth == f64::INFINITY || center_depth == f64::NEG_INFINITY {
                     continue;
@@ -50,7 +51,7 @@ fn find_outliers_for_layer(
                         if nr == r && nc == c {
                             continue;
                         }
-                        let neighbor_depth = z_slice[[nr, nc]];
+                        let neighbor_depth = z_buffer[[nr, nc]];
                         // Check if neighbor is valid (not background and finite)
                         let is_valid_neighbor =
                             neighbor_depth < f64::INFINITY && neighbor_depth.is_finite();
@@ -80,73 +81,48 @@ fn find_outliers_for_layer(
 /// 1. An occlusion map (Array4<u8>, shape=[NUM_IMAGES, rows, cols, 1]) where 1 indicates an outlier.
 /// 2. Counts of filtered pixels per layer ([u64; NUM_IMAGES]).
 pub fn filter_outliers(
-    images: &mut Array4<u8>,
-    z_buffers: &Array3<f64>,
+    buffers: &mut Buffers,
     filtering_window_radius: u64,
     max_bound_f64: f64,
-) -> (Array4<u8>, Vec<u64>) {
+) -> u64 {
     // Return outlier counts array
-    let rows = z_buffers.shape()[1];
-    let cols = z_buffers.shape()[2];
-    let num_images = z_buffers.shape()[0];
+    let rows = buffers.z_buffer.shape()[0];
+    let cols = buffers.z_buffer.shape()[1];
     if filtering_window_radius == 0 {
         log::info!("Outlier filtering disabled.");
-        let shape4d_occ = Ix4(num_images, rows, cols, 1);
-        return (Array4::zeros(shape4d_occ), vec![0; num_images]);
+        return 0;
     };
     log::info!(
         "Filtering outliers with window radius {}",
         filtering_window_radius
     );
     // Initialize occlusion map (num_images, rows, cols, 1 channel)
-    let mut outlier_counts = vec![0; num_images];
-    let mut occlusion_maps = Array4::<u8>::zeros(Ix4(num_images, rows, cols, 1));
+    let mut outlier_count = 0;
     let w = filtering_window_radius as usize;
     if rows <= 2 * w || cols <= 2 * w {
-        return (occlusion_maps, outlier_counts); // Return empty map and zero counts
+        return outlier_count;
     }
     let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f64;
-    // Collect results from parallel processing
-    let results: Vec<_> = (0..num_images)
-        .into_par_iter()
-        .map(|k| {
-            let z_slice = z_buffers.index_axis(Axis(0), k);
-            let outlier_coords = find_outliers_for_layer(z_slice, w, rows, cols, filter_threshold);
-            let count = outlier_coords.len() as u64;
-            (k, outlier_coords, count) // Return index, coords, and count
-        })
-        .collect();
+    let outlier_coords =
+        find_outliers_for_layer(&buffers.z_buffer, w, rows, cols, filter_threshold);
+    outlier_count = outlier_coords.len() as u64;
     // Populate the occlusion map and counts sequentially after parallel computation
-    for (k, outlier_coords, count) in results {
-        outlier_counts[k] = count;
-        if !outlier_coords.is_empty() {
-            let mut occlusion_slice = occlusion_maps.index_axis_mut(Axis(0), k);
-            for &(r, c) in &outlier_coords {
-                // Set the single channel to 1 for outliers
-                occlusion_slice[[r, c, 0]] = 1;
+    if !outlier_coords.is_empty() {
+        for &(r, c) in &outlier_coords {
+            buffers.occupancy_map[[r, c]] = 1;
+        }
+    }
+    for r in 0..rows {
+        for c in 0..cols {
+            // Check the occlusion map's single channel
+            if buffers.occupancy_map[[r, c]] == 0 {
+                continue;
+            }
+            // If outlier, set all channels of the image pixel to background
+            for chan in 0..NUM_CHANNELS {
+                buffers.image[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
             }
         }
     }
-    // Apply filtering to images using the occlusion map
-    images
-        .axis_iter_mut(Axis(0))
-        .zip(occlusion_maps.axis_iter(Axis(0)))
-        .par_bridge() // Parallelize the application
-        .for_each(|(mut img_slice, occ_slice)| {
-            // img_slice shape: (rows, cols, channels)
-            // occ_slice shape: (rows, cols, 1)
-            for r in 0..rows {
-                for c in 0..cols {
-                    // Check the occlusion map's single channel
-                    if occ_slice[[r, c, 0]] == 0 {
-                        continue;
-                    }
-                    // If outlier, set all channels of the image pixel to background
-                    for chan in 0..NUM_CHANNELS {
-                        img_slice[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
-                    }
-                }
-            }
-        });
-    (occlusion_maps, outlier_counts)
+    outlier_count
 }
