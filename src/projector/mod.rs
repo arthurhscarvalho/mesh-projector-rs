@@ -22,7 +22,6 @@ use mesh::{Mesh, MeshMode};
 use ndarray::{Array3, Array4, Axis};
 use rayon::prelude::*;
 use std::path::Path;
-use std::sync::Arc;
 
 /// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
@@ -108,8 +107,6 @@ pub fn compute_mesh_projections(
             light_source: config::LightSource::Camera,
         });
     }
-    let settings_arc = Arc::new(settings);
-    let mesh_arc = Arc::new(mesh);
     // Compute projections for each view in parallel
     projections
         .axis_iter_mut(Axis(0))
@@ -132,7 +129,7 @@ pub fn compute_mesh_projections(
                 log::info!("Computing projection {} of {}", i + 1, num_views);
                 // Compute projection for this view
                 let (img, depth, normal, occ, outlier) =
-                    projection::compute_projection(&mesh_arc, &settings_arc, view_config);
+                    projection::compute_projection(&mesh, &settings, view_config);
                 // Store results in the 5D array and other containers
                 projection.assign(&img);
                 depth_map.assign(&depth);
@@ -208,28 +205,15 @@ pub fn compute_and_save_rotation_projections(
             light_source: config::LightSource::Camera,
         });
     }
-
-    let mesh_arc = Arc::new(mesh.clone());
-    let settings_arc = Arc::new(settings);
-    let output_dir_arc = Arc::new(output_dir.to_path_buf());
-
     view_configs
         .par_iter()
         .enumerate()
         .for_each(|(i, view_config)| {
             log::info!("Computing projection {} of {}", i + 1, num_steps);
-
-            // Mesh is no longer rotated here. Transformation happens in compute_single_projection.
-            let current_mesh_for_projection = Arc::clone(&mesh_arc).as_ref().clone();
-
-            let (img, _, _, _, _) = projection::compute_projection(
-                &current_mesh_for_projection,
-                &settings_arc,
-                view_config,
-            );
+            let (img, _, _, _, _) = projection::compute_projection(&mesh, &settings, view_config);
 
             // Save the projection data for the current view
-            if let Err(e) = save_image_data(&img, &output_dir_arc, i, true) {
+            if let Err(e) = save_image_data(&img, output_dir, i, true) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }
         });
