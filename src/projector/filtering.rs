@@ -8,9 +8,8 @@ use rayon::prelude::*;
 use std::f64;
 
 /// Finds outlier pixels by comparing depth to neighbors.
-/// Now uses z-buffer validity instead of occlusion map.
-fn find_outliers_for_layer(
-    z_buffer: &Array2<f64>, // Z-buffer for the current layer
+fn find_outliers(
+    z_buffer: &Array2<f64>, // Z-buffer
     w: usize,               // Filter window radius
     rows: usize,            // Total rows
     cols: usize,            // Total columns
@@ -77,45 +76,35 @@ fn find_outliers_for_layer(
 }
 
 /// Filters outlier pixels for all image layers and applies the filtering to the images.
-/// Returns a tuple containing:
-/// 1. An occlusion map (Array4<u8>, shape=[NUM_IMAGES, rows, cols, 1]) where 1 indicates an outlier.
-/// 2. Counts of filtered pixels per layer ([u64; NUM_IMAGES]).
-pub fn filter_outliers(
-    buffers: &mut Buffers,
-    filtering_window_radius: u64,
-    max_bound_f64: f64,
-) -> u64 {
+pub fn filter_outliers(buffers: &mut Buffers, filtering_window_radius: u64, max_bound_f64: f64) {
     // Return outlier counts array
     let rows = buffers.z_buffer.shape()[0];
     let cols = buffers.z_buffer.shape()[1];
     if filtering_window_radius == 0 {
         log::info!("Outlier filtering disabled.");
-        return 0;
+        return;
     };
     log::info!(
         "Filtering outliers with window radius {}",
         filtering_window_radius
     );
-    // Initialize occlusion map (num_images, rows, cols, 1 channel)
-    let mut outlier_count = 0;
     let w = filtering_window_radius as usize;
     if rows <= 2 * w || cols <= 2 * w {
-        return outlier_count;
+        return;
     }
     let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f64;
-    let outlier_coords =
-        find_outliers_for_layer(&buffers.z_buffer, w, rows, cols, filter_threshold);
-    outlier_count = outlier_coords.len() as u64;
+    let outlier_coords = find_outliers(&buffers.z_buffer, w, rows, cols, filter_threshold);
+    let outlier_count = outlier_coords.len() as u64;
     // Populate the occlusion map and counts sequentially after parallel computation
     if !outlier_coords.is_empty() {
         for &(r, c) in &outlier_coords {
-            buffers.occupancy_map[[r, c]] = 1;
+            buffers.occupancy_map[[r, c]] = 0;
         }
     }
     for r in 0..rows {
         for c in 0..cols {
             // Check the occlusion map's single channel
-            if buffers.occupancy_map[[r, c]] == 0 {
+            if buffers.occupancy_map[[r, c]] == 255 {
                 continue;
             }
             // If outlier, set all channels of the image pixel to background
@@ -124,5 +113,5 @@ pub fn filter_outliers(
             }
         }
     }
-    outlier_count
+    buffers.outlier_count = outlier_count;
 }

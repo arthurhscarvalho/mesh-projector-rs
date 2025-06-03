@@ -44,7 +44,7 @@ pub fn compute_projection(
         }
     }
     // Apply outlier filtering
-    buffers.outlier_count = filter_outliers(
+    filter_outliers(
         &mut buffers,
         settings.filtering_window_radius,
         max_bound_f64,
