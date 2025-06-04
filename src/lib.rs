@@ -80,13 +80,11 @@ fn generate_projections<'py>(
     );
 
     let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
-    let camera_position = [0.0, 0.0, 0.0];
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,
         rotation_steps,
         rotation_config,
-        camera_position,
         None,
     );
 
@@ -168,29 +166,27 @@ fn generate_cube_projections<'py>(
     // Rotations are in radians. Y is pitch, X is roll, Z is yaw.
     let pi = std::f64::consts::PI;
     let cube_faces = vec![
-        (0.0, 0.0, 1.0, 0.0, 0.0, 0.0, "front"), // Front: Cam at +Z, looking -Z. No rotation.
-        (0.0, 0.0, -1.0, 0.0, pi, 0.0, "back"), // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
-        (1.0, 0.0, 0.0, 0.0, pi / 2.0, 0.0, "right"), // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
-        (-1.0, 0.0, 0.0, 0.0, -pi / 2.0, 0.0, "left"), // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
-        (0.0, 1.0, 0.0, pi / 2.0, 0.0, 0.0, "top"), // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
-        (0.0, -1.0, 0.0, -pi / 2.0, 0.0, 0.0, "bottom"), // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
+        (0.0, 0.0, 0.0, "front"),      // Front: Cam at +Z, looking -Z. No rotation.
+        (0.0, pi, 0.0, "back"),        // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
+        (0.0, pi / 2.0, 0.0, "right"), // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
+        (0.0, -pi / 2.0, 0.0, "left"), // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
+        (pi / 2.0, 0.0, 0.0, "top"),   // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
+        (-pi / 2.0, 0.0, 0.0, "bottom"), // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
     ];
 
     // Use rayon to compute all 6 projections in parallel
     let results: Vec<_> = cube_faces
         .into_par_iter()
-        .map(|(cam_x, cam_y, cam_z, rot_x, rot_y, rot_z, label)| {
+        .map(|(rot_x, rot_y, rot_z, label)| {
             log::info!("Computing {} face projection", label);
 
             // Set camera orientation and position for this face
             let rotation_config_for_face = [rot_x, rot_y, rot_z];
-            let camera_position_for_face = [cam_x, cam_y, cam_z];
             let settings = ProjectorConfig::new(
                 precision,
                 filtering_radius,
                 1, // Single step for each face
                 rotation_config_for_face,
-                camera_position_for_face,
                 None,
             );
 
@@ -299,13 +295,11 @@ fn generate_projections_rotation<'py>(
         angle_delta_z
     );
     let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
-    let camera_position = [0.0, 0.0, 0.0];
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,
         rotation_steps,
         rotation_config,
-        camera_position,
         None,
     );
 
@@ -367,13 +361,11 @@ fn generate_point_cloud<'py>(
     let angle_delta_y: f64 = 0.0;
     let angle_delta_z: f64 = 0.0;
     let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
-    let camera_position = [0.0, 0.0, 0.0];
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,
         rotation_steps,
         rotation_config,
-        camera_position,
         Some(point_cloud_density_factor),
     );
 

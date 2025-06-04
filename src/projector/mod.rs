@@ -102,7 +102,7 @@ pub fn compute_mesh_projections(
         view_configs.push(ViewConfig {
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix, settings.camera_position),
+            view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });
@@ -200,7 +200,7 @@ pub fn compute_and_save_rotation_projections(
         view_configs.push(ViewConfig {
             view_dir: view_dir_tuple,
             rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix, settings.camera_position),
+            view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });

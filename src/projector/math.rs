@@ -78,56 +78,22 @@ pub fn subtract_vec3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
-/// Creates a 4x4 view matrix from a 3x3 rotation matrix and optional position.
+/// Creates a 4x4 view matrix from a 3x3 rotation matrix.
 /// For orthographic projection, the camera is the projection plane itself.
 /// This creates a view matrix that transforms from world space to view space,
 /// where the view direction becomes the Z axis.
-pub fn create_view_matrix(rotation_matrix: &Array2<f64>, position: [f64; 3]) -> Array2<f64> {
-    // The input 'rotation_matrix' (let's call it r_cam_to_world) defines the camera's orientation in world space.
-    // Its columns are the camera's X, Y, Z axes in world coordinates.
-    // The view matrix's rotation part should be r_cam_to_world.transpose().
-    let r_cam_to_world = rotation_matrix;
-    let r_world_to_cam = r_cam_to_world.t().into_owned(); // Transpose for the rotation part of the view matrix
-
+pub fn create_view_matrix(rotation_matrix: &Array2<f64>) -> Array2<f64> {
     // In orthographic projection, we don't position the camera at a distance
     // Instead, the projection plane itself acts as the camera
     // The rotation matrix should already be set up to transform the view direction to the Z axis
-    // The r_cam_to_world input is the camera's orientation. r_world_to_cam is its transpose.
+    let r = rotation_matrix;
 
-    // Calculate translation component: - (r_world_to_cam * P_world)
-    // which is also - (r_cam_to_world.transpose() * P_world).
-    // The original calculation was equivalent to this:
-    // tx = -(r_cam_to_world[[0,0]]*P_x + r_cam_to_world[[1,0]]*P_y + r_cam_to_world[[2,0]]*P_z) == -dot(P_world, cam_X_axis_world)
-    // ty = -(r_cam_to_world[[0,1]]*P_x + r_cam_to_world[[1,1]]*P_y + r_cam_to_world[[2,1]]*P_z) == -dot(P_world, cam_Y_axis_world)
-    // tz = -(r_cam_to_world[[0,2]]*P_x + r_cam_to_world[[1,2]]*P_y + r_cam_to_world[[2,2]]*P_z) == -dot(P_world, cam_Z_axis_world)
-    // These are the components of -r_cam_to_world.transpose() * position_vector.
-    let p_vec = array![position[0], position[1], position[2]];
-    let translation_vec = -r_world_to_cam.dot(&p_vec);
-
-    let tx = translation_vec[0];
-    let ty = translation_vec[1];
-    let tz = translation_vec[2];
-
-    // Create the 4x4 view matrix with the corrected rotation and translation components
+    // Create the 4x4 view matrix without translation component
+    // The rotation part ensures the view direction is transformed to the Z axis
     array![
-        [
-            r_world_to_cam[[0, 0]],
-            r_world_to_cam[[0, 1]],
-            r_world_to_cam[[0, 2]],
-            tx
-        ],
-        [
-            r_world_to_cam[[1, 0]],
-            r_world_to_cam[[1, 1]],
-            r_world_to_cam[[1, 2]],
-            ty
-        ],
-        [
-            r_world_to_cam[[2, 0]],
-            r_world_to_cam[[2, 1]],
-            r_world_to_cam[[2, 2]],
-            tz
-        ],
+        [r[[0, 0]], r[[0, 1]], r[[0, 2]], 0.0],
+        [r[[1, 0]], r[[1, 1]], r[[1, 2]], 0.0],
+        [r[[2, 0]], r[[2, 1]], r[[2, 2]], 0.0],
         [0.0, 0.0, 0.0, 1.0]
     ]
 }

@@ -40,8 +40,6 @@ pub struct ProjectorConfig {
     pub filtering_window_radius: u64,
     /// Optional rotation configuration. If None, uses default 6-view orthographic projection.
     pub rotation_config: RotationConfig,
-    /// Optional camera position. If None, uses default camera position.
-    pub camera_position: [f64; 3],
     /// Factor to control the density of points in the discretized point cloud.
     pub point_cloud_density_factor: Option<f64>,
 }
@@ -53,7 +51,6 @@ impl ProjectorConfig {
         filtering_window_radius: u64,
         num_steps: u32,
         rotation_config: [f64; 3],
-        camera_position: [f64; 3],
         point_cloud_density_factor: Option<f64>,
     ) -> Self {
         ProjectorConfig {
@@ -65,7 +62,6 @@ impl ProjectorConfig {
                 rotation_config[2],
                 num_steps as usize,
             ),
-            camera_position,
             point_cloud_density_factor,
         }
     }
