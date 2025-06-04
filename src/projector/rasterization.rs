@@ -283,16 +283,20 @@ pub fn rasterize_triangle(
                 buffers.depth_map[[row, col, 0]] = depth_byte;
                 buffers.depth_map[[row, col, 1]] = depth_byte;
                 buffers.depth_map[[row, col, 2]] = depth_byte;
-                // Normal map (view-space normals, scaled to 0-255)
-                let interpolated_normal_vs_for_map =
+                // View-space normals
+                let interpolated_normal_vs =
                     transform_vector_3d(interpolated_normal_ws, &view_config.view_matrix);
                 // Update the normal map
-                buffers.normal_map[[row, col, 0]] =
-                    ((interpolated_normal_vs_for_map[0] * 0.5 + 0.5) * 255.0).round() as u8;
-                buffers.normal_map[[row, col, 1]] =
-                    ((interpolated_normal_vs_for_map[1] * 0.5 + 0.5) * 255.0).round() as u8;
-                buffers.normal_map[[row, col, 2]] =
-                    ((interpolated_normal_vs_for_map[2] * 0.5 + 0.5) * 255.0).round() as u8;
+                let normal_map = &mut buffers.normal_map;
+                normal_map[[row, col, 0]] = ((interpolated_normal_vs[0] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                normal_map[[row, col, 1]] = ((interpolated_normal_vs[1] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                normal_map[[row, col, 2]] = ((interpolated_normal_vs[2] + 1.0) / 2.0 * 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
         }
     }
