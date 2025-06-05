@@ -1,4 +1,7 @@
-// src/projector/rasterization.rs
+//! This module provides functions for rasterizing triangles onto a 2D projection plane.
+//! It handles triangle visibility, barycentric interpolation, texture sampling, and
+//! per-pixel lighting calculations, supporting various mesh modes for flexible rendering.
+
 use crate::projector::buffers::Buffers;
 use crate::projector::config::ViewConfig;
 use crate::projector::constants::DEFAULT_MISSING_TEXTURE_COLOR;

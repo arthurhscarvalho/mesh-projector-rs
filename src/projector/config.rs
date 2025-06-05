@@ -1,5 +1,9 @@
-// src/projector/config.rs
-//! Projection settings and related structures.
+//! Configuration types and settings for controlling the 3D mesh projection process.
+//!
+//! This module defines the structures and parameters used to specify projection resolution,
+//! rotation strategies, outlier filtering, and other options that influence how projections
+//! are generated from 3D meshes. These settings are consumed by the projector pipeline to
+//! produce images, depth maps, and related outputs.
 
 use ndarray::Array2;
 

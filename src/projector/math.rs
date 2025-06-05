@@ -1,6 +1,8 @@
-// src/projector/math.rs
-//! Vector math operations for 3D geometry calculations.
-//! Provides basic operations like dot product, vector scaling, subtraction, reflection, etc.
+//! Core linear algebra and vector math utilities for 3D graphics.
+//!
+//! This module provides essential functions for manipulating 3D vectors and matrices,
+//! including dot products, normalization, rotation matrix construction, and geometric
+//! transformations.
 
 use ndarray::{array, Array2};
 

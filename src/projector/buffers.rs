@@ -1,9 +1,16 @@
-// src/projector/buffers.rs
+//! Defines and manages the core data buffers used during 3D mesh projection.
+//!
+//! This module provides the `Buffers` struct, which encapsulates all intermediate and output
+//! arrays required for rendering a projection view, including color images, depth maps,
+//! normal maps, occupancy masks, z-buffers, and outlier statistics. These buffers are
+//! initialized, updated, and accessed throughout the projection pipeline to accumulate
+//! per-pixel results and support post-processing operations.
+
 use crate::projector::constants::BACKGROUND_BRIGHTNESS;
 use ndarray::{Array2, Array3};
 use std::f64;
 
-/// Holds the output image buffers generated during the projection process.
+/// Holds buffers generated during the projection process.
 pub struct Buffers {
     /// The rendered color image (H, W, C).
     pub image: Array3<u8>,

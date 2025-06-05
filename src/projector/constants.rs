@@ -1,5 +1,6 @@
-// src/projector/constants.rs
-use std::f64;
+//! This module defines constants for image projection, rendering, and filtering operations.
+//! These constants control color representation, numerical tolerances, lighting parameters,
+//! and default values used throughout the projector pipeline.
 
 /// Number of channels in the output image (RGB).
 pub const NUM_CHANNELS: usize = 3;

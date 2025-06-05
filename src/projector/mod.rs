@@ -1,4 +1,5 @@
-// src/projector/mod.rs
+//! High-level module for 3D mesh projection and rendering.
+
 mod buffers;
 pub mod config;
 mod constants;

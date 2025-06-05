@@ -1,4 +1,8 @@
-// src/projector/geometry.rs
+//! This module provides core geometric algorithms and utilities.
+//! It includes functions for computing barycentric coordinates, triangle normals, and other
+//! essential operations required for rasterization, visibility testing, and surface analysis
+//! during the projection pipeline.
+
 use crate::projector::constants::{BARYCENTRIC_COORD_EPSILON, BARYCENTRIC_EPSILON};
 use nd::{Array2, ArrayView2};
 use std::f64;

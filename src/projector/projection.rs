@@ -1,3 +1,8 @@
+//! This module implements the core logic for projecting a 3D mesh onto a 2D image plane
+//! according to a specified view configuration. It orchestrates the rasterization of mesh
+//! triangles, manages per-pixel buffers (color, depth, normals, occupancy), and applies
+//! post-processing such as outlier filtering.
+
 use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
@@ -13,10 +18,8 @@ pub fn compute_projection(
     view_config: &ViewConfig,
 ) -> (Array3<u8>, Array3<u8>, Array3<u8>, Array2<u8>, u64) {
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
-    let max_bound_u: usize = max_bound as usize;
-    let rows = max_bound_u;
-    let cols = max_bound_u;
+    let rows = max_bound as usize;
+    let cols = max_bound as usize;
     // Initialize buffers for a single view
     let mut buffers = Buffers::new(rows, cols, NUM_CHANNELS);
     let num_submeshes = mesh.submeshes.len();
@@ -44,11 +47,7 @@ pub fn compute_projection(
         }
     }
     // Apply outlier filtering
-    filter_outliers(
-        &mut buffers,
-        settings.filtering_window_radius,
-        max_bound_f64,
-    );
+    filter_outliers(&mut buffers, &settings, max_bound as f64);
     // Return from buffers
     (
         buffers.image,

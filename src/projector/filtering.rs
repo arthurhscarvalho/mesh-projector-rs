@@ -1,5 +1,9 @@
-// src/projector/filtering.rs
+//! This module provides functions for outlier filtering in projected images,
+//! specifically targeting pixels whose depth values significantly deviate from
+//! their local neighborhood.
+
 use crate::projector::buffers::Buffers;
+use crate::projector::config::ProjectorConfig;
 use crate::projector::constants::{
     BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS,
 };
@@ -76,7 +80,8 @@ fn find_outliers(
 }
 
 /// Filters outlier pixels for all image layers and applies the filtering to the images.
-pub fn filter_outliers(buffers: &mut Buffers, filtering_window_radius: u64, max_bound_f64: f64) {
+pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectorConfig, max_bound: f64) {
+    let filtering_window_radius = settings.filtering_window_radius;
     // Return outlier counts array
     let rows = buffers.z_buffer.shape()[0];
     let cols = buffers.z_buffer.shape()[1];
@@ -92,7 +97,7 @@ pub fn filter_outliers(buffers: &mut Buffers, filtering_window_radius: u64, max_
     if rows <= 2 * w || cols <= 2 * w {
         return;
     }
-    let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound_f64;
+    let filter_threshold = FILTERING_NEIGHBORHOOD_FACTOR * max_bound;
     let outlier_coords = find_outliers(&buffers.z_buffer, w, rows, cols, filter_threshold);
     let outlier_count = outlier_coords.len() as u64;
     // Populate the occlusion map and counts sequentially after parallel computation

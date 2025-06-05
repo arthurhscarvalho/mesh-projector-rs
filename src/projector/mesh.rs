@@ -1,5 +1,10 @@
-// src/projector/mesh.rs
-//! Mesh data structures for representing 3D geometry.
+//! Core data structures for representing 3D mesh geometry, textures, and materials.
+//!
+//! This module defines the types used to describe the geometry (vertices, faces, normals, colors),
+//! texture mapping (UVs, images), and material properties (PBR parameters) of 3D models.
+//! These structures form the foundation for mesh loading, transformation, and rendering
+//! throughout the projection and rasterization pipeline.
+
 use ndarray::{Array2, Array3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

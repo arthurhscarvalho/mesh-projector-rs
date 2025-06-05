@@ -1,5 +1,6 @@
-// src/projector/sampling.rs
-//! Texture and color sampling functions for the projector.
+//! Provides utilities for sampling colors from textures, including bilinear filtering,
+//! to support accurate texture mapping in the projector module.
+
 use ndarray::ArrayView3;
 
 /// Samples the texture color using bilinear filtering.

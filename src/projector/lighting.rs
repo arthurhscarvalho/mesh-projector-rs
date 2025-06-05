@@ -1,5 +1,9 @@
-// src/projector/lighting.rs
-//! Lighting calculation functions for the projector.
+//! This module provides functions for physically-based lighting calculations,
+//! including support for different light sources, material properties, and
+//! color space conversions. It is used to compute the final color of surfaces
+//! in 3D scenes, taking into account ambient, diffuse, and specular lighting
+//! components, as well as transformations between world and view space.
+
 use crate::projector::config::LightSource;
 use crate::projector::constants::GLOBAL_AMBIENT;
 use crate::projector::math::{
