@@ -15,6 +15,234 @@ use crate::projector::sampling::sample_texture_color_bilinear;
 use nd::Array1;
 use std::f64;
 
+/// Represents interpolated attributes at a specific point on a triangle surface
+#[derive(Debug, Clone)]
+pub struct InterpolatedAttributes {
+    pub position_ws: [f64; 3],
+    pub normal_ws: [f64; 3],
+    pub base_color: [f64; 3], // Linear color space
+}
+
+/// Represents the basic triangle data needed for processing
+#[derive(Debug, Clone)]
+pub struct TriangleData {
+    pub vertices_ws: [[f64; 3]; 3],   // World-space vertex positions
+    pub normals_ws: [[f64; 3]; 3],    // World-space vertex normals
+    pub uvs: [(f64, f64); 3],         // UV coordinates
+    pub colors: [(f64, f64, f64); 3], // Linear vertex colors (for ObjOnly mode)
+    pub face_normal_ws: [f64; 3],     // Face normal in world space
+}
+
+/// Extracts triangle data from mesh for processing
+pub fn extract_triangle_data(
+    mesh: &Mesh,
+    submesh_index: usize,
+    triangle_index: usize,
+) -> TriangleData {
+    let submesh = &mesh.submeshes[submesh_index];
+
+    // Calculate global triangle offset for UV lookup
+    let global_triangle_offset: usize = (0..submesh_index)
+        .into_iter()
+        .map(|i| mesh.submeshes[i].geometry.triangles.nrows())
+        .sum();
+    let uv_triangle_id: usize = global_triangle_offset + triangle_index;
+
+    // Get face normal
+    let current_face_normal_ws = submesh.geometry.face_normals.row(triangle_index);
+    let face_normal_ws_arr = [
+        current_face_normal_ws[0],
+        current_face_normal_ws[1],
+        current_face_normal_ws[2],
+    ];
+
+    // Get vertex indices
+    let world_vertices = submesh.geometry.vertices.view();
+    let triangles = submesh.geometry.triangles.view();
+    let tri_indices = triangles.row(triangle_index);
+    let i0 = tri_indices[0];
+    let i1 = tri_indices[1];
+    let i2 = tri_indices[2];
+
+    // Get world-space positions
+    let p0_ws_vec = world_vertices.row(i0);
+    let p1_ws_vec = world_vertices.row(i1);
+    let p2_ws_vec = world_vertices.row(i2);
+    let vertices_ws = [
+        [p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]],
+        [p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]],
+        [p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]],
+    ];
+
+    // Get normals (use vertex normals if available, otherwise face normal)
+    let mut normals_ws = [face_normal_ws_arr; 3];
+    if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
+        let v_normals_ws_view = v_normals_ws.view();
+        let n0_v_ws = v_normals_ws_view.row(i0);
+        let n1_v_ws = v_normals_ws_view.row(i1);
+        let n2_v_ws = v_normals_ws_view.row(i2);
+        normals_ws = [
+            [n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]],
+            [n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]],
+            [n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]],
+        ];
+    }
+
+    // Get UVs
+    let mut uvs = [(0.0, 0.0); 3];
+    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
+        if let Some(texture_uvs) = &mesh.texture.triangle_uvs {
+            let uv_idx_base = uv_triangle_id * 3;
+            if uv_idx_base + 2 < texture_uvs.shape()[0] {
+                let uv0_data = texture_uvs.row(uv_idx_base);
+                let uv1_data = texture_uvs.row(uv_idx_base + 1);
+                let uv2_data = texture_uvs.row(uv_idx_base + 2);
+                uvs = [
+                    (uv0_data[0], uv0_data[1]),
+                    (uv1_data[0], uv1_data[1]),
+                    (uv2_data[0], uv2_data[1]),
+                ];
+            }
+        }
+    }
+
+    // Get vertex colors
+    let mut colors = [(1.0, 1.0, 1.0); 3];
+    if mesh.mode == MeshMode::ObjOnly {
+        if let Some(v_colors) = &submesh.geometry.vertex_colors {
+            if i0 < v_colors.nrows() && i1 < v_colors.nrows() && i2 < v_colors.nrows() {
+                let v_colors_view = v_colors.view();
+                let c0v = v_colors_view.row(i0);
+                let c1v = v_colors_view.row(i1);
+                let c2v = v_colors_view.row(i2);
+                colors = [
+                    (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2)),
+                    (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2)),
+                    (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2)),
+                ];
+            }
+        }
+    }
+
+    TriangleData {
+        vertices_ws,
+        normals_ws,
+        uvs,
+        colors,
+        face_normal_ws: face_normal_ws_arr,
+    }
+}
+
+/// Interpolates attributes at a specific barycentric coordinate within a triangle
+pub fn interpolate_triangle_attributes(
+    triangle_data: &TriangleData,
+    barycentric_coords: (f64, f64, f64), // (w0, w1, w2)
+    mesh: &Mesh,
+) -> InterpolatedAttributes {
+    let (w0, w1, w2) = barycentric_coords;
+
+    // Interpolate position
+    let position_ws = [
+        w0 * triangle_data.vertices_ws[0][0]
+            + w1 * triangle_data.vertices_ws[1][0]
+            + w2 * triangle_data.vertices_ws[2][0],
+        w0 * triangle_data.vertices_ws[0][1]
+            + w1 * triangle_data.vertices_ws[1][1]
+            + w2 * triangle_data.vertices_ws[2][1],
+        w0 * triangle_data.vertices_ws[0][2]
+            + w1 * triangle_data.vertices_ws[1][2]
+            + w2 * triangle_data.vertices_ws[2][2],
+    ];
+
+    // Interpolate normal and normalize
+    let mut normal_ws = [
+        w0 * triangle_data.normals_ws[0][0]
+            + w1 * triangle_data.normals_ws[1][0]
+            + w2 * triangle_data.normals_ws[2][0],
+        w0 * triangle_data.normals_ws[0][1]
+            + w1 * triangle_data.normals_ws[1][1]
+            + w2 * triangle_data.normals_ws[2][1],
+        w0 * triangle_data.normals_ws[0][2]
+            + w1 * triangle_data.normals_ws[1][2]
+            + w2 * triangle_data.normals_ws[2][2],
+    ];
+    normalize_vec3(&mut normal_ws);
+
+    // Interpolate UV
+    let uv = (
+        w0 * triangle_data.uvs[0].0 + w1 * triangle_data.uvs[1].0 + w2 * triangle_data.uvs[2].0,
+        w0 * triangle_data.uvs[0].1 + w1 * triangle_data.uvs[1].1 + w2 * triangle_data.uvs[2].1,
+    );
+
+    // Calculate base color based on mesh mode
+    let base_color = match mesh.mode {
+        MeshMode::ObjOnly => {
+            // Interpolate vertex colors
+            let r = w0 * triangle_data.colors[0].0
+                + w1 * triangle_data.colors[1].0
+                + w2 * triangle_data.colors[2].0;
+            let g = w0 * triangle_data.colors[0].1
+                + w1 * triangle_data.colors[1].1
+                + w2 * triangle_data.colors[2].1;
+            let b = w0 * triangle_data.colors[0].2
+                + w1 * triangle_data.colors[1].2
+                + w2 * triangle_data.colors[2].2;
+            [r.max(0.0), g.max(0.0), b.max(0.0)]
+        }
+        MeshMode::ObjTexture | MeshMode::Full => {
+            if let Some(tex_image) = &mesh.texture.texture {
+                let sampled_srgb = sample_texture_color_bilinear(
+                    uv.0,
+                    uv.1,
+                    tex_image.view(),
+                    mesh.texture.channels,
+                    mesh.texture.height_f64,
+                    mesh.texture.width_f64,
+                );
+                [
+                    sampled_srgb[0].powf(2.2),
+                    sampled_srgb[1].powf(2.2),
+                    sampled_srgb[2].powf(2.2),
+                ]
+            } else {
+                DEFAULT_MISSING_TEXTURE_COLOR
+            }
+        }
+    };
+
+    InterpolatedAttributes {
+        position_ws,
+        normal_ws,
+        base_color,
+    }
+}
+
+/// Calculates final color with lighting for interpolated attributes
+pub fn calculate_final_color(
+    attributes: &InterpolatedAttributes,
+    view_config: &ViewConfig,
+    material: &crate::projector::mesh::MeshMaterial,
+    mesh_mode: MeshMode,
+    light_source: &crate::projector::config::LightSource,
+) -> [f64; 3] {
+    let view_dir_ws = [
+        view_config.view_dir.0,
+        view_config.view_dir.1,
+        view_config.view_dir.2,
+    ];
+
+    calculate_lighting(
+        attributes.base_color,
+        attributes.position_ws,
+        attributes.normal_ws,
+        &view_config.view_matrix,
+        view_dir_ws,
+        material,
+        mesh_mode,
+        light_source,
+    )
+}
+
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle(
     mesh: &Mesh,
@@ -24,27 +252,20 @@ pub fn rasterize_triangle(
     triangle_index: usize, // Local triangle index for geometry
 ) {
     let submesh = &mesh.submeshes[submesh_index];
-    // Get the current face normal (world-space) and the global triangle ID for UV lookup
-    let current_face_normal_ws = submesh.geometry.face_normals.row(triangle_index);
-    let global_triangle_offset: usize = (0..submesh_index)
-        .into_iter()
-        .map(|i| mesh.submeshes[i].geometry.triangles.nrows())
-        .sum();
-    let uv_triangle_id: usize = global_triangle_offset + triangle_index;
-    let face_normal_ws_arr = [
-        current_face_normal_ws[0],
-        current_face_normal_ws[1],
-        current_face_normal_ws[2],
-    ];
+
+    // Extract triangle data
+    let triangle_data = extract_triangle_data(mesh, submesh_index, triangle_index);
+
     // Back-face Culling (using world-space face normal and world-space view direction)
     if !is_triangle_visible(
-        face_normal_ws_arr[0],
-        face_normal_ws_arr[1],
-        face_normal_ws_arr[2],
+        triangle_data.face_normal_ws[0],
+        triangle_data.face_normal_ws[1],
+        triangle_data.face_normal_ws[2],
         view_config.view_dir, // This is the world-space normal of the projection plane
     ) {
         return;
     }
+
     // Define projection plane axes from the rotation matrix
     let rot_mat = &view_config.rotation_matrix;
     let u_axis_ws = Array1::from_vec(vec![rot_mat[[0, 0]], rot_mat[[1, 0]], rot_mat[[2, 0]]]);
@@ -54,6 +275,7 @@ pub fn rasterize_triangle(
         view_config.view_dir.1,
         view_config.view_dir.2,
     ]);
+
     let cube_center_coord = (view_config.max_bound_f64 - 1.0) / 2.0;
     let c_cube_vec = Array1::from_vec(vec![
         cube_center_coord,
@@ -62,105 +284,26 @@ pub fn rasterize_triangle(
     ]);
     let offset_u_on_plane = c_cube_vec.dot(&u_axis_ws) - cube_center_coord;
     let offset_v_on_plane = c_cube_vec.dot(&v_axis_ws) - cube_center_coord;
-    // Get Vertex Data Indices & Original (world-space, pre-scaled) Positions from submesh_geometry
-    let world_vertices = submesh.geometry.vertices.view();
-    let triangles = submesh.geometry.triangles.view();
-    let tri_indices = triangles.row(triangle_index);
-    let i0 = tri_indices[0];
-    let i1 = tri_indices[1];
-    let i2 = tri_indices[2];
-    // Get the world-space positions of the triangle vertices
-    let p0_ws_vec = world_vertices.row(i0);
-    let p1_ws_vec = world_vertices.row(i1);
-    let p2_ws_vec = world_vertices.row(i2);
-    // Convert ArrayView1 to [f64; 3] for functions expecting it and for dot products
-    let p0_ws_arr_nd = Array1::from_vec(vec![p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]]);
-    let p1_ws_arr_nd = Array1::from_vec(vec![p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]]);
-    let p2_ws_arr_nd = Array1::from_vec(vec![p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]]);
-    let p0_ws_arr = [p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]];
-    let p1_ws_arr = [p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]];
-    let p2_ws_arr = [p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]];
+
     // Project world-space vertices onto the view plane
-    let p0_proj_x = p0_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
-    let p0_proj_y = p0_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
-    let z0 = p0_ws_arr_nd.dot(&plane_normal_ws);
-    let p1_proj_x = p1_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
-    let p1_proj_y = p1_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
-    let z1 = p1_ws_arr_nd.dot(&plane_normal_ws);
-    let p2_proj_x = p2_ws_arr_nd.dot(&u_axis_ws) - offset_u_on_plane;
-    let p2_proj_y = p2_ws_arr_nd.dot(&v_axis_ws) - offset_v_on_plane;
-    let z2 = p2_ws_arr_nd.dot(&plane_normal_ws);
-    let p0_proj = (p0_proj_x, p0_proj_y);
-    let p1_proj = (p1_proj_x, p1_proj_y);
-    let p2_proj = (p2_proj_x, p2_proj_y);
-    // Setup Data for Interpolation
-    let mut uv0 = (0.0, 0.0);
-    let mut uv1 = (0.0, 0.0);
-    let mut uv2 = (0.0, 0.0);
-    let mut c0 = (1.0, 1.0, 1.0);
-    let mut c1 = (1.0, 1.0, 1.0);
-    let mut c2 = (1.0, 1.0, 1.0);
-    // Get the world-space normals for the triangle vertices if they are available
-    let mut n0_ws_arr = face_normal_ws_arr; // Default to face normal
-    let mut n1_ws_arr = face_normal_ws_arr;
-    let mut n2_ws_arr = face_normal_ws_arr;
-    if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
-        let v_normals_ws_view = v_normals_ws.view();
-        let n0_v_ws = v_normals_ws_view.row(i0);
-        let n1_v_ws = v_normals_ws_view.row(i1);
-        let n2_v_ws = v_normals_ws_view.row(i2);
-        // Store world-space normals for later interpolation
-        n0_ws_arr = [n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]];
-        n1_ws_arr = [n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]];
-        n2_ws_arr = [n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]];
-    }
-    // Get the UVs for the triangle vertices if they are available
-    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-        if let Some(uvs) = &mesh.texture.triangle_uvs {
-            // Use uv_triangle_id for indexing into the global shared_texture.triangle_uvs
-            // Each entry in triangle_uvs is (U,V) for one corner. So, 3 entries per triangle.
-            let uv_idx_base = uv_triangle_id * 3;
-            if uv_idx_base + 2 < uvs.shape()[0] {
-                let uv0_data = uvs.row(uv_idx_base);
-                let uv1_data = uvs.row(uv_idx_base + 1);
-                let uv2_data = uvs.row(uv_idx_base + 2);
-                uv0 = (uv0_data[0], uv0_data[1]);
-                uv1 = (uv1_data[0], uv1_data[1]);
-                uv2 = (uv2_data[0], uv2_data[1]);
-            } else {
-                uv0 = (0.0, 0.0);
-                uv1 = (0.0, 0.0);
-                uv2 = (0.0, 0.0);
-                log::warn!("UV lookup out of bounds. Global Triangle ID: {}, UV Idx Base: {}, UVs shape: {:?}. Using default UVs.",
-                            uv_triangle_id, uv_idx_base, uvs.shape());
-            }
-        } else {
-            uv0 = (0.0, 0.0);
-            uv1 = (0.0, 0.0);
-            uv2 = (0.0, 0.0);
-        }
-    }
-    // Setup vertex colors if available (primarily for ObjOnly mesh_mode)
-    if mesh.mode == MeshMode::ObjOnly {
-        if let Some(v_colors) = &submesh.geometry.vertex_colors {
-            // Ensure we have colors for all vertices indexed by this triangle
-            if i0 < v_colors.nrows() && i1 < v_colors.nrows() && i2 < v_colors.nrows() {
-                let v_colors_view = v_colors.view();
-                let c0v = v_colors_view.row(i0);
-                let c1v = v_colors_view.row(i1);
-                let c2v = v_colors_view.row(i2);
-                c0 = (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2));
-                c1 = (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2));
-                c2 = (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2));
-            } else {
-                log::warn!("Vertex color index out of bounds for submesh. Using default white.");
-                // Default white (1,1,1) is already set
-            }
-        } else {
-            // No vertex colors provided for this submesh, default white is used.
-            log::debug!("No vertex colors for submesh in ObjOnly mode, using default white.");
-        }
-    }
+    let vertices_proj: [(f64, f64, f64); 3] = triangle_data
+        .vertices_ws
+        .iter()
+        .map(|&vertex_ws| {
+            let vertex_nd = Array1::from_vec(vec![vertex_ws[0], vertex_ws[1], vertex_ws[2]]);
+            let proj_x = vertex_nd.dot(&u_axis_ws) - offset_u_on_plane;
+            let proj_y = vertex_nd.dot(&v_axis_ws) - offset_v_on_plane;
+            let z = vertex_nd.dot(&plane_normal_ws);
+            (proj_x, proj_y, z)
+        })
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+
+    let p0_proj = (vertices_proj[0].0, vertices_proj[0].1);
+    let p1_proj = (vertices_proj[1].0, vertices_proj[1].1);
+    let p2_proj = (vertices_proj[2].0, vertices_proj[2].1);
+
     // Get the bounding box for the triangle
     let (rows, cols) = (buffers.z_buffer.shape()[0], buffers.z_buffer.shape()[1]);
     let Some((min_row, max_row, min_col, max_col)) =
@@ -168,6 +311,7 @@ pub fn rasterize_triangle(
     else {
         return;
     };
+
     // Rasterize the triangle
     for row in min_row..max_row {
         for col in min_col..max_col {
@@ -178,82 +322,27 @@ pub fn rasterize_triangle(
             if !is_inside_triangle(w0, w1, w2) {
                 continue;
             }
-            let interpolated_z = w0 * z0 + w1 * z1 + w2 * z2;
+
+            let interpolated_z =
+                w0 * vertices_proj[0].2 + w1 * vertices_proj[1].2 + w2 * vertices_proj[2].2;
             let current_z = buffers.z_buffer[[row, col]];
             let depth_test_passed = interpolated_z < current_z;
-            // If the depth test passed, interpolate the world-space vertex position and normal
+
+            // If the depth test passed, interpolate attributes and update buffers
             if depth_test_passed {
-                // Interpolate world-space vertex position for the current pixel
-                let interpolated_vx_ws = w0 * p0_ws_arr[0] + w1 * p1_ws_arr[0] + w2 * p2_ws_arr[0];
-                let interpolated_vy_ws = w0 * p0_ws_arr[1] + w1 * p1_ws_arr[1] + w2 * p2_ws_arr[1];
-                let interpolated_vz_ws = w0 * p0_ws_arr[2] + w1 * p1_ws_arr[2] + w2 * p2_ws_arr[2];
-                let interpolated_vertex_pos_ws =
-                    [interpolated_vx_ws, interpolated_vy_ws, interpolated_vz_ws];
-                // Interpolate world-space normal for the current pixel
-                let interpolated_nx_ws = w0 * n0_ws_arr[0] + w1 * n1_ws_arr[0] + w2 * n2_ws_arr[0];
-                let interpolated_ny_ws = w0 * n0_ws_arr[1] + w1 * n1_ws_arr[1] + w2 * n2_ws_arr[1];
-                let interpolated_nz_ws = w0 * n0_ws_arr[2] + w1 * n1_ws_arr[2] + w2 * n2_ws_arr[2];
-                let mut interpolated_normal_ws =
-                    [interpolated_nx_ws, interpolated_ny_ws, interpolated_nz_ws];
-                normalize_vec3(&mut interpolated_normal_ws);
-                // Interpolate the UVs for the current pixel
-                let (interpolated_u, interpolated_v) =
-                    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-                        (
-                            w0 * uv0.0 + w1 * uv1.0 + w2 * uv2.0,
-                            w0 * uv0.1 + w1 * uv1.1 + w2 * uv2.1,
-                        )
-                    } else {
-                        (0.0, 0.0)
-                    };
-                // Interpolate the base color for the current pixel
-                let linear_base_color = match mesh.mode {
-                    MeshMode::ObjOnly => {
-                        // Interpolate vertex colors (c0, c1, c2 are default white for now)
-                        let r = w0 * c0.0 + w1 * c1.0 + w2 * c2.0;
-                        let g = w0 * c0.1 + w1 * c1.1 + w2 * c2.1;
-                        let b = w0 * c0.2 + w1 * c1.2 + w2 * c2.2;
-                        [r.max(0.0), g.max(0.0), b.max(0.0)]
-                    }
-                    MeshMode::ObjTexture | MeshMode::Full => {
-                        if let Some(tex_image) = &mesh.texture.texture {
-                            // Use shared_texture for texture image
-                            let sampled_srgb = sample_texture_color_bilinear(
-                                interpolated_u,
-                                interpolated_v,
-                                tex_image.view(),
-                                mesh.texture.channels,
-                                mesh.texture.height_f64,
-                                mesh.texture.width_f64,
-                            );
-                            [
-                                sampled_srgb[0].powf(2.2),
-                                sampled_srgb[1].powf(2.2),
-                                sampled_srgb[2].powf(2.2),
-                            ]
-                        } else {
-                            DEFAULT_MISSING_TEXTURE_COLOR
-                        }
-                    }
-                };
-                // For orthographic projection, the camera is on the projection plane
-                // Get the view direction from the config
-                let view_dir_ws = [
-                    view_config.view_dir.0,
-                    view_config.view_dir.1,
-                    view_config.view_dir.2,
-                ];
-                // Calculate the final color for the current pixel
-                let final_color_linear = calculate_lighting(
-                    linear_base_color,
-                    interpolated_vertex_pos_ws,
-                    interpolated_normal_ws,
-                    &view_config.view_matrix,
-                    view_dir_ws,
+                // Interpolate attributes using the new shared function
+                let attributes =
+                    interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
+
+                // Calculate final color with lighting
+                let final_color_linear = calculate_final_color(
+                    &attributes,
+                    view_config,
                     &submesh.material,
                     mesh.mode,
                     &view_config.light_source,
                 );
+
                 // Convert the final color to sRGB
                 let final_color_srgb = [
                     (final_color_linear[0].powf(1.0 / 2.2) * 255.0)
@@ -269,11 +358,13 @@ pub fn rasterize_triangle(
                         .max(0.0)
                         .min(255.0) as u8,
                 ];
+
                 // Update the buffers
                 buffers.z_buffer[[row, col]] = interpolated_z;
                 buffers.image[[row, col, 0]] = final_color_srgb[0];
                 buffers.image[[row, col, 1]] = final_color_srgb[1];
                 buffers.image[[row, col, 2]] = final_color_srgb[2];
+
                 // Depth map (scaled to 0-255)
                 let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
                     .abs()
@@ -286,9 +377,11 @@ pub fn rasterize_triangle(
                 buffers.depth_map[[row, col, 0]] = depth_byte;
                 buffers.depth_map[[row, col, 1]] = depth_byte;
                 buffers.depth_map[[row, col, 2]] = depth_byte;
+
                 // View-space normals
                 let interpolated_normal_vs =
-                    transform_vector_3d(interpolated_normal_ws, &view_config.view_matrix);
+                    transform_vector_3d(attributes.normal_ws, &view_config.view_matrix);
+
                 // Update the normal map
                 let normal_map = &mut buffers.normal_map;
                 normal_map[[row, col, 0]] = ((interpolated_normal_vs[0] + 1.0) / 2.0 * 255.0)

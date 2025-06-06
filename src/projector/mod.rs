@@ -14,12 +14,11 @@ mod sampling;
 
 use crate::mesh_io::save_image_data;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
-use crate::projector::constants::{DEFAULT_MISSING_TEXTURE_COLOR, NUM_CHANNELS};
+use crate::projector::constants::NUM_CHANNELS;
 use crate::projector::math::{
-    combine_rotations, create_view_matrix, normalize_vec3, rotation_matrix_x, rotation_matrix_y,
-    rotation_matrix_z,
+    combine_rotations, create_view_matrix, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
 };
-use mesh::{Mesh, MeshMode};
+use mesh::Mesh;
 use ndarray::{Array3, Array4, Axis};
 use rayon::prelude::*;
 use std::path::Path;
@@ -240,148 +239,48 @@ pub fn discretize_mesh_to_point_cloud(
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
     let density_factor = settings.point_cloud_density_factor.unwrap_or(1.0);
-
-    if mesh.submeshes.is_empty()
-        || mesh
-            .submeshes
-            .iter()
-            .all(|sm| sm.geometry.vertices.is_empty() || sm.geometry.triangles.is_empty())
-    {
-        log::warn!(
-            "Empty mesh (no submeshes or no geometry in submeshes). Returning empty point cloud."
-        );
-        let empty_points = ndarray::Array2::<f64>::zeros((0, 3));
-        let empty_colors = ndarray::Array2::<u8>::zeros((0, 3));
-        return (empty_points, empty_colors);
-    }
-
-    let mut point_cloud_points = Vec::new();
-    let mut point_cloud_colors = Vec::new();
-
+    // Initialize point cloud buffers
+    let mut points = Vec::new();
+    let mut colors = Vec::new();
+    let mut num_points: usize = 0;
+    // Calculate total mesh area for density calculation
     let mut total_mesh_area = 0.0;
-    for submesh in &mesh.submeshes {
-        let triangles = submesh.geometry.triangles.view();
-        let world_vertices = submesh.geometry.vertices.view(); // These are now assumed to be pre-scaled
-        for triangle_index in 0..triangles.nrows() {
-            let tri_indices = triangles.row(triangle_index);
-            let i0 = tri_indices[0];
-            let i1 = tri_indices[1];
-            let i2 = tri_indices[2];
-            let p0 = world_vertices.row(i0);
-            let p1 = world_vertices.row(i1);
-            let p2 = world_vertices.row(i2);
-            let ab = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
-            let ac = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
-            let cross = [
-                ab[1] * ac[2] - ab[2] * ac[1],
-                ab[2] * ac[0] - ab[0] * ac[2],
-                ab[0] * ac[1] - ab[1] * ac[0],
-            ];
-            let area =
-                0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
-            total_mesh_area += area;
+    for submesh_index in 0..mesh.submeshes.len() {
+        let submesh = &mesh.submeshes[submesh_index];
+        let num_faces = submesh.geometry.triangles.nrows();
+        for triangle_index in 0..num_faces {
+            let triangle_data =
+                rasterization::extract_triangle_data(&mesh, submesh_index, triangle_index);
+            let triangle_area = geometry::calculate_triangle_area(&triangle_data.vertices_ws);
+            total_mesh_area += triangle_area;
         }
     }
-
+    // Density factor is the number of points per unit area.
     let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
-
-    let mut global_triangle_offset = 0;
-    for submesh in &mesh.submeshes {
-        let triangles = submesh.geometry.triangles.view();
-        let world_vertices = submesh.geometry.vertices.view(); // Assumed pre-scaled
-        let num_faces = triangles.nrows();
+    // Create a placeholder view config for lighting calculations
+    let view_config = ViewConfig {
+        view_dir: (0.0, 0.0, 1.0),
+        rotation_matrix: ndarray::Array2::eye(4),
+        view_matrix: ndarray::Array2::eye(4),
+        max_bound_f64,
+        light_source: config::LightSource::Camera,
+    };
+    // Process each submesh
+    for submesh_index in 0..mesh.submeshes.len() {
+        let submesh = &mesh.submeshes[submesh_index];
+        let num_faces = submesh.geometry.triangles.nrows();
         for triangle_index in 0..num_faces {
-            let face_normal_view = submesh.geometry.face_normals.row(triangle_index);
-            let face_normal_ws_arr = [
-                face_normal_view[0],
-                face_normal_view[1],
-                face_normal_view[2],
-            ];
-            let tri_indices = triangles.row(triangle_index);
-            let i0 = tri_indices[0];
-            let i1 = tri_indices[1];
-            let i2 = tri_indices[2];
-            let p0_ws_vec = world_vertices.row(i0);
-            let p1_ws_vec = world_vertices.row(i1);
-            let p2_ws_vec = world_vertices.row(i2);
-            let p0_ws_arr = [p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]];
-            let p1_ws_arr = [p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]];
-            let p2_ws_arr = [p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]];
-            let mut n0_ws_arr = face_normal_ws_arr;
-            let mut n1_ws_arr = face_normal_ws_arr;
-            let mut n2_ws_arr = face_normal_ws_arr;
-            if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
-                let v_normals_ws_view = v_normals_ws.view();
-                let n0_v_ws = v_normals_ws_view.row(i0);
-                let n1_v_ws = v_normals_ws_view.row(i1);
-                let n2_v_ws = v_normals_ws_view.row(i2);
-                n0_ws_arr = [n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]];
-                n1_ws_arr = [n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]];
-                n2_ws_arr = [n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]];
-            }
-            let mut uv0 = (0.0, 0.0);
-            let mut uv1 = (0.0, 0.0);
-            let mut uv2 = (0.0, 0.0);
-            let uv_triangle_id = global_triangle_offset + triangle_index;
-            if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-                if let Some(uvs) = &mesh.texture.triangle_uvs {
-                    let uv_idx_base = uv_triangle_id * 3;
-                    if uv_idx_base + 2 < uvs.shape()[0] {
-                        let uv0_data = uvs.row(uv_idx_base);
-                        let uv1_data = uvs.row(uv_idx_base + 1);
-                        let uv2_data = uvs.row(uv_idx_base + 2);
-                        uv0 = (uv0_data[0], uv0_data[1]);
-                        uv1 = (uv1_data[0], uv1_data[1]);
-                        uv2 = (uv2_data[0], uv2_data[1]);
-                    }
-                }
-            }
-            let mut c0 = (1.0, 1.0, 1.0);
-            let mut c1 = (1.0, 1.0, 1.0);
-            let mut c2 = (1.0, 1.0, 1.0);
-            if mesh.mode == MeshMode::ObjOnly {
-                if let Some(v_colors) = &submesh.geometry.vertex_colors {
-                    if i0 < v_colors.nrows() && i1 < v_colors.nrows() && i2 < v_colors.nrows() {
-                        let v_colors_view = v_colors.view();
-                        let c0v = v_colors_view.row(i0);
-                        let c1v = v_colors_view.row(i1);
-                        let c2v = v_colors_view.row(i2);
-                        c0 = (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2));
-                        c1 = (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2));
-                        c2 = (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2));
-                    }
-                }
-            }
-            let ab = [
-                p1_ws_arr[0] - p0_ws_arr[0],
-                p1_ws_arr[1] - p0_ws_arr[1],
-                p1_ws_arr[2] - p0_ws_arr[2],
-            ];
-            let ac = [
-                p2_ws_arr[0] - p0_ws_arr[0],
-                p2_ws_arr[1] - p0_ws_arr[1],
-                p2_ws_arr[2] - p0_ws_arr[2],
-            ];
-            let cross = [
-                ab[1] * ac[2] - ab[2] * ac[1],
-                ab[2] * ac[0] - ab[0] * ac[2],
-                ab[0] * ac[1] - ab[1] * ac[0],
-            ];
-            let triangle_area =
-                0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
-
-            // n_subdiv determines subdivisions along triangle edges.
-            // Number of points per triangle is roughly 0.5 * n_subdiv^2.
-            // With n_subdiv = (triangle_area * density).sqrt(),
-            // points per triangle becomes ~ 0.5 * triangle_area * density.
-            // Using .floor() allows n_subdiv to be 0 for triangles that don't meet
-            // the threshold for even one subdivision step at the current density,
-            // leading to fewer points at low precision settings.
+            // Extract triangle data
+            let triangle_data =
+                rasterization::extract_triangle_data(&mesh, submesh_index, triangle_index);
+            // Calculate triangle area
+            let triangle_area = geometry::calculate_triangle_area(&triangle_data.vertices_ws);
+            // Calculate number of subdivisions based on triangle area and density
             let n_subdiv = (triangle_area * density).sqrt().floor() as usize;
-
             if n_subdiv == 0 {
                 continue;
             }
+            // Sample points across the triangle surface
             for i in 0..=n_subdiv {
                 for j in 0..=(n_subdiv - i) {
                     let u = i as f64 / n_subdiv as f64;
@@ -390,84 +289,37 @@ pub fn discretize_mesh_to_point_cloud(
                     if u < 0.0 || v < 0.0 || w < 0.0 {
                         continue;
                     }
-                    let x = u * p0_ws_arr[0] + v * p1_ws_arr[0] + w * p2_ws_arr[0];
-                    let y = u * p0_ws_arr[1] + v * p1_ws_arr[1] + w * p2_ws_arr[1];
-                    let z = u * p0_ws_arr[2] + v * p1_ws_arr[2] + w * p2_ws_arr[2];
-                    let mut interpolated_normal_ws = [
-                        u * n0_ws_arr[0] + v * n1_ws_arr[0] + w * n2_ws_arr[0],
-                        u * n0_ws_arr[1] + v * n1_ws_arr[1] + w * n2_ws_arr[1],
-                        u * n0_ws_arr[2] + v * n1_ws_arr[2] + w * n2_ws_arr[2],
-                    ];
-                    normalize_vec3(&mut interpolated_normal_ws);
-                    let (interpolated_u, interpolated_v) =
-                        if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-                            (
-                                u * uv0.0 + v * uv1.0 + w * uv2.0,
-                                u * uv0.1 + v * uv1.1 + w * uv2.1,
-                            )
-                        } else {
-                            (0.0, 0.0)
-                        };
-                    let linear_base_color = match mesh.mode {
-                        MeshMode::ObjOnly => {
-                            let r = u * c0.0 + v * c1.0 + w * c2.0;
-                            let g = u * c0.1 + v * c1.1 + w * c2.1;
-                            let b = u * c0.2 + v * c1.2 + w * c2.2;
-                            [r.max(0.0), g.max(0.0), b.max(0.0)]
-                        }
-                        MeshMode::ObjTexture | MeshMode::Full => {
-                            if let Some(tex_image) = &mesh.texture.texture {
-                                let sampled_srgb = sampling::sample_texture_color_bilinear(
-                                    interpolated_u,
-                                    interpolated_v,
-                                    tex_image.view(),
-                                    mesh.texture.channels,
-                                    mesh.texture.height_f64,
-                                    mesh.texture.width_f64,
-                                );
-                                [
-                                    sampled_srgb[0].powf(2.2),
-                                    sampled_srgb[1].powf(2.2),
-                                    sampled_srgb[2].powf(2.2),
-                                ]
-                            } else {
-                                DEFAULT_MISSING_TEXTURE_COLOR
-                            }
-                        }
-                    };
-                    let final_color = lighting::calculate_lighting(
-                        linear_base_color,
-                        [x, y, z],
-                        interpolated_normal_ws,
-                        &ndarray::Array2::eye(4),
-                        [0.0, 0.0, 1.0],
+                    // Use the shared interpolation function
+                    let attributes = rasterization::interpolate_triangle_attributes(
+                        &triangle_data,
+                        (u, v, w),
+                        mesh,
+                    );
+                    // Calculate final color using the shared lighting function
+                    let final_color = rasterization::calculate_final_color(
+                        &attributes,
+                        &view_config,
                         &submesh.material,
                         mesh.mode,
                         &config::LightSource::Camera,
                     );
+                    // Convert to sRGB and clamp to u8 range
                     let r_srgb = (final_color[0].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     let g_srgb = (final_color[1].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     let b_srgb = (final_color[2].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
-
-                    point_cloud_points.push([x, y, z]);
-                    point_cloud_colors.push([r_srgb, g_srgb, b_srgb]);
+                    // Add point and color to the flatten arrays
+                    points.push(attributes.position_ws[0]);
+                    points.push(attributes.position_ws[1]);
+                    points.push(attributes.position_ws[2]);
+                    colors.push(r_srgb);
+                    colors.push(g_srgb);
+                    colors.push(b_srgb);
+                    num_points += 1;
                 }
             }
         }
-        global_triangle_offset += num_faces;
     }
-    let num_points = point_cloud_points.len();
-    let mut points_array = ndarray::Array2::<f64>::zeros((num_points, 3));
-    let mut colors_array = ndarray::Array2::<u8>::zeros((num_points, 3));
-    for (i, point) in point_cloud_points.iter().enumerate() {
-        points_array[[i, 0]] = point[0];
-        points_array[[i, 1]] = point[1];
-        points_array[[i, 2]] = point[2];
-    }
-    for (i, color) in point_cloud_colors.iter().enumerate() {
-        colors_array[[i, 0]] = color[0];
-        colors_array[[i, 1]] = color[1];
-        colors_array[[i, 2]] = color[2];
-    }
+    let points_array = nd::Array2::from_shape_vec((num_points, 3), points).unwrap();
+    let colors_array = nd::Array2::from_shape_vec((num_points, 3), colors).unwrap();
     (points_array, colors_array)
 }

@@ -155,3 +155,25 @@ pub fn is_inside_triangle(u: f64, v: f64, w: f64) -> bool {
         && v >= BARYCENTRIC_COORD_EPSILON
         && w >= BARYCENTRIC_COORD_EPSILON
 }
+
+/// Calculates the area of a triangle given its vertices.
+pub fn calculate_triangle_area(vertices: &[[f64; 3]; 3]) -> f64 {
+    let ab = [
+        vertices[1][0] - vertices[0][0],
+        vertices[1][1] - vertices[0][1],
+        vertices[1][2] - vertices[0][2],
+    ];
+    let ac = [
+        vertices[2][0] - vertices[0][0],
+        vertices[2][1] - vertices[0][1],
+        vertices[2][2] - vertices[0][2],
+    ];
+    let cross = [
+        ab[1] * ac[2] - ab[2] * ac[1],
+        ab[2] * ac[0] - ab[0] * ac[2],
+        ab[0] * ac[1] - ab[1] * ac[0],
+    ];
+    let triangle_area =
+        0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+    triangle_area
+}
