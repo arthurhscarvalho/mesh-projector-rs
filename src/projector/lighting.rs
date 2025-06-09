@@ -12,11 +12,6 @@ use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{MeshMaterial, MeshMode};
 use ndarray::Array2;
 
-/// Converts sRGB color to linear space
-fn srgb_to_linear(srgb: [f64; 3]) -> Color {
-    Color::new(srgb[0].powf(2.2), srgb[1].powf(2.2), srgb[2].powf(2.2))
-}
-
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
 pub fn calculate_lighting(
     base_color_linear: [f64; 3], // Base color of the surface (e.g. from texture or vertex color), in linear space
@@ -35,9 +30,9 @@ pub fn calculate_lighting(
     }
 
     // Convert material properties from sRGB to linear space
-    let linear_ka = srgb_to_linear(material.ka);
-    let linear_kd = srgb_to_linear(material.kd);
-    let linear_ks = srgb_to_linear(material.ks);
+    let linear_ka = Color::from(material.ka).to_linear();
+    let linear_kd = Color::from(material.kd).to_linear();
+    let linear_ks = Color::from(material.ks).to_linear();
 
     // Transform normal and vertex position to view space
     let normal_vs = transform_vector_3d(Coordinate::from(normal_ws), view_matrix); // Normals are vectors (w=0)
