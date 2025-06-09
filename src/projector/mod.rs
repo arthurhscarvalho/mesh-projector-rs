@@ -7,7 +7,6 @@ mod filtering;
 pub mod geometry;
 mod lighting;
 mod math;
-pub mod mesh;
 mod projection;
 mod rasterization;
 mod sampling;
@@ -15,10 +14,10 @@ mod sampling;
 use crate::mesh_io::save_image_data;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
-use crate::projector::math::{
-    combine_rotations, create_view_matrix, rotation_matrix_x, rotation_matrix_y, rotation_matrix_z,
-};
-use mesh::Mesh;
+use crate::projector::math::create_view_matrix;
+use crate::types::coordinate::Coordinate;
+use crate::types::mesh::Mesh;
+use crate::types::orientation::Orientation;
 use ndarray::{Array3, Array4, Axis};
 use rayon::prelude::*;
 use std::path::Path;
@@ -75,32 +74,27 @@ pub fn compute_mesh_projections(
     }
     // Create view configs for rotation-based projection
     for i in 0..num_views {
-        let (angle_x, angle_y, angle_z) = if num_views == 1 {
+        let angles = if num_views == 1 {
             // For a single view, use the deltas as absolute rotation angles
-            (
-                rotation_config.angle_delta_x,
-                rotation_config.angle_delta_y,
-                rotation_config.angle_delta_z,
-            )
+            rotation_config.angle_deltas
         } else {
             // For multiple views (rotational sweep), treat deltas as increments
-            (
-                rotation_config.angle_delta_x * i as f64,
-                rotation_config.angle_delta_y * i as f64,
-                rotation_config.angle_delta_z * i as f64,
+            Orientation::new(
+                rotation_config.angle_delta_x() * i as f64,
+                rotation_config.angle_delta_y() * i as f64,
+                rotation_config.angle_delta_z() * i as f64,
             )
         };
-        let rx = rotation_matrix_x(angle_x);
-        let ry = rotation_matrix_y(angle_y);
-        let rz = rotation_matrix_z(angle_z);
-        let rotation_matrix = combine_rotations(&rx, &ry, &rz);
-        let view_dir_tuple = (
+
+        let rotation_matrix = angles.to_rotation_matrix();
+        let view_dir = Coordinate::new(
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
+
         view_configs.push(ViewConfig {
-            view_dir: view_dir_tuple,
+            view_dir,
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
@@ -182,23 +176,21 @@ pub fn compute_and_save_rotation_projections(
 
     // Create view configs for rotation-based projection
     for i in 0..num_steps {
-        let angle_x = rotation_config.angle_delta_x * i as f64;
-        let angle_y = rotation_config.angle_delta_y * i as f64;
-        let angle_z = rotation_config.angle_delta_z * i as f64;
+        let angles = Orientation::new(
+            rotation_config.angle_delta_x() * i as f64,
+            rotation_config.angle_delta_y() * i as f64,
+            rotation_config.angle_delta_z() * i as f64,
+        );
 
-        let rx = rotation_matrix_x(angle_x);
-        let ry = rotation_matrix_y(angle_y);
-        let rz = rotation_matrix_z(angle_z);
-        let rotation_matrix = combine_rotations(&rx, &ry, &rz);
-
-        let view_dir_tuple = (
+        let rotation_matrix = angles.to_rotation_matrix();
+        let view_dir = Coordinate::new(
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
 
         view_configs.push(ViewConfig {
-            view_dir: view_dir_tuple,
+            view_dir,
             rotation_matrix: rotation_matrix.clone(),
             view_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
@@ -259,8 +251,8 @@ pub fn discretize_mesh_to_point_cloud(
     let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
     // Create a placeholder view config for lighting calculations
     let view_config = ViewConfig {
-        view_dir: (0.0, 0.0, 1.0),
-        rotation_matrix: ndarray::Array2::eye(4),
+        view_dir: Coordinate::new(0.0, 0.0, 1.0),
+        rotation_matrix: ndarray::Array2::eye(3),
         view_matrix: ndarray::Array2::eye(4),
         max_bound_f64,
         light_source: config::LightSource::Camera,
@@ -308,9 +300,10 @@ pub fn discretize_mesh_to_point_cloud(
                     let g_srgb = (final_color[1].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     let b_srgb = (final_color[2].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     // Add point and color to the flatten arrays
-                    points.push(attributes.position_ws[0]);
-                    points.push(attributes.position_ws[1]);
-                    points.push(attributes.position_ws[2]);
+                    let pos_array: [f64; 3] = attributes.position_ws.into();
+                    points.push(pos_array[0]);
+                    points.push(pos_array[1]);
+                    points.push(pos_array[2]);
                     colors.push(r_srgb);
                     colors.push(g_srgb);
                     colors.push(b_srgb);

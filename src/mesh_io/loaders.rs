@@ -12,7 +12,7 @@ use crate::mesh_io::{
     },
 };
 use crate::projector::geometry::precompute_triangle_normals;
-use crate::projector::mesh::{Mesh, MeshGeometry, MeshMode, MeshTexture, SubMesh};
+use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, SubMesh};
 use log::{info, warn};
 use tobj;
 
@@ -162,7 +162,7 @@ fn create_empty_texture() -> MeshTexture {
 /// Process all submeshes from the loaded models
 fn process_submeshes(
     models: &[tobj::Model],
-    materials: &[crate::projector::mesh::MeshMaterial],
+    materials: &[MeshMaterial],
     mode: MeshMode,
     precision: u32,
 ) -> MeshResult<Vec<SubMesh>> {
@@ -180,7 +180,7 @@ fn process_submeshes(
 /// Process a single model into a submesh
 fn process_single_submesh(
     model: &tobj::Model,
-    materials: &[crate::projector::mesh::MeshMaterial],
+    materials: &[MeshMaterial],
     mode: MeshMode,
     precision: u32,
 ) -> MeshResult<Option<SubMesh>> {

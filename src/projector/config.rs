@@ -5,34 +5,39 @@
 //! are generated from 3D meshes. These settings are consumed by the projector pipeline to
 //! produce images, depth maps, and related outputs.
 
+use crate::types::{coordinate::Coordinate, orientation::Orientation};
 use ndarray::Array2;
 
 /// Contains settings for controlling mesh rotation during projection.
 pub struct RotationConfig {
-    /// Angle delta for rotation around X axis (in radians)
-    pub angle_delta_x: f64,
-    /// Angle delta for rotation around Y axis (in radians)
-    pub angle_delta_y: f64,
-    /// Angle delta for rotation around Z axis (in radians)
-    pub angle_delta_z: f64,
+    /// Angle deltas for rotation (pitch, yaw, roll in radians)
+    pub angle_deltas: Orientation,
     /// Number of steps for each rotation axis
     pub num_steps: usize,
 }
 
 impl RotationConfig {
     /// Creates a new rotation configuration with specified angle deltas and number of steps.
-    pub fn new(
-        angle_delta_x: f64,
-        angle_delta_y: f64,
-        angle_delta_z: f64,
-        num_steps: usize,
-    ) -> Self {
+    pub fn new(angle_deltas: Orientation, num_steps: usize) -> Self {
         RotationConfig {
-            angle_delta_x,
-            angle_delta_y,
-            angle_delta_z,
+            angle_deltas,
             num_steps,
         }
+    }
+
+    /// Gets the X-axis angle delta (pitch).
+    pub fn angle_delta_x(&self) -> f64 {
+        self.angle_deltas.pitch()
+    }
+
+    /// Gets the Y-axis angle delta (yaw).
+    pub fn angle_delta_y(&self) -> f64 {
+        self.angle_deltas.yaw()
+    }
+
+    /// Gets the Z-axis angle delta (roll).
+    pub fn angle_delta_z(&self) -> f64 {
+        self.angle_deltas.roll()
     }
 }
 
@@ -54,18 +59,13 @@ impl ProjectorConfig {
         precision: u64,
         filtering_window_radius: u64,
         num_steps: u32,
-        rotation_config: [f64; 3],
+        rotation_config: Orientation,
         point_cloud_density_factor: Option<f64>,
     ) -> Self {
         ProjectorConfig {
             precision,
             filtering_window_radius,
-            rotation_config: RotationConfig::new(
-                rotation_config[0],
-                rotation_config[1],
-                rotation_config[2],
-                num_steps as usize,
-            ),
+            rotation_config: RotationConfig::new(rotation_config, num_steps as usize),
             point_cloud_density_factor,
         }
     }
@@ -75,7 +75,7 @@ impl ProjectorConfig {
 pub struct ViewConfig {
     /// Normalized view direction vector corresponding to this projection
     /// (this will be the new Z-axis after transformation).
-    pub view_dir: (f64, f64, f64),
+    pub view_dir: Coordinate,
     /// Rotation matrix to orient the mesh for this view.
     pub rotation_matrix: Array2<f64>,
     /// View matrix that transforms from world space to view space.
@@ -92,7 +92,7 @@ pub struct ViewConfig {
 pub enum LightSource {
     /// Light is fixed in world coordinates.
     #[allow(dead_code)] // Temporary while we don't parametrize the light source
-    World([f64; 3]),
+    World(Coordinate),
     /// Light originates from the camera.
     Camera,
 }

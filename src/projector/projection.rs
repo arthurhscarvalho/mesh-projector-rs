@@ -7,8 +7,8 @@ use crate::projector::buffers::Buffers;
 use crate::projector::config::{ProjectorConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
 use crate::projector::filtering::filter_outliers;
-use crate::projector::mesh::Mesh;
 use crate::projector::rasterization::rasterize_triangle;
+use crate::types::mesh::Mesh;
 use ndarray::{Array2, Array3};
 
 /// Computes a single orthographic projection for the given view configuration.

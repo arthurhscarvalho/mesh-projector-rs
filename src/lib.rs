@@ -7,6 +7,7 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::ProjectorConfig;
+use crate::types::orientation::Orientation;
 use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
 use pyo3::wrap_pyfunction;
@@ -16,6 +17,7 @@ use std::path::Path;
 mod logging;
 mod mesh_io;
 mod projector;
+mod types;
 
 #[pyfunction]
 fn generate_projections<'py>(
@@ -79,7 +81,8 @@ fn generate_projections<'py>(
         angle_delta_z
     );
 
-    let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
+    let rotation_config = Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z);
+
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,
@@ -180,13 +183,13 @@ fn generate_cube_projections<'py>(
         .map(|(rot_x, rot_y, rot_z, label)| {
             log::info!("Computing {} face projection", label);
 
+            let rotation_config = Orientation::new(rot_x, rot_y, rot_z);
             // Set camera orientation and position for this face
-            let rotation_config_for_face = [rot_x, rot_y, rot_z];
             let settings = ProjectorConfig::new(
                 precision,
                 filtering_radius,
                 1, // Single step for each face
-                rotation_config_for_face,
+                rotation_config,
                 None,
             );
 
@@ -294,7 +297,8 @@ fn generate_projections_rotation<'py>(
         angle_delta_y,
         angle_delta_z
     );
-    let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
+
+    let rotation_config = Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z);
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,
@@ -360,7 +364,7 @@ fn generate_point_cloud<'py>(
     let angle_delta_x: f64 = 0.0;
     let angle_delta_y: f64 = 0.0;
     let angle_delta_z: f64 = 0.0;
-    let rotation_config = [angle_delta_x, angle_delta_y, angle_delta_z];
+    let rotation_config = Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z);
     let settings = ProjectorConfig::new(
         precision,
         filtering_radius,

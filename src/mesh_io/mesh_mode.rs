@@ -1,7 +1,7 @@
 //! Mesh mode inference.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use crate::projector::mesh::MeshMode;
+use crate::types::mesh::MeshMode;
 use log::info;
 use std::path::Path;
 

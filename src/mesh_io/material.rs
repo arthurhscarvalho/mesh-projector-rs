@@ -1,7 +1,7 @@
 //! Material handling for mesh I/O operations.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use crate::projector::mesh::{MeshMaterial, MeshMode};
+use crate::types::mesh::{MeshMaterial, MeshMode};
 use log::{info, warn};
 use std::path::Path;
 use tobj;

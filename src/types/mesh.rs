@@ -57,7 +57,9 @@ pub struct MeshMaterial {
 
 #[derive(Debug, Clone)]
 pub struct SubMesh {
+    /// Geometry of the submesh.
     pub geometry: MeshGeometry,
+    /// Material of the submesh.
     pub material: MeshMaterial,
 }
 

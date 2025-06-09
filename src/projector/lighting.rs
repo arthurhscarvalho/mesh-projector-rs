@@ -6,15 +6,15 @@
 
 use crate::projector::config::LightSource;
 use crate::projector::constants::GLOBAL_AMBIENT;
-use crate::projector::math::{
-    dot_product, normalize_vec3, subtract_vec3, transform_point_3d, transform_vector_3d,
-};
-use crate::projector::mesh::{MeshMaterial, MeshMode};
+use crate::projector::math::{subtract_vec3, transform_point_3d, transform_vector_3d};
+use crate::types::color::Color;
+use crate::types::coordinate::Coordinate;
+use crate::types::mesh::{MeshMaterial, MeshMode};
 use ndarray::Array2;
 
 /// Converts sRGB color to linear space
-fn srgb_to_linear(srgb: [f64; 3]) -> [f64; 3] {
-    [srgb[0].powf(2.2), srgb[1].powf(2.2), srgb[2].powf(2.2)]
+fn srgb_to_linear(srgb: [f64; 3]) -> Color {
+    Color::new(srgb[0].powf(2.2), srgb[1].powf(2.2), srgb[2].powf(2.2))
 }
 
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
@@ -40,102 +40,74 @@ pub fn calculate_lighting(
     let linear_ks = srgb_to_linear(material.ks);
 
     // Transform normal and vertex position to view space
-    let normal_vs = transform_vector_3d(normal_ws, view_matrix); // Normals are vectors (w=0)
-    let vertex_position_vs = transform_point_3d(vertex_position_ws, view_matrix); // Points are transformed (w=1)
+    let normal_vs = transform_vector_3d(Coordinate::from(normal_ws), view_matrix); // Normals are vectors (w=0)
+    let vertex_position_vs = transform_point_3d(Coordinate::from(vertex_position_ws), view_matrix); // Points are transformed (w=1)
 
     // Normalize the normal in view space
     let mut normal_n_vs = normal_vs;
-    normalize_vec3(&mut normal_n_vs);
+    normal_n_vs.normalize();
 
     // Determine light direction and light color in view-space
     let (light_dir_vs, light_color) = match light_source {
         LightSource::World(world_light_pos) => {
             // Treat world_light_pos as a direction vector in world space and transform it
             let mut dir_vs = transform_vector_3d(*world_light_pos, view_matrix);
-            normalize_vec3(&mut dir_vs);
-            (dir_vs, [1.0, 1.0, 1.0]) // White light
+            dir_vs.normalize();
+            (dir_vs, Color::white()) // White light
         }
         LightSource::Camera => {
             // For orthographic projection with camera lighting, the light direction should
             // match the view direction in world space (transformed to view space)
             // This ensures light comes from the projection plane for any view angle
-            let mut dir_ws = view_dir_ws; // Use the passed view direction
-            normalize_vec3(&mut dir_ws);
+            let mut dir_ws = Coordinate::from(view_dir_ws); // Use the passed view direction
+            dir_ws.normalize();
 
             // Transform the world-space view direction to view space
             let mut dir_vs = transform_vector_3d(dir_ws, view_matrix);
-            normalize_vec3(&mut dir_vs);
+            dir_vs.normalize();
 
             // Negate to make light point toward surface from camera
-            dir_vs = [-dir_vs[0], -dir_vs[1], -dir_vs[2]];
+            dir_vs = -dir_vs;
 
-            (dir_vs, [1.0, 1.0, 1.0]) // White light
+            (dir_vs, Color::white()) // White light
         }
     };
 
     // View direction in view space is from surface point to camera (origin in VS)
-    let mut view_dir_vs = subtract_vec3([0.0, 0.0, 0.0], vertex_position_vs);
-    normalize_vec3(&mut view_dir_vs);
+    let mut view_dir_vs = subtract_vec3(Coordinate::new(0.0, 0.0, 0.0), vertex_position_vs);
+    view_dir_vs.normalize();
 
-    let mut final_color_linear = match material.illum {
+    let final_color_linear = match material.illum {
         0 => {
             // Constant color - ambient only, modulated by base color
-            [
-                base_color_linear[0] * linear_ka[0],
-                base_color_linear[1] * linear_ka[1],
-                base_color_linear[2] * linear_ka[2],
-            ]
+            Color::from(base_color_linear) * Color::new(linear_ka.r(), linear_ka.g(), linear_ka.b())
         }
         1 => {
             // Ambient + Diffuse
 
             // Ambient component using global ambient and material ambient
-            let ambient_comp = [
-                GLOBAL_AMBIENT[0] * linear_ka[0],
-                GLOBAL_AMBIENT[1] * linear_ka[1],
-                GLOBAL_AMBIENT[2] * linear_ka[2],
-            ];
+            let ambient_comp = GLOBAL_AMBIENT * linear_ka;
 
             // Diffuse component
-            let dot_nl = dot_product(&normal_n_vs, &light_dir_vs).max(0.0);
-            let diffuse_comp = [
-                base_color_linear[0] * linear_kd[0] * dot_nl * light_color[0],
-                base_color_linear[1] * linear_kd[1] * dot_nl * light_color[1],
-                base_color_linear[2] * linear_kd[2] * dot_nl * light_color[2],
-            ];
+            let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
+            let diffuse_comp = Color::from(base_color_linear) * linear_kd * dot_nl * light_color;
 
-            [
-                ambient_comp[0] + diffuse_comp[0],
-                ambient_comp[1] + diffuse_comp[1],
-                ambient_comp[2] + diffuse_comp[2],
-            ]
+            ambient_comp + diffuse_comp
         }
         _ => {
             // Full model: Ambient + Diffuse + Specular (illum >= 2)
 
             // Ambient component using global ambient and material ambient
-            let ambient_comp = [
-                GLOBAL_AMBIENT[0] * linear_ka[0],
-                GLOBAL_AMBIENT[1] * linear_ka[1],
-                GLOBAL_AMBIENT[2] * linear_ka[2],
-            ];
+            let ambient_comp = GLOBAL_AMBIENT * linear_ka;
 
             // Diffuse component
-            let dot_nl = dot_product(&normal_n_vs, &light_dir_vs).max(0.0);
-            let diffuse_comp = [
-                base_color_linear[0] * linear_kd[0] * dot_nl * light_color[0],
-                base_color_linear[1] * linear_kd[1] * dot_nl * light_color[1],
-                base_color_linear[2] * linear_kd[2] * dot_nl * light_color[2],
-            ];
+            let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
+            let diffuse_comp = Color::from(base_color_linear) * linear_kd * dot_nl * light_color;
 
             // Specular component (Blinn-Phong)
-            let mut halfway_dir = [
-                light_dir_vs[0] + view_dir_vs[0],
-                light_dir_vs[1] + view_dir_vs[1],
-                light_dir_vs[2] + view_dir_vs[2],
-            ];
-            normalize_vec3(&mut halfway_dir);
-            let dot_nh = dot_product(&normal_n_vs, &halfway_dir).max(0.0);
+            let mut halfway_dir = light_dir_vs + view_dir_vs;
+            halfway_dir.normalize();
+            let dot_nh = normal_n_vs.dot(&halfway_dir).max(0.0);
 
             let specular_intensity = if material.ns > 0.0 {
                 dot_nh.powf(material.ns)
@@ -143,26 +115,15 @@ pub fn calculate_lighting(
                 0.0
             };
 
-            let specular_comp = [
-                linear_ks[0] * specular_intensity * light_color[0],
-                linear_ks[1] * specular_intensity * light_color[1],
-                linear_ks[2] * specular_intensity * light_color[2],
-            ];
+            let specular_comp = linear_ks * specular_intensity * light_color;
 
-            [
-                ambient_comp[0] + diffuse_comp[0] + specular_comp[0],
-                ambient_comp[1] + diffuse_comp[1] + specular_comp[1],
-                ambient_comp[2] + diffuse_comp[2] + specular_comp[2],
-            ]
+            ambient_comp + diffuse_comp + specular_comp
         }
     };
 
-    // Clamp to valid range
-    final_color_linear[0] = final_color_linear[0].max(0.0).min(1.0);
-    final_color_linear[1] = final_color_linear[1].max(0.0).min(1.0);
-    final_color_linear[2] = final_color_linear[2].max(0.0).min(1.0);
-
-    final_color_linear
+    // Clamp to valid range and convert back to array
+    let final_color_clamped = final_color_linear.clamp(0.0, 1.0);
+    final_color_clamped.into()
 }
 
 // Removed placeholder transform_normal_ws_to_vs as we use transform_vector_3d

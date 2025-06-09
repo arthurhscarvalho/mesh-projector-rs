@@ -15,7 +15,7 @@ pub mod mesh_mode;
 pub mod preprocessing;
 pub mod utils;
 
-use crate::projector::mesh::Mesh;
+use crate::types::mesh::Mesh;
 pub use errors::MeshError;
 pub use image::save_image_data;
 

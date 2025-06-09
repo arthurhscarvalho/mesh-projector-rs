@@ -3,34 +3,37 @@
 //! per-pixel lighting calculations, supporting various mesh modes for flexible rendering.
 
 use crate::projector::buffers::Buffers;
-use crate::projector::config::ViewConfig;
+use crate::projector::config::{LightSource, ViewConfig};
 use crate::projector::constants::DEFAULT_MISSING_TEXTURE_COLOR;
 use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::lighting::calculate_lighting;
-use crate::projector::math::{normalize_vec3, transform_vector_3d};
-use crate::projector::mesh::{Mesh, MeshMode};
+use crate::projector::math::transform_vector_3d;
 use crate::projector::sampling::sample_texture_color_bilinear;
+use crate::types::color::Color;
+use crate::types::coordinate::Coordinate;
+use crate::types::mesh::{Mesh, MeshMaterial, MeshMode};
 use nd::Array1;
+use ndarray as nd;
 use std::f64;
 
 /// Represents interpolated attributes at a specific point on a triangle surface
 #[derive(Debug, Clone)]
 pub struct InterpolatedAttributes {
-    pub position_ws: [f64; 3],
-    pub normal_ws: [f64; 3],
-    pub base_color: [f64; 3], // Linear color space
+    pub position_ws: Coordinate,
+    pub normal_ws: Coordinate,
+    pub base_color: Color, // Linear color space
 }
 
 /// Represents the basic triangle data needed for processing
 #[derive(Debug, Clone)]
 pub struct TriangleData {
-    pub vertices_ws: [[f64; 3]; 3],   // World-space vertex positions
-    pub normals_ws: [[f64; 3]; 3],    // World-space vertex normals
+    pub vertices_ws: [Coordinate; 3], // World-space vertex positions
+    pub normals_ws: [Coordinate; 3],  // World-space vertex normals
     pub uvs: [(f64, f64); 3],         // UV coordinates
-    pub colors: [(f64, f64, f64); 3], // Linear vertex colors (for ObjOnly mode)
-    pub face_normal_ws: [f64; 3],     // Face normal in world space
+    pub colors: [Color; 3],           // Linear vertex colors (for ObjOnly mode)
+    pub face_normal_ws: Coordinate,   // Face normal in world space
 }
 
 /// Extracts triangle data from mesh for processing
@@ -50,11 +53,11 @@ pub fn extract_triangle_data(
 
     // Get face normal
     let current_face_normal_ws = submesh.geometry.face_normals.row(triangle_index);
-    let face_normal_ws_arr = [
+    let face_normal_ws = Coordinate::new(
         current_face_normal_ws[0],
         current_face_normal_ws[1],
         current_face_normal_ws[2],
-    ];
+    );
 
     // Get vertex indices
     let world_vertices = submesh.geometry.vertices.view();
@@ -69,22 +72,22 @@ pub fn extract_triangle_data(
     let p1_ws_vec = world_vertices.row(i1);
     let p2_ws_vec = world_vertices.row(i2);
     let vertices_ws = [
-        [p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]],
-        [p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]],
-        [p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]],
+        Coordinate::new(p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]),
+        Coordinate::new(p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]),
+        Coordinate::new(p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]),
     ];
 
     // Get normals (use vertex normals if available, otherwise face normal)
-    let mut normals_ws = [face_normal_ws_arr; 3];
+    let mut normals_ws = [face_normal_ws; 3];
     if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
         let v_normals_ws_view = v_normals_ws.view();
         let n0_v_ws = v_normals_ws_view.row(i0);
         let n1_v_ws = v_normals_ws_view.row(i1);
         let n2_v_ws = v_normals_ws_view.row(i2);
         normals_ws = [
-            [n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]],
-            [n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]],
-            [n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]],
+            Coordinate::new(n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]),
+            Coordinate::new(n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]),
+            Coordinate::new(n2_v_ws[0], n2_v_ws[1], n2_v_ws[2]),
         ];
     }
 
@@ -107,7 +110,7 @@ pub fn extract_triangle_data(
     }
 
     // Get vertex colors
-    let mut colors = [(1.0, 1.0, 1.0); 3];
+    let mut colors = [Color::white(); 3];
     if mesh.mode == MeshMode::ObjOnly {
         if let Some(v_colors) = &submesh.geometry.vertex_colors {
             if i0 < v_colors.nrows() && i1 < v_colors.nrows() && i2 < v_colors.nrows() {
@@ -116,9 +119,9 @@ pub fn extract_triangle_data(
                 let c1v = v_colors_view.row(i1);
                 let c2v = v_colors_view.row(i2);
                 colors = [
-                    (c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2)),
-                    (c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2)),
-                    (c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2)),
+                    Color::new(c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2)),
+                    Color::new(c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2)),
+                    Color::new(c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2)),
                 ];
             }
         }
@@ -129,7 +132,7 @@ pub fn extract_triangle_data(
         normals_ws,
         uvs,
         colors,
-        face_normal_ws: face_normal_ws_arr,
+        face_normal_ws,
     }
 }
 
@@ -142,31 +145,15 @@ pub fn interpolate_triangle_attributes(
     let (w0, w1, w2) = barycentric_coords;
 
     // Interpolate position
-    let position_ws = [
-        w0 * triangle_data.vertices_ws[0][0]
-            + w1 * triangle_data.vertices_ws[1][0]
-            + w2 * triangle_data.vertices_ws[2][0],
-        w0 * triangle_data.vertices_ws[0][1]
-            + w1 * triangle_data.vertices_ws[1][1]
-            + w2 * triangle_data.vertices_ws[2][1],
-        w0 * triangle_data.vertices_ws[0][2]
-            + w1 * triangle_data.vertices_ws[1][2]
-            + w2 * triangle_data.vertices_ws[2][2],
-    ];
+    let position_ws = triangle_data.vertices_ws[0] * w0
+        + triangle_data.vertices_ws[1] * w1
+        + triangle_data.vertices_ws[2] * w2;
 
     // Interpolate normal and normalize
-    let mut normal_ws = [
-        w0 * triangle_data.normals_ws[0][0]
-            + w1 * triangle_data.normals_ws[1][0]
-            + w2 * triangle_data.normals_ws[2][0],
-        w0 * triangle_data.normals_ws[0][1]
-            + w1 * triangle_data.normals_ws[1][1]
-            + w2 * triangle_data.normals_ws[2][1],
-        w0 * triangle_data.normals_ws[0][2]
-            + w1 * triangle_data.normals_ws[1][2]
-            + w2 * triangle_data.normals_ws[2][2],
-    ];
-    normalize_vec3(&mut normal_ws);
+    let mut normal_ws = triangle_data.normals_ws[0] * w0
+        + triangle_data.normals_ws[1] * w1
+        + triangle_data.normals_ws[2] * w2;
+    normal_ws.normalize();
 
     // Interpolate UV
     let uv = (
@@ -178,16 +165,14 @@ pub fn interpolate_triangle_attributes(
     let base_color = match mesh.mode {
         MeshMode::ObjOnly => {
             // Interpolate vertex colors
-            let r = w0 * triangle_data.colors[0].0
-                + w1 * triangle_data.colors[1].0
-                + w2 * triangle_data.colors[2].0;
-            let g = w0 * triangle_data.colors[0].1
-                + w1 * triangle_data.colors[1].1
-                + w2 * triangle_data.colors[2].1;
-            let b = w0 * triangle_data.colors[0].2
-                + w1 * triangle_data.colors[1].2
-                + w2 * triangle_data.colors[2].2;
-            [r.max(0.0), g.max(0.0), b.max(0.0)]
+            let interpolated_color = triangle_data.colors[0] * w0
+                + triangle_data.colors[1] * w1
+                + triangle_data.colors[2] * w2;
+            Color::new(
+                interpolated_color.r().max(0.0),
+                interpolated_color.g().max(0.0),
+                interpolated_color.b().max(0.0),
+            )
         }
         MeshMode::ObjTexture | MeshMode::Full => {
             if let Some(tex_image) = &mesh.texture.texture {
@@ -199,11 +184,11 @@ pub fn interpolate_triangle_attributes(
                     mesh.texture.height_f64,
                     mesh.texture.width_f64,
                 );
-                [
+                Color::new(
                     sampled_srgb[0].powf(2.2),
                     sampled_srgb[1].powf(2.2),
                     sampled_srgb[2].powf(2.2),
-                ]
+                )
             } else {
                 DEFAULT_MISSING_TEXTURE_COLOR
             }
@@ -221,20 +206,16 @@ pub fn interpolate_triangle_attributes(
 pub fn calculate_final_color(
     attributes: &InterpolatedAttributes,
     view_config: &ViewConfig,
-    material: &crate::projector::mesh::MeshMaterial,
+    material: &MeshMaterial,
     mesh_mode: MeshMode,
-    light_source: &crate::projector::config::LightSource,
+    light_source: &LightSource,
 ) -> [f64; 3] {
-    let view_dir_ws = [
-        view_config.view_dir.0,
-        view_config.view_dir.1,
-        view_config.view_dir.2,
-    ];
+    let view_dir_ws: [f64; 3] = view_config.view_dir.into();
 
     calculate_lighting(
-        attributes.base_color,
-        attributes.position_ws,
-        attributes.normal_ws,
+        attributes.base_color.into(),
+        attributes.position_ws.into(),
+        attributes.normal_ws.into(),
         &view_config.view_matrix,
         view_dir_ws,
         material,
@@ -261,7 +242,7 @@ pub fn rasterize_triangle(
         triangle_data.face_normal_ws[0],
         triangle_data.face_normal_ws[1],
         triangle_data.face_normal_ws[2],
-        view_config.view_dir, // This is the world-space normal of the projection plane
+        view_config.view_dir.into(), // This is the world-space normal of the projection plane
     ) {
         return;
     }
@@ -270,10 +251,11 @@ pub fn rasterize_triangle(
     let rot_mat = &view_config.rotation_matrix;
     let u_axis_ws = Array1::from_vec(vec![rot_mat[[0, 0]], rot_mat[[1, 0]], rot_mat[[2, 0]]]);
     let v_axis_ws = Array1::from_vec(vec![rot_mat[[0, 1]], rot_mat[[1, 1]], rot_mat[[2, 1]]]);
+    let view_dir_array: [f64; 3] = view_config.view_dir.into();
     let plane_normal_ws = Array1::from_vec(vec![
-        view_config.view_dir.0,
-        view_config.view_dir.1,
-        view_config.view_dir.2,
+        view_dir_array[0],
+        view_dir_array[1],
+        view_dir_array[2],
     ]);
 
     let cube_center_coord = (view_config.max_bound_f64 - 1.0) / 2.0;
@@ -381,16 +363,17 @@ pub fn rasterize_triangle(
                 // View-space normals
                 let interpolated_normal_vs =
                     transform_vector_3d(attributes.normal_ws, &view_config.view_matrix);
+                let normal_array: [f64; 3] = interpolated_normal_vs.into();
 
                 // Update the normal map
                 let normal_map = &mut buffers.normal_map;
-                normal_map[[row, col, 0]] = ((interpolated_normal_vs[0] + 1.0) / 2.0 * 255.0)
+                normal_map[[row, col, 0]] = ((normal_array[0] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
-                normal_map[[row, col, 1]] = ((interpolated_normal_vs[1] + 1.0) / 2.0 * 255.0)
+                normal_map[[row, col, 1]] = ((normal_array[1] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
-                normal_map[[row, col, 2]] = ((interpolated_normal_vs[2] + 1.0) / 2.0 * 255.0)
+                normal_map[[row, col, 2]] = ((normal_array[2] + 1.0) / 2.0 * 255.0)
                     .round()
                     .clamp(0.0, 255.0) as u8;
             }
