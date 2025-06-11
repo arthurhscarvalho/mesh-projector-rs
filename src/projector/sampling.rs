@@ -15,7 +15,7 @@ pub fn sample_texture_color_bilinear(
 ) -> [f64; 3] {
     // Return fixed-size array [R, G, B] in [0,1] range
     let tex_xf = interp_u_coord * width_f64;
-    // Assuming V=0 is bottom in input UVs based on Python preprocessing flip logic
+    // Get texture coordinates
     let tex_yf = interp_v_coord * height_f64;
     let x0f = tex_xf.max(0.0).min(width_f64 - 1.0001);
     let y0f = tex_yf.max(0.0).min(height_f64 - 1.0001);
@@ -25,8 +25,9 @@ pub fn sample_texture_color_bilinear(
     let y1 = (y0 + 1).min(height_f64 as usize - 1);
     let wx = x0f - x0 as f64;
     let wy = y0f - y0 as f64;
+    // Initialize sampled color
     let mut sampled_color = [0.0f64; 3];
-    // Assume 3 channels (RGB)
+    // If 3 channels (RGB)
     if channels >= 3 {
         for chan in 0..3 {
             let c00 = texture[[y0, x0, chan]] as f64; // Bottom-left in texture space

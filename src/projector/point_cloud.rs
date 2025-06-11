@@ -2,11 +2,12 @@
 //! Instead of projecting the mesh onto a 2D plane, this function samples points
 //! across the triangle surfaces in 3D space.
 
-use crate::projector::config::PointCloudConfig;
-use crate::projector::config::ViewConfig;
-use crate::projector::{config, geometry, rasterization};
+use crate::projector::config::{LightSource, PointCloudConfig, ViewConfig};
+use crate::projector::math::create_view_matrix;
+use crate::projector::{geometry, rasterization};
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::Mesh;
+use crate::types::orientation::Orientation;
 use ndarray::Array2;
 
 /// Discretizes a mesh into a 3D point cloud, maintaining the 3D structure.
@@ -46,12 +47,24 @@ pub fn discretize_mesh_to_point_cloud(
     }
     // Density factor is the number of points per unit area.
     let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
-    // Create a placeholder view config for lighting calculations
+    // Define a transformation matrix for the world coordinates
+    let angles = Orientation::new(0.0, 0.0, 0.0);
+    let rotation_matrix = angles.to_rotation_matrix();
+    let transformation_matrix = create_view_matrix(&rotation_matrix);
+    // Define the view direction
+    let view_direction = Coordinate::new(
+        rotation_matrix[[0, 2]],
+        rotation_matrix[[1, 2]],
+        rotation_matrix[[2, 2]],
+    );
+    // Define the light source
+    let light_source = LightSource::World(Coordinate::new(1.0, 1.0, 1.0));
+    // Create a view config for lighting calculations
     let view_config = ViewConfig {
-        view_direction: Coordinate::new(0.0, 0.0, 1.0),
-        transformation_matrix: ndarray::Array2::eye(4),
+        view_direction,
+        transformation_matrix,
         max_bound_f64,
-        light_source: config::LightSource::Camera,
+        light_source,
     };
     // Process each submesh
     for submesh_index in 0..mesh.submeshes.len() {
@@ -69,6 +82,7 @@ pub fn discretize_mesh_to_point_cloud(
             // Sample points across the triangle surface
             for i in 0..=n_subdiv {
                 for j in 0..=(n_subdiv - i) {
+                    // Calculate barycentric coordinates
                     let u = i as f64 / n_subdiv as f64;
                     let v = j as f64 / n_subdiv as f64;
                     let w = 1.0 - u - v;
@@ -87,20 +101,14 @@ pub fn discretize_mesh_to_point_cloud(
                         &view_config,
                         &submesh.material,
                         mesh.mode,
-                        &config::LightSource::Camera,
                     );
-                    // Convert to sRGB and clamp to u8 range
-                    let r_srgb = (final_color[0].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
-                    let g_srgb = (final_color[1].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
-                    let b_srgb = (final_color[2].powf(1.0 / 2.2) * 255.0).min(255.0) as u8;
                     // Add point and color to the flatten arrays
-                    let pos_array: [f64; 3] = attributes.position_ws.into();
-                    points.push(pos_array[0]);
-                    points.push(pos_array[1]);
-                    points.push(pos_array[2]);
-                    colors.push(r_srgb);
-                    colors.push(g_srgb);
-                    colors.push(b_srgb);
+                    points.push(attributes.position_ws.x());
+                    points.push(attributes.position_ws.y());
+                    points.push(attributes.position_ws.z());
+                    colors.push(final_color.r() as u8);
+                    colors.push(final_color.g() as u8);
+                    colors.push(final_color.b() as u8);
                     num_points += 1;
                 }
             }

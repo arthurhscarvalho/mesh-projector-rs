@@ -1,6 +1,7 @@
 //! This module defines the `Coordinate` struct for representing 3D coordinates and vectors,
 //! and provides methods for transformations and vector operations.
 
+use crate::types::color::Color;
 use ndarray::Array2;
 use std::ops::{Add, Index, IndexMut, Mul, Neg, Sub};
 
@@ -113,6 +114,15 @@ impl Coordinate {
     pub fn length_squared(&self) -> f64 {
         self.0[0] * self.0[0] + self.0[1] * self.0[1] + self.0[2] * self.0[2]
     }
+
+    /// Maps each component of the coordinate using the provided function,
+    /// returning a new `Coordinate` with the transformed values.
+    pub fn map<F>(&self, f: F) -> Coordinate
+    where
+        F: Fn(f64) -> f64,
+    {
+        Coordinate([f(self.0[0]), f(self.0[1]), f(self.0[2])])
+    }
 }
 
 impl From<[f64; 3]> for Coordinate {
@@ -136,6 +146,14 @@ impl From<(f64, f64, f64)> for Coordinate {
 impl From<Coordinate> for (f64, f64, f64) {
     fn from(val: Coordinate) -> Self {
         (val.0[0], val.0[1], val.0[2])
+    }
+}
+
+/// Converts a `Coordinate` to a `Color`.
+/// This conversion is useful when mapping coordinates to images.
+impl From<Coordinate> for Color {
+    fn from(val: Coordinate) -> Self {
+        Color([val.0[0], val.0[1], val.0[2]])
     }
 }
 

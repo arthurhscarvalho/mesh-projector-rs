@@ -73,28 +73,45 @@ impl Color {
 
     /// Converts the color from sRGB to linear color space.
     pub fn to_linear(&self) -> Color {
-        Color([
-            self.0[0].powf(2.2),
-            self.0[1].powf(2.2),
-            self.0[2].powf(2.2),
-        ])
+        Color([self.r().powf(2.2), self.g().powf(2.2), self.b().powf(2.2)])
     }
 
     /// Converts the color from linear to sRGB color space.
     pub fn to_srgb(&self) -> Color {
         Color([
-            self.0[0].powf(1.0 / 2.2),
-            self.0[1].powf(1.0 / 2.2),
-            self.0[2].powf(1.0 / 2.2),
+            self.r().powf(1.0 / 2.2),
+            self.g().powf(1.0 / 2.2),
+            self.b().powf(1.0 / 2.2),
+        ])
+    }
+
+    /// Converts the color from linear to sRGB color space and denormalizes it to the range [0, 255].
+    pub fn to_srgb_denormalized(&self) -> Color {
+        Color([
+            self.r()
+                .powf(1.0 / 2.2)
+                .mul(255.0)
+                .round()
+                .clamp(0.0, 255.0),
+            self.g()
+                .powf(1.0 / 2.2)
+                .mul(255.0)
+                .round()
+                .clamp(0.0, 255.0),
+            self.b()
+                .powf(1.0 / 2.2)
+                .mul(255.0)
+                .round()
+                .clamp(0.0, 255.0),
         ])
     }
 
     /// Clamps the color components to the given range.
     pub fn clamp(&self, min: f64, max: f64) -> Color {
         Color([
-            self.0[0].clamp(min, max),
-            self.0[1].clamp(min, max),
-            self.0[2].clamp(min, max),
+            self.r().clamp(min, max),
+            self.g().clamp(min, max),
+            self.b().clamp(min, max),
         ])
     }
 }

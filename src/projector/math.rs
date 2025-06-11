@@ -19,11 +19,6 @@ pub fn transform_vector_3d(vector: Coordinate, matrix: &Array2<f64>) -> Coordina
     vector.to_view_space_as_vector(matrix)
 }
 
-/// Subtracts vector `b` from `a` and returns the result as a new vector.
-pub fn subtract_vec3(a: Coordinate, b: Coordinate) -> Coordinate {
-    a - b
-}
-
 /// Creates a 4x4 view matrix from a 3x3 rotation matrix.
 /// For orthographic projection, the camera is the projection plane itself.
 /// This creates a view matrix that transforms from world space to view space,
