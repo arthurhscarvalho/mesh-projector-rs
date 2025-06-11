@@ -68,16 +68,15 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
         // Create view direction from the rotation matrix
-        let view_dir = Coordinate::new(
+        let view_direction = Coordinate::new(
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
         // Create view config for the current view
         view_configs.push(ViewConfig {
-            view_dir,
-            rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix),
+            view_direction,
+            transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });
@@ -146,16 +145,15 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
         // Create view direction from the rotation matrix
-        let view_dir = Coordinate::new(
+        let view_direction = Coordinate::new(
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
         // Create view config for the current view
         view_configs.push(ViewConfig {
-            view_dir,
-            rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix),
+            view_direction,
+            transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });
@@ -221,16 +219,15 @@ pub fn compute_and_save_rotation_projections(
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
         // Create view direction from the rotation matrix
-        let view_dir = Coordinate::new(
+        let view_direction = Coordinate::new(
             rotation_matrix[[0, 2]],
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
         // Create view config for the current view
         view_configs.push(ViewConfig {
-            view_dir,
-            rotation_matrix: rotation_matrix.clone(),
-            view_matrix: create_view_matrix(&rotation_matrix),
+            view_direction,
+            transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f64,
             light_source: config::LightSource::Camera,
         });

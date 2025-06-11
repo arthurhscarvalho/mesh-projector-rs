@@ -17,11 +17,11 @@ pub fn calculate_lighting(
     base_color_linear: [f64; 3], // Base color of the surface (e.g. from texture or vertex color), in linear space
     vertex_position_ws: [f64; 3], // Vertex position in world-space
     normal_ws: [f64; 3],         // Surface normal in world-space
-    view_matrix: &Array2<f64>,   // Full 4x4 view matrix that transforms from world to view space
-    view_dir_ws: [f64; 3],       // View direction in world space (needed for Camera light mode)
-    material: &MeshMaterial,     // Material properties of the surface
-    mesh_mode: MeshMode,         // Current rendering mode
-    light_source: &LightSource,  // Lighting configuration
+    transformation_matrix: &Array2<f64>, // Full 4x4 view matrix that transforms from world to view space
+    view_dir_ws: [f64; 3], // View direction in world space (needed for Camera light mode)
+    material: &MeshMaterial, // Material properties of the surface
+    mesh_mode: MeshMode,   // Current rendering mode
+    light_source: &LightSource, // Lighting configuration
 ) -> [f64; 3] {
     // For illum model 0, return base color modulated by ambient only
     if material.illum == 0 && (mesh_mode == MeshMode::ObjOnly || mesh_mode == MeshMode::ObjTexture)
@@ -35,8 +35,9 @@ pub fn calculate_lighting(
     let linear_ks = Color::from(material.ks).to_linear();
 
     // Transform normal and vertex position to view space
-    let normal_vs = transform_vector_3d(Coordinate::from(normal_ws), view_matrix); // Normals are vectors (w=0)
-    let vertex_position_vs = transform_point_3d(Coordinate::from(vertex_position_ws), view_matrix); // Points are transformed (w=1)
+    let normal_vs = transform_vector_3d(Coordinate::from(normal_ws), transformation_matrix); // Normals are vectors (w=0)
+    let vertex_position_vs =
+        transform_point_3d(Coordinate::from(vertex_position_ws), transformation_matrix); // Points are transformed (w=1)
 
     // Normalize the normal in view space
     let mut normal_n_vs = normal_vs;
@@ -46,7 +47,7 @@ pub fn calculate_lighting(
     let (light_dir_vs, light_color) = match light_source {
         LightSource::World(world_light_pos) => {
             // Treat world_light_pos as a direction vector in world space and transform it
-            let mut dir_vs = transform_vector_3d(*world_light_pos, view_matrix);
+            let mut dir_vs = transform_vector_3d(*world_light_pos, transformation_matrix);
             dir_vs.normalize();
             (dir_vs, Color::white()) // White light
         }
@@ -58,7 +59,7 @@ pub fn calculate_lighting(
             dir_ws.normalize();
 
             // Transform the world-space view direction to view space
-            let mut dir_vs = transform_vector_3d(dir_ws, view_matrix);
+            let mut dir_vs = transform_vector_3d(dir_ws, transformation_matrix);
             dir_vs.normalize();
 
             // Negate to make light point toward surface from camera

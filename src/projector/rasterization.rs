@@ -210,13 +210,13 @@ pub fn calculate_final_color(
     mesh_mode: MeshMode,
     light_source: &LightSource,
 ) -> [f64; 3] {
-    let view_dir_ws: [f64; 3] = view_config.view_dir.into();
+    let view_dir_ws: [f64; 3] = view_config.view_direction.into();
 
     calculate_lighting(
         attributes.base_color.into(),
         attributes.position_ws.into(),
         attributes.normal_ws.into(),
-        &view_config.view_matrix,
+        &view_config.transformation_matrix,
         view_dir_ws,
         material,
         mesh_mode,
@@ -242,16 +242,16 @@ pub fn rasterize_triangle(
         triangle_data.face_normal_ws[0],
         triangle_data.face_normal_ws[1],
         triangle_data.face_normal_ws[2],
-        view_config.view_dir.into(), // This is the world-space normal of the projection plane
+        view_config.view_direction.into(), // This is the world-space normal of the projection plane
     ) {
         return;
     }
 
     // Define projection plane axes from the rotation matrix
-    let rot_mat = &view_config.rotation_matrix;
-    let u_axis_ws = Array1::from_vec(vec![rot_mat[[0, 0]], rot_mat[[1, 0]], rot_mat[[2, 0]]]);
-    let v_axis_ws = Array1::from_vec(vec![rot_mat[[0, 1]], rot_mat[[1, 1]], rot_mat[[2, 1]]]);
-    let view_dir_array: [f64; 3] = view_config.view_dir.into();
+    let view_mat = &view_config.transformation_matrix;
+    let u_axis_ws = Array1::from_vec(vec![view_mat[[0, 0]], view_mat[[1, 0]], view_mat[[2, 0]]]);
+    let v_axis_ws = Array1::from_vec(vec![view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]]);
+    let view_dir_array: [f64; 3] = view_config.view_direction.into();
     let plane_normal_ws = Array1::from_vec(vec![
         view_dir_array[0],
         view_dir_array[1],
@@ -364,7 +364,7 @@ pub fn rasterize_triangle(
 
                 // View-space normals
                 let interpolated_normal_vs =
-                    transform_vector_3d(attributes.normal_ws, &view_config.view_matrix);
+                    transform_vector_3d(attributes.normal_ws, &view_config.transformation_matrix);
                 let normal_array: [f64; 3] = interpolated_normal_vs.into();
 
                 // Update the normal map

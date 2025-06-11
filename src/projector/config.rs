@@ -38,11 +38,9 @@ pub enum LightSource {
 /// Encapsulates parameters for a single orthographic projection view (camera settings).
 pub struct ViewConfig {
     /// Normalized view direction vector corresponding to this projection
-    pub view_dir: Coordinate,
-    /// Rotation matrix to orient the mesh for this view.
-    pub rotation_matrix: Array2<f64>,
+    pub view_direction: Coordinate,
     /// View matrix that transforms from world space to view space.
-    pub view_matrix: Array2<f64>,
+    pub transformation_matrix: Array2<f64>,
     /// The maximum bound of the projection space, used for scaling depth values.
     pub max_bound_f64: f64,
     /// Lighting configuration

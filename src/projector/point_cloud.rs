@@ -48,9 +48,8 @@ pub fn discretize_mesh_to_point_cloud(
     let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
     // Create a placeholder view config for lighting calculations
     let view_config = ViewConfig {
-        view_dir: Coordinate::new(0.0, 0.0, 1.0),
-        rotation_matrix: ndarray::Array2::eye(3),
-        view_matrix: ndarray::Array2::eye(4),
+        view_direction: Coordinate::new(0.0, 0.0, 1.0),
+        transformation_matrix: ndarray::Array2::eye(4),
         max_bound_f64,
         light_source: config::LightSource::Camera,
     };
