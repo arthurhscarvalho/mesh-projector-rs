@@ -13,7 +13,7 @@ mod rasterization;
 mod sampling;
 
 use crate::mesh_io::save_image_data;
-use crate::projector::config::{ProjectorConfig, ViewConfig};
+use crate::projector::config::{PointCloudConfig, ProjectionConfig, ViewConfig};
 use crate::projector::constants::NUM_CHANNELS;
 use crate::projector::math::create_view_matrix;
 use crate::types::coordinate::Coordinate;
@@ -28,7 +28,7 @@ use std::path::Path;
 ///
 /// Returns:
 /// An ImageBatch containing all projection data.
-pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectorConfig) -> ImageBatch {
+pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -111,7 +111,7 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectorConfig) -> Imag
 /// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
 /// Returns an ImageBatch containing all projection data.
-pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectorConfig) -> ImageBatch {
+pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -139,9 +139,9 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectorConfig) -> Imag
     for i in 0..num_views {
         // Create orientation from the view angles
         let angles = Orientation::new(
-            rotation_config.angle_delta_x() * i as f64,
-            rotation_config.angle_delta_y() * i as f64,
-            rotation_config.angle_delta_z() * i as f64,
+            rotation_config.angle_deltas.pitch() * i as f64,
+            rotation_config.angle_deltas.yaw() * i as f64,
+            rotation_config.angle_deltas.roll() * i as f64,
         );
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
@@ -190,7 +190,7 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectorConfig) -> Imag
 /// This function does not return any projection data.
 pub fn compute_and_save_rotation_projections(
     mesh: &Mesh,
-    settings: &ProjectorConfig,
+    settings: &ProjectionConfig,
     output_dir: &Path,
 ) {
     log::info!(
@@ -214,9 +214,9 @@ pub fn compute_and_save_rotation_projections(
     for i in 0..num_steps {
         // Create orientation from the view angles
         let angles = Orientation::new(
-            rotation_config.angle_delta_x() * i as f64,
-            rotation_config.angle_delta_y() * i as f64,
-            rotation_config.angle_delta_z() * i as f64,
+            rotation_config.angle_deltas.pitch() * i as f64,
+            rotation_config.angle_deltas.yaw() * i as f64,
+            rotation_config.angle_deltas.roll() * i as f64,
         );
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
@@ -264,6 +264,6 @@ pub fn compute_and_save_rotation_projections(
 ///
 /// Returns:
 /// A tuple containing the points and their colors.
-pub fn mesh_to_point_cloud(mesh: &Mesh, settings: &ProjectorConfig) -> (Array2<f64>, Array2<u8>) {
+pub fn mesh_to_point_cloud(mesh: &Mesh, settings: &PointCloudConfig) -> (Array2<f64>, Array2<u8>) {
     point_cloud::discretize_mesh_to_point_cloud(mesh, settings)
 }

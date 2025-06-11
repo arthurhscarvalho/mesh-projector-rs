@@ -6,7 +6,7 @@ extern crate numpy;
 extern crate pyo3;
 extern crate rayon;
 
-use crate::projector::config::ProjectorConfig;
+use crate::projector::config::{PointCloudConfig, ProjectionConfig, RotationConfig};
 use crate::types::orientation::Orientation;
 use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
@@ -62,14 +62,17 @@ fn generate_cube_projections<'py>(
             )));
         }
     };
+    // Set up rotation config for cube projection (will be handled internally)
+    let rotation_config = RotationConfig {
+        angle_deltas: Orientation::from([0.0, 0.0, 0.0]),
+        num_steps: 1,
+    };
     // Set up projection settings for cube projection
-    let settings = ProjectorConfig::new(
+    let settings = ProjectionConfig {
         precision,
-        filtering_radius,
-        1,                                  // Single step for each face (handled internally)
-        Orientation::from([0.0, 0.0, 0.0]), // No rotation for cube projection (handled internally)
-        None,                               // No point cloud density factor needed for projections
-    );
+        filtering_window_radius: filtering_radius,
+        rotation_config,
+    };
     // Call the backend to compute projections
     let image_batch = py.allow_threads(|| projector::compute_cube_projections(&mesh, &settings));
     let (projections, depth_maps, normal_maps, occlusion_maps) = (
@@ -149,15 +152,16 @@ fn generate_projections<'py>(
         angle_delta_z
     );
     // Create rotation config from the deltas
-    let rotation_config = Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z);
+    let rotation_config = RotationConfig {
+        angle_deltas: Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z),
+        num_steps: rotation_steps as usize,
+    };
     // Create settings for the projection
-    let settings = ProjectorConfig::new(
+    let settings = ProjectionConfig {
         precision,
-        filtering_radius,
-        rotation_steps,
+        filtering_window_radius: filtering_radius,
         rotation_config,
-        None,
-    );
+    };
     // Call the backend to compute projections
     let image_batch = py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
     let (images, depth_maps, normal_maps, occlusion_maps) = (
@@ -232,14 +236,15 @@ fn generate_projections_rotation<'py>(
         angle_delta_z
     );
     // Create rotation config from the deltas
-    let rotation_config = Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z);
-    let settings = ProjectorConfig::new(
+    let rotation_config = RotationConfig {
+        angle_deltas: Orientation::new(angle_delta_x, angle_delta_y, angle_delta_z),
+        num_steps: rotation_steps as usize,
+    };
+    let settings = ProjectionConfig {
         precision,
-        filtering_radius,
-        rotation_steps,
+        filtering_window_radius: filtering_radius,
         rotation_config,
-        None,
-    );
+    };
     // Call the backend to compute projections
     let output_dir = Path::new("projections");
     py.allow_threads(|| {
@@ -256,7 +261,6 @@ fn generate_point_cloud<'py>(
     texture_path: Option<&str>,
     mtl_path: Option<&str>,
     precision: u64,
-    filtering_radius: u64,
     flip_uv: bool,
     point_cloud_density_factor: f64,
     ignore_opacity: bool,
@@ -289,18 +293,11 @@ fn generate_point_cloud<'py>(
             )));
         }
     };
-    // Set up projection settings
-    // Note: rotation parameters aren't used for point cloud generation,
-    // but we need to provide them for the ProjectorConfig
-    let rotation_steps: u32 = 1;
-    let rotation_config = Orientation::new(0.0, 0.0, 0.0);
-    let settings = ProjectorConfig::new(
+    // Set up point cloud settings
+    let settings = PointCloudConfig {
         precision,
-        filtering_radius,
-        rotation_steps,
-        rotation_config,
-        Some(point_cloud_density_factor),
-    );
+        point_cloud_density_factor,
+    };
     // Call the backend to generate the point cloud
     let (points, colors) = py.allow_threads(|| projector::mesh_to_point_cloud(&mesh, &settings));
     log::info!(

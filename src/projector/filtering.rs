@@ -3,7 +3,7 @@
 //! their local neighborhood.
 
 use crate::projector::buffers::Buffers;
-use crate::projector::config::ProjectorConfig;
+use crate::projector::config::ProjectionConfig;
 use crate::projector::constants::{
     BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS,
 };
@@ -80,7 +80,7 @@ fn find_outliers(
 }
 
 /// Filters outlier pixels for all image layers and applies the filtering to the images.
-pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectorConfig, max_bound: f64) {
+pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectionConfig, max_bound: f64) {
     let filtering_window_radius = settings.filtering_window_radius;
     // Return outlier counts array
     let rows = buffers.z_buffer.shape()[0];

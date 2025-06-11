@@ -348,13 +348,15 @@ pub fn rasterize_triangle(
                 buffers.image[[row, col, 2]] = final_color_srgb[2];
 
                 // Depth map (scaled to 0-255)
-                let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
-                    .abs()
-                    .max(0.0)
-                    .min(1.0);
-                if interpolated_z > 0.0 {
-                    depth_val_norm = 1.0 - depth_val_norm;
-                }
+                let depth_val_norm = {
+                    let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
+                        .abs()
+                        .clamp(0.0, 1.0);
+                    if interpolated_z > 0.0 {
+                        depth_val_norm = 1.0 - depth_val_norm;
+                    }
+                    depth_val_norm
+                };
                 let depth_byte = (depth_val_norm * 255.0).round() as u8;
                 buffers.depth_map[[row, col, 0]] = depth_byte;
                 buffers.depth_map[[row, col, 1]] = depth_byte;

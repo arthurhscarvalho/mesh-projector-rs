@@ -2,7 +2,7 @@
 //! Instead of projecting the mesh onto a 2D plane, this function samples points
 //! across the triangle surfaces in 3D space.
 
-use crate::projector::config::ProjectorConfig;
+use crate::projector::config::PointCloudConfig;
 use crate::projector::config::ViewConfig;
 use crate::projector::{config, geometry, rasterization};
 use crate::types::coordinate::Coordinate;
@@ -18,7 +18,7 @@ use ndarray::Array2;
 /// - colors: Array2<u8> - RGB colors for each point (0-255 range)
 pub fn discretize_mesh_to_point_cloud(
     mesh: &Mesh,
-    settings: &ProjectorConfig,
+    settings: &PointCloudConfig,
 ) -> (Array2<f64>, Array2<u8>) {
     log::info!(
         "Initializing 3D mesh discretization. Mode: {:?}, Precision: {}",
@@ -27,7 +27,7 @@ pub fn discretize_mesh_to_point_cloud(
     );
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
-    let density_factor = settings.point_cloud_density_factor.unwrap_or(1.0);
+    let density_factor = settings.point_cloud_density_factor;
     // Initialize point cloud buffers
     let mut points = Vec::new();
     let mut colors = Vec::new();
