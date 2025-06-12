@@ -12,22 +12,39 @@ use crate::projector::lighting::calculate_lighting;
 use crate::projector::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{Mesh, MeshMaterial, MeshMode};
+use crate::types::mesh::{Mesh, MeshMode};
 
-/// Represents interpolated attributes at a specific point on a triangle surface
-pub struct InterpolatedAttributes {
+/// Stores the interpolated attributes at a point on a triangle surface.
+///
+/// This struct is used to hold the results of barycentric interpolation for a point
+/// within a triangle, including its world-space position, normal, and base color.
+/// These attributes are then used for lighting calculations and final color output.
+pub struct TrianglePoint {
+    /// The interpolated position of the point in world space.
     pub position_ws: Coordinate,
+    /// The interpolated normal vector at the point in world space.
     pub normal_ws: Coordinate,
-    pub base_color: Color, // Linear color space
+    /// The interpolated base color at the point (in linear color space).
+    pub base_color: Color,
 }
 
-/// Represents the basic triangle data needed for processing
-pub struct TriangleData {
-    pub vertices_ws: [Coordinate; 3], // World-space vertex positions
-    pub normals_ws: [Coordinate; 3],  // World-space vertex normals
-    pub uvs: [(f64, f64); 3],         // UV coordinates
-    pub colors: [Color; 3],           // Linear vertex colors (for ObjOnly mode)
-    pub face_normal_ws: Coordinate,   // Face normal in world space
+/// Stores the per-triangle data required for rasterization and attribute interpolation.
+///
+/// This struct contains all the geometric and attribute information for a single triangle,
+/// including world-space vertex positions, normals, UV coordinates, per-vertex colors,
+/// and the face normal. It is used as an input to attribute interpolation and lighting
+/// calculations during rasterization.
+pub struct TriangleSurface {
+    /// The positions of the triangle's three vertices in world space.
+    pub vertices_ws: [Coordinate; 3],
+    /// The normals at each vertex in world space.
+    pub normals_ws: [Coordinate; 3],
+    /// The UV texture coordinates for each vertex, as (u, v) pairs.
+    pub uvs: [(f64, f64); 3],
+    /// The linear-space color at each vertex, used in ObjOnly mode.
+    pub colors: [Color; 3],
+    /// The face normal of the triangle in world space.
+    pub face_normal_ws: Coordinate,
 }
 
 /// Extracts triangle data from mesh for processing
@@ -35,7 +52,7 @@ pub fn extract_triangle_data(
     mesh: &Mesh,
     submesh_index: usize,
     triangle_index: usize,
-) -> TriangleData {
+) -> TriangleSurface {
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
     // Calculate global triangle offset for UV lookup
@@ -115,7 +132,7 @@ pub fn extract_triangle_data(
         }
     }
     // Return triangle data
-    TriangleData {
+    TriangleSurface {
         vertices_ws,
         normals_ws,
         uvs,
@@ -126,10 +143,10 @@ pub fn extract_triangle_data(
 
 /// Interpolates attributes at a specific barycentric coordinate within a triangle
 pub fn interpolate_triangle_attributes(
-    triangle_data: &TriangleData,
+    triangle_data: &TriangleSurface,
     barycentric_coords: (f64, f64, f64), // (w0, w1, w2)
     mesh: &Mesh,
-) -> InterpolatedAttributes {
+) -> TrianglePoint {
     let (w0, w1, w2) = barycentric_coords;
     // Interpolate position
     let position_ws = triangle_data.vertices_ws[0] * w0
@@ -174,31 +191,11 @@ pub fn interpolate_triangle_attributes(
         }
     };
     // Return interpolated attributes
-    InterpolatedAttributes {
+    TrianglePoint {
         position_ws,
         normal_ws,
         base_color,
     }
-}
-
-/// Calculates final color with lighting for interpolated attributes
-pub fn calculate_final_color(
-    attributes: &InterpolatedAttributes,
-    view_config: &ViewConfig,
-    material: &MeshMaterial,
-    mesh_mode: MeshMode,
-) -> Color {
-    let view_dir_ws = view_config.view_direction;
-    calculate_lighting(
-        attributes.base_color,
-        attributes.position_ws,
-        attributes.normal_ws,
-        &view_config.transformation_matrix,
-        view_dir_ws,
-        material,
-        mesh_mode,
-        &view_config.light_source,
-    )
 }
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
@@ -273,7 +270,7 @@ pub fn rasterize_triangle(
             let attributes = interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
             // Calculate final color with lighting
             let final_color_linear =
-                calculate_final_color(&attributes, view_config, &submesh.material, mesh.mode);
+                calculate_lighting(&attributes, &view_config, &submesh.material, &mesh.mode);
             // Convert the final color to sRGB
             let final_color_srgb = final_color_linear.to_srgb_denormalized();
             // Update buffers

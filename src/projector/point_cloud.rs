@@ -4,7 +4,7 @@
 
 use crate::projector::config::{LightSource, PointCloudConfig, ViewConfig};
 use crate::projector::geometry::create_view_matrix;
-use crate::projector::{geometry, rasterization};
+use crate::projector::{geometry, lighting, rasterization};
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::Mesh;
 use crate::types::orientation::Orientation;
@@ -90,23 +90,23 @@ pub fn discretize_mesh_to_point_cloud(
                         continue;
                     }
                     // Use the shared interpolation function
-                    let attributes = rasterization::interpolate_triangle_attributes(
+                    let interpolated_point = rasterization::interpolate_triangle_attributes(
                         &triangle_data,
                         (u, v, w),
                         mesh,
                     );
                     // Calculate final color using the shared lighting function
-                    let final_color = rasterization::calculate_final_color(
-                        &attributes,
+                    let final_color = lighting::calculate_lighting(
+                        &interpolated_point,
                         &view_config,
                         &submesh.material,
-                        mesh.mode,
+                        &mesh.mode,
                     )
                     .to_srgb_denormalized();
                     // Add point and color to the flatten arrays
-                    points.push(attributes.position_ws.x());
-                    points.push(attributes.position_ws.y());
-                    points.push(attributes.position_ws.z());
+                    points.push(interpolated_point.position_ws.x());
+                    points.push(interpolated_point.position_ws.y());
+                    points.push(interpolated_point.position_ws.z());
                     colors.push(final_color.r() as u8);
                     colors.push(final_color.g() as u8);
                     colors.push(final_color.b() as u8);

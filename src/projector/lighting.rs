@@ -4,26 +4,30 @@
 //! in 3D scenes, taking into account ambient, diffuse, and specular lighting
 //! components, as well as transformations between world and view space.
 
-use crate::projector::config::LightSource;
+use crate::projector::config::{LightSource, ViewConfig};
 use crate::projector::constants::GLOBAL_AMBIENT;
+use crate::projector::rasterization::TrianglePoint;
 use crate::types::color::Color;
-use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{MeshMaterial, MeshMode};
-use ndarray::Array2;
 
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
 pub fn calculate_lighting(
-    base_color_linear: Color, // Base color of the surface (e.g. from texture or vertex color), in linear space
-    vertex_position_ws: Coordinate, // Vertex position in world-space
-    normal_ws: Coordinate,    // Surface normal in world-space
-    transformation_matrix: &Array2<f64>, // Full 4x4 view matrix that transforms from world to view space
-    view_dir_ws: Coordinate, // View direction in world space (needed for Camera light mode)
+    interpolated_point: &TrianglePoint,
+    view_config: &ViewConfig,
     material: &MeshMaterial, // Material properties of the surface
-    mesh_mode: MeshMode,     // Current rendering mode
-    light_source: &LightSource, // Lighting configuration
+    mesh_mode: &MeshMode,    // Current rendering mode
 ) -> Color {
+    // Extract data from interpolated attributes
+    let base_color_linear = interpolated_point.base_color;
+    let normal_ws = interpolated_point.normal_ws;
+    let vertex_position_ws = interpolated_point.position_ws;
+    // Extract data from view config
+    let transformation_matrix = &view_config.transformation_matrix;
+    let light_source = &view_config.light_source;
+    let view_dir_ws = view_config.view_direction;
     // For illum model 0, return base color modulated by ambient only
-    if material.illum == 0 && (mesh_mode == MeshMode::ObjOnly || mesh_mode == MeshMode::ObjTexture)
+    if material.illum == 0
+        && (*mesh_mode == MeshMode::ObjOnly || *mesh_mode == MeshMode::ObjTexture)
     {
         return base_color_linear;
     }
