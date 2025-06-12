@@ -10,7 +10,7 @@ use std::ops::{Add, Index, IndexMut, Mul, Neg, Sub};
 /// This struct is used to represent both points and vectors in 3D space.
 /// The interpretation (point or vector) depends on the context and the
 /// transformation method used.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct Coordinate(pub [f64; 3]);
 
 impl Coordinate {

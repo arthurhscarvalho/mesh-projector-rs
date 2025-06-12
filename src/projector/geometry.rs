@@ -5,7 +5,7 @@
 
 use crate::projector::constants::{BARYCENTRIC_COORD_EPSILON, BARYCENTRIC_EPSILON};
 use crate::types::coordinate::Coordinate;
-use nd::{Array2, ArrayView2};
+use nd::{array, Array2, ArrayView2};
 use std::f64;
 
 /// Computes barycentric coordinates (u, v, w) for point P relative to triangle ABC in 2D.
@@ -165,4 +165,23 @@ pub fn calculate_triangle_area(vertices: &[Coordinate; 3]) -> f64 {
     let cross = ab.cross(&ac);
     let triangle_area = 0.5 * cross.length();
     triangle_area
+}
+
+/// Creates a 4x4 view matrix from a 3x3 rotation matrix.
+/// For orthographic projection, the camera is the projection plane itself.
+/// This creates a view matrix that transforms from world space to view space,
+/// where the view direction becomes the Z axis.
+pub fn create_view_matrix(rotation_matrix: &Array2<f64>) -> Array2<f64> {
+    // In orthographic projection, we don't position the camera at a distance
+    // Instead, the projection plane itself acts as the camera
+    // The rotation matrix should already be set up to transform the view direction to the Z axis
+    let r = rotation_matrix;
+    // Create the 4x4 view matrix without translation component
+    // The rotation part ensures the view direction is transformed to the Z axis
+    array![
+        [r[[0, 0]], r[[0, 1]], r[[0, 2]], 0.0],
+        [r[[1, 0]], r[[1, 1]], r[[1, 2]], 0.0],
+        [r[[2, 0]], r[[2, 1]], r[[2, 2]], 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+    ]
 }

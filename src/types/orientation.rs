@@ -7,7 +7,6 @@ use ndarray::{array, Array2};
 /// This struct is used to represent orientations in 3D space using
 /// pitch (rotation around X-axis), yaw (rotation around Y-axis),
 /// and roll (rotation around Z-axis) angles in radians.
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Orientation(pub [f64; 3]);
 
 impl Orientation {

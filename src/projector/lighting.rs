@@ -6,7 +6,6 @@
 
 use crate::projector::config::LightSource;
 use crate::projector::constants::GLOBAL_AMBIENT;
-use crate::projector::math::{transform_point_3d, transform_vector_3d};
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{MeshMaterial, MeshMode};
@@ -33,8 +32,8 @@ pub fn calculate_lighting(
     let linear_kd = Color::from(material.kd).to_linear();
     let linear_ks = Color::from(material.ks).to_linear();
     // Transform normal and vertex position to view space
-    let normal_vs = transform_vector_3d(normal_ws, transformation_matrix);
-    let vertex_position_vs = transform_point_3d(vertex_position_ws, transformation_matrix);
+    let normal_vs = normal_ws.to_view_space_as_vector(transformation_matrix);
+    let vertex_position_vs = vertex_position_ws.to_view_space_as_point(transformation_matrix);
     // Normalize the normal in view space
     let mut normal_n_vs = normal_vs;
     normal_n_vs.normalize();
@@ -42,7 +41,7 @@ pub fn calculate_lighting(
     let (light_dir_vs, light_color) = match light_source {
         LightSource::World(world_light_pos) => {
             // Treat world_light_pos as a direction vector in world space and transform it
-            let mut dir_vs = transform_vector_3d(*world_light_pos, transformation_matrix);
+            let mut dir_vs = world_light_pos.to_view_space_as_vector(transformation_matrix);
             dir_vs.normalize();
             // Light direction in view space, and white light
             (dir_vs, Color::white())
@@ -54,7 +53,7 @@ pub fn calculate_lighting(
             let mut dir_ws = view_dir_ws; // Use the passed view direction
             dir_ws.normalize();
             // Transform the world-space view direction to view space
-            let mut dir_vs = transform_vector_3d(dir_ws, transformation_matrix);
+            let mut dir_vs = dir_ws.to_view_space_as_vector(transformation_matrix);
             dir_vs.normalize();
             // Negate to make light point toward surface from camera
             dir_vs = -dir_vs;

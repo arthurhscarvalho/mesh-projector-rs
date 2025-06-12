@@ -9,7 +9,6 @@ use crate::projector::geometry::{
     barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
 };
 use crate::projector::lighting::calculate_lighting;
-use crate::projector::math::transform_vector_3d;
 use crate::projector::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
@@ -306,8 +305,9 @@ pub fn rasterize_triangle(
                 buffers.depth_map[[row, col, 1]] = depth_byte;
                 buffers.depth_map[[row, col, 2]] = depth_byte;
                 // View-space normals
-                let interpolated_normal_vs =
-                    transform_vector_3d(attributes.normal_ws, &view_config.transformation_matrix);
+                let interpolated_normal_vs = attributes
+                    .normal_ws
+                    .to_view_space_as_vector(&view_config.transformation_matrix);
                 // Normalize the normal vector from [-1, 1] to the [0, 1] range
                 let normals_normalized: Color =
                     interpolated_normal_vs.map(|x| (x + 1.0) / 2.0).into();

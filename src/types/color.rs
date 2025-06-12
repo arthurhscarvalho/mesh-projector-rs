@@ -7,7 +7,7 @@ use std::ops::{Add, Mul};
 ///
 /// The color values are stored as `f64` and are typically expected to be in a normalized range
 /// (e.g., [0.0, 1.0]), although this is not strictly enforced by the struct itself.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct Color(pub [f64; 3]);
 
 impl Color {

@@ -3,7 +3,7 @@
 //! across the triangle surfaces in 3D space.
 
 use crate::projector::config::{LightSource, PointCloudConfig, ViewConfig};
-use crate::projector::math::create_view_matrix;
+use crate::projector::geometry::create_view_matrix;
 use crate::projector::{geometry, rasterization};
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::Mesh;
@@ -58,7 +58,7 @@ pub fn discretize_mesh_to_point_cloud(
         rotation_matrix[[2, 2]],
     );
     // Define the light source
-    let light_source = LightSource::World(Coordinate::new(1.0, 1.0, 1.0));
+    let light_source = LightSource::World((1.0, 1.0, 1.0).into());
     // Create a view config for lighting calculations
     let view_config = ViewConfig {
         view_direction,

@@ -17,7 +17,6 @@ pub enum MeshMode {
     Full,
 }
 
-#[derive(Debug, Clone)]
 pub struct MeshGeometry {
     /// Vertex positions (N, 3).
     pub vertices: Array2<f64>,
@@ -31,7 +30,6 @@ pub struct MeshGeometry {
     pub vertex_colors: Option<Array2<f64>>,
 }
 
-#[derive(Debug, Clone)]
 pub struct MeshTexture {
     /// Texture image data (optional).
     pub texture: Option<Array3<u8>>,
@@ -55,7 +53,6 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
-#[derive(Debug, Clone)]
 pub struct SubMesh {
     /// Geometry of the submesh.
     pub geometry: MeshGeometry,
@@ -63,7 +60,6 @@ pub struct SubMesh {
     pub material: MeshMaterial,
 }
 
-#[derive(Debug, Clone)]
 pub struct Mesh {
     // Submeshes: each submesh has its own geometry, texture, material, and mode
     pub submeshes: Vec<SubMesh>,
