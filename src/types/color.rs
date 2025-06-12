@@ -3,17 +3,30 @@
 
 use std::ops::{Add, Mul};
 
+/// The gamma factor for the sRGB color space.
+const GAMMA: f64 = 2.2;
+/// The inverse gamma factor for the sRGB color space.
+const INVERSE_GAMMA: f64 = 1.0 / GAMMA;
+
 /// Represents a color with three components (e.g., R, G, B).
 ///
 /// The color values are stored as `f64` and are typically expected to be in a normalized range
 /// (e.g., [0.0, 1.0]), although this is not strictly enforced by the struct itself.
+/// It's also expected that the color is in linear color space.
+/// Use `Color::from_srgb` to create a color from sRGB components.
 #[derive(Clone, Copy)]
 pub struct Color(pub [f64; 3]);
 
 impl Color {
-    /// Creates a new `Color` from three f64 components.
+    /// Creates a new `Color` from three f64 components, expected to be in linear color space.
     pub fn new(r: f64, g: f64, b: f64) -> Self {
         Color([r, g, b])
+    }
+
+    /// Creates a new `Color` from three f64 components, in sRGB color space.
+    /// The saved color is in linear color space.
+    pub fn from_srgb(r: f64, g: f64, b: f64) -> Self {
+        Color([r.powf(GAMMA), g.powf(GAMMA), b.powf(GAMMA)])
     }
 
     /// Creates a black color (0, 0, 0).
@@ -73,15 +86,19 @@ impl Color {
 
     /// Converts the color from sRGB to linear color space.
     pub fn to_linear(&self) -> Color {
-        Color([self.r().powf(2.2), self.g().powf(2.2), self.b().powf(2.2)])
+        Color([
+            self.r().powf(GAMMA),
+            self.g().powf(GAMMA),
+            self.b().powf(GAMMA),
+        ])
     }
 
     /// Converts the color from linear to sRGB color space.
     pub fn to_srgb(&self) -> Color {
         Color([
-            self.r().powf(1.0 / 2.2),
-            self.g().powf(1.0 / 2.2),
-            self.b().powf(1.0 / 2.2),
+            self.r().powf(INVERSE_GAMMA),
+            self.g().powf(INVERSE_GAMMA),
+            self.b().powf(INVERSE_GAMMA),
         ])
     }
 
@@ -89,17 +106,17 @@ impl Color {
     pub fn to_srgb_denormalized(&self) -> Color {
         Color([
             self.r()
-                .powf(1.0 / 2.2)
+                .powf(INVERSE_GAMMA)
                 .mul(255.0)
                 .round()
                 .clamp(0.0, 255.0),
             self.g()
-                .powf(1.0 / 2.2)
+                .powf(INVERSE_GAMMA)
                 .mul(255.0)
                 .round()
                 .clamp(0.0, 255.0),
             self.b()
-                .powf(1.0 / 2.2)
+                .powf(INVERSE_GAMMA)
                 .mul(255.0)
                 .round()
                 .clamp(0.0, 255.0),

@@ -107,9 +107,9 @@ pub fn extract_triangle_data(
                 let c1v = v_colors_view.row(i1);
                 let c2v = v_colors_view.row(i2);
                 colors = [
-                    Color::new(c0v[0].powf(2.2), c0v[1].powf(2.2), c0v[2].powf(2.2)),
-                    Color::new(c1v[0].powf(2.2), c1v[1].powf(2.2), c1v[2].powf(2.2)),
-                    Color::new(c2v[0].powf(2.2), c2v[1].powf(2.2), c2v[2].powf(2.2)),
+                    Color::from_srgb(c0v[0], c0v[1], c0v[2]),
+                    Color::from_srgb(c1v[0], c1v[1], c1v[2]),
+                    Color::from_srgb(c2v[0], c2v[1], c2v[2]),
                 ];
             }
         }
@@ -168,11 +168,7 @@ pub fn interpolate_triangle_attributes(
                     mesh.texture.height_f64,
                     mesh.texture.width_f64,
                 );
-                Color::new(
-                    sampled_srgb[0].powf(2.2),
-                    sampled_srgb[1].powf(2.2),
-                    sampled_srgb[2].powf(2.2),
-                )
+                Color::from_srgb(sampled_srgb[0], sampled_srgb[1], sampled_srgb[2])
             } else {
                 DEFAULT_MISSING_TEXTURE_COLOR
             }
@@ -219,12 +215,7 @@ pub fn rasterize_triangle(
     // Extract triangle data
     let triangle_data = extract_triangle_data(mesh, submesh_index, triangle_index);
     // Back-face Culling (using world-space face normal and world-space view direction)
-    if !is_triangle_visible(
-        triangle_data.face_normal_ws[0],
-        triangle_data.face_normal_ws[1],
-        triangle_data.face_normal_ws[2],
-        view_config.view_direction.into(), // This is the world-space normal of the projection plane
-    ) {
+    if !is_triangle_visible(triangle_data.face_normal_ws, view_config.view_direction) {
         return;
     }
     // Define projection plane axes from the rotation matrix
@@ -233,10 +224,10 @@ pub fn rasterize_triangle(
     let v_axis_ws = Coordinate::new(view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]);
     let plane_normal_ws = view_config.view_direction;
     // Calculate cube center coordinates
-    let cube_center_coord = (view_config.max_bound_f64 - 1.0) / 2.0;
-    let c_cube_vec = Coordinate::new(cube_center_coord, cube_center_coord, cube_center_coord);
-    let offset_u_on_plane = c_cube_vec.dot(&u_axis_ws) - cube_center_coord;
-    let offset_v_on_plane = c_cube_vec.dot(&v_axis_ws) - cube_center_coord;
+    let cube_center = (view_config.max_bound_f64 - 1.0) / 2.0;
+    let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
+    let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
+    let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
     // Project world-space vertices onto the view plane
     let vertices_proj: [(f64, f64, f64); 3] = triangle_data
         .vertices_ws
@@ -276,48 +267,47 @@ pub fn rasterize_triangle(
             let current_z = buffers.z_buffer[[row, col]];
             let depth_test_passed = interpolated_z < current_z;
             // If the depth test passed, interpolate attributes and update buffers
-            if depth_test_passed {
-                // Interpolate attributes using the new shared function
-                let attributes =
-                    interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
-                // Calculate final color with lighting
-                let final_color_linear =
-                    calculate_final_color(&attributes, view_config, &submesh.material, mesh.mode);
-                // Convert the final color to sRGB
-                let final_color_srgb = final_color_linear.to_srgb_denormalized();
-                // Update buffers
-                buffers.z_buffer[[row, col]] = interpolated_z;
-                buffers.image[[row, col, 0]] = final_color_srgb.r() as u8;
-                buffers.image[[row, col, 1]] = final_color_srgb.g() as u8;
-                buffers.image[[row, col, 2]] = final_color_srgb.b() as u8;
-                // Depth map (scaled to 0-255)
-                let depth_val_norm = {
-                    let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
-                        .abs()
-                        .clamp(0.0, 1.0);
-                    if interpolated_z > 0.0 {
-                        depth_val_norm = 1.0 - depth_val_norm;
-                    }
-                    depth_val_norm
-                };
-                let depth_byte = (depth_val_norm * 255.0).round() as u8;
-                buffers.depth_map[[row, col, 0]] = depth_byte;
-                buffers.depth_map[[row, col, 1]] = depth_byte;
-                buffers.depth_map[[row, col, 2]] = depth_byte;
-                // View-space normals
-                let interpolated_normal_vs = attributes
-                    .normal_ws
-                    .to_view_space_as_vector(&view_config.transformation_matrix);
-                // Normalize the normal vector from [-1, 1] to the [0, 1] range
-                let normals_normalized: Color =
-                    interpolated_normal_vs.map(|x| (x + 1.0) / 2.0).into();
-                let normals_srgb: Color = normals_normalized.to_srgb_denormalized();
-                // Update the normal map
-                let normal_map = &mut buffers.normal_map;
-                normal_map[[row, col, 0]] = normals_srgb.r() as u8;
-                normal_map[[row, col, 1]] = normals_srgb.g() as u8;
-                normal_map[[row, col, 2]] = normals_srgb.b() as u8;
+            if !depth_test_passed {
+                continue;
             }
+            // Interpolate attributes using the new shared function
+            let attributes = interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
+            // Calculate final color with lighting
+            let final_color_linear =
+                calculate_final_color(&attributes, view_config, &submesh.material, mesh.mode);
+            // Convert the final color to sRGB
+            let final_color_srgb = final_color_linear.to_srgb_denormalized();
+            // Update buffers
+            buffers.z_buffer[[row, col]] = interpolated_z;
+            buffers.image[[row, col, 0]] = final_color_srgb.r() as u8;
+            buffers.image[[row, col, 1]] = final_color_srgb.g() as u8;
+            buffers.image[[row, col, 2]] = final_color_srgb.b() as u8;
+            // Depth map (scaled to 0-255)
+            let depth_val_norm = {
+                let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
+                    .abs()
+                    .clamp(0.0, 1.0);
+                if interpolated_z > 0.0 {
+                    depth_val_norm = 1.0 - depth_val_norm;
+                }
+                depth_val_norm
+            };
+            let depth_byte = (depth_val_norm * 255.0).round() as u8;
+            buffers.depth_map[[row, col, 0]] = depth_byte;
+            buffers.depth_map[[row, col, 1]] = depth_byte;
+            buffers.depth_map[[row, col, 2]] = depth_byte;
+            // View-space normals
+            let interpolated_normal_vs = attributes
+                .normal_ws
+                .to_view_space_as_vector(&view_config.transformation_matrix);
+            // Normalize the normal vector from [-1, 1] to the [0, 1] range
+            let normals_normalized: Color = interpolated_normal_vs.map(|x| (x + 1.0) / 2.0).into();
+            let normals_srgb: Color = normals_normalized.to_srgb_denormalized();
+            // Update the normal map
+            let normal_map = &mut buffers.normal_map;
+            normal_map[[row, col, 0]] = normals_srgb.r() as u8;
+            normal_map[[row, col, 1]] = normals_srgb.g() as u8;
+            normal_map[[row, col, 2]] = normals_srgb.b() as u8;
         }
     }
 }

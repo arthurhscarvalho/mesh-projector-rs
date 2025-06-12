@@ -2,6 +2,14 @@ use ndarray::iter::AxisIterMut;
 use ndarray::{Array3, Array4, ArrayViewMut2, ArrayViewMut3, Axis};
 use rayon::iter::IntoParallelIterator;
 
+/// A batch of images and their associated maps (depth, normal, occupancy).
+///
+/// This struct stores multiple images and their corresponding depth maps,
+/// normal maps, and occupancy maps in 4D/3D arrays for efficient batch processing.
+/// - `images`: (N, H, W, C) array of image data.
+/// - `depth_maps`: (N, H, W, C) array of depth map data.
+/// - `normal_maps`: (N, H, W, C) array of normal map data.
+/// - `occupancy_maps`: (N, H, W) array indicating pixel occupancy.
 pub struct ImageBatch {
     pub images: Array4<u8>,
     pub depth_maps: Array4<u8>,

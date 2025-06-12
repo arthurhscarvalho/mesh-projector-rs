@@ -94,14 +94,11 @@ pub fn precompute_triangle_normals(
 /// is less than 90 degrees (dot product > 0), the triangle is facing the viewer and is culled.
 /// We render triangles whose normal points *away* from the view direction (dot product < 0).
 pub fn is_triangle_visible(
-    normal_x: f64,                   // X component of the triangle's normal
-    normal_y: f64,                   // Y component of the triangle's normal
-    normal_z: f64,                   // Z component of the triangle's normal
-    view_direction: (f64, f64, f64), // Normalized view direction vector
+    normal: Coordinate,         // Triangle's normal vector
+    view_direction: Coordinate, // Normalized view direction vector
 ) -> bool {
     // Calculate the dot product of the triangle normal and the view direction vector.
-    let dot =
-        normal_x * view_direction.0 + normal_y * view_direction.1 + normal_z * view_direction.2;
+    let dot = normal.dot(&view_direction);
     // If the dot product is negative, the normal points generally away from the view direction
     // (angle > 90 degrees), meaning the front face of the triangle (using right-hand rule for normal)
     // is visible from this view direction.
