@@ -249,7 +249,7 @@ pub fn compute_and_save_rotation_projections(
                 );
             }
             // Save the projection data for the current view
-            if let Err(e) = save_image_data(&proj, output_dir, i, true) {
+            if let Err(e) = save_image_data(&proj, output_dir, i) {
                 log::error!("Failed to save data for view {}: {}", i, e);
             }
         });

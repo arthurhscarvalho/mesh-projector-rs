@@ -3,22 +3,17 @@
 use crate::mesh_io::errors::{MeshError, MeshResult};
 use image::{ImageBuffer, Rgb};
 use log::warn;
-use ndarray::{Array3, Axis};
+use ndarray::Array3;
 use std::fs;
 use std::path::Path;
 
 /// Saves projection data for a single view to specified files
-pub fn save_image_data(
-    image: &Array3<u8>,
-    output_dir: &Path,
-    view_index: usize,
-    flip_vertical: bool,
-) -> MeshResult<()> {
+pub fn save_image_data(image: &Array3<u8>, output_dir: &Path, view_index: usize) -> MeshResult<()> {
     create_output_directory(output_dir)?;
     let (rows, cols) = (image.shape()[0], image.shape()[1]);
     let channels = image.shape()[2];
     if channels == 3 || channels == 4 {
-        save_rgb_image(image, output_dir, view_index, rows, cols, flip_vertical)?;
+        save_rgb_image(image, output_dir, view_index, rows, cols)?;
     } else {
         warn!(
             "Image array has unsupported number of channels: {}. Skipping save.",
@@ -45,25 +40,11 @@ fn save_rgb_image(
     view_index: usize,
     rows: usize,
     cols: usize,
-    flip_vertical: bool,
 ) -> MeshResult<()> {
-    let final_image_slice = if flip_vertical {
-        create_flipped_image(image.view())
-    } else {
-        image.clone()
-    };
-    let buffer = create_image_buffer(final_image_slice, cols, rows)?;
+    let image_data = image.clone();
+    let buffer = create_image_buffer(image_data, cols, rows)?;
     let image_path = output_dir.join(format!("image_{:04}.png", view_index));
     save_image_buffer(buffer, &image_path)
-}
-
-/// Create vertically flipped image
-fn create_flipped_image(image_slice: ndarray::ArrayView3<u8>) -> Array3<u8> {
-    let mut flipped = Array3::zeros(image_slice.raw_dim());
-    for (i, row) in image_slice.outer_iter().rev().enumerate() {
-        flipped.index_axis_mut(Axis(0), i).assign(&row);
-    }
-    flipped
 }
 
 /// Create image buffer from array data

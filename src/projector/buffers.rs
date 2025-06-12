@@ -7,7 +7,7 @@
 //! per-pixel results and support post-processing operations.
 
 use crate::projector::constants::BACKGROUND_BRIGHTNESS;
-use ndarray::{Array2, Array3};
+use ndarray::{Array2, Array3, Axis};
 use std::f64;
 
 /// Holds buffers generated during the projection process.
@@ -38,5 +38,14 @@ impl Buffers {
             z_buffer: Array2::from_elem((rows, cols), f64::INFINITY),
             outlier_count: 0,
         }
+    }
+
+    /// Vertically flip all buffers in-place.
+    pub fn v_flip(&mut self) {
+        self.image.invert_axis(Axis(0));
+        self.depth_map.invert_axis(Axis(0));
+        self.normal_map.invert_axis(Axis(0));
+        self.occupancy_map.invert_axis(Axis(0));
+        self.z_buffer.invert_axis(Axis(0));
     }
 }
