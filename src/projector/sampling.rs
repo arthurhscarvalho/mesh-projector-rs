@@ -34,19 +34,42 @@ pub fn sample_texture_color_bilinear(
     let mut sampled_color = [0.0; 3];
     // If 3 channels (RGB)
     if channels >= 3 {
+        // Fetch neighboring texels once and convert to linear space via LUT.
+        let c00 = [
+            texture[[y0, x0, 0]],
+            texture[[y0, x0, 1]],
+            texture[[y0, x0, 2]],
+        ];
+        let c10 = [
+            texture[[y0, x1, 0]],
+            texture[[y0, x1, 1]],
+            texture[[y0, x1, 2]],
+        ];
+        let c01 = [
+            texture[[y1, x0, 0]],
+            texture[[y1, x0, 1]],
+            texture[[y1, x0, 2]],
+        ];
+        let c11 = [
+            texture[[y1, x1, 0]],
+            texture[[y1, x1, 1]],
+            texture[[y1, x1, 2]],
+        ];
+
         for chan in 0..3 {
-            let c00 = texture[[y0, x0, chan]] as f64; // Bottom-left in texture space
-            let c10 = texture[[y0, x1, chan]] as f64; // Bottom-right
-            let c01 = texture[[y1, x0, chan]] as f64; // Top-left
-            let c11 = texture[[y1, x1, chan]] as f64; // Top-right
-            let interpolated_channel = c00 * (1.0 - wx) * (1.0 - wy)
-                + c10 * wx * (1.0 - wy)
-                + c01 * (1.0 - wx) * wy
-                + c11 * wx * wy;
-            sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f64 [0, 1]
+            let c00_lin = crate::types::color::srgb_byte_to_linear(c00[chan]);
+            let c10_lin = crate::types::color::srgb_byte_to_linear(c10[chan]);
+            let c01_lin = crate::types::color::srgb_byte_to_linear(c01[chan]);
+            let c11_lin = crate::types::color::srgb_byte_to_linear(c11[chan]);
+
+            let interpolated_lin = c00_lin * (1.0 - wx) * (1.0 - wy)
+                + c10_lin * wx * (1.0 - wy)
+                + c01_lin * (1.0 - wx) * wy
+                + c11_lin * wx * wy;
+            sampled_color[chan] = interpolated_lin;
         }
     } else {
         panic!("Expected 3 channels (RGB), got {}", channels);
     }
-    Color::from_srgb(sampled_color[0], sampled_color[1], sampled_color[2])
+    Color::new(sampled_color[0], sampled_color[1], sampled_color[2])
 }

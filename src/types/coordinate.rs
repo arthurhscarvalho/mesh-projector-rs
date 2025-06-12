@@ -49,27 +49,33 @@ impl Coordinate {
         self.0[2] = z;
     }
 
-    /// Transforms the coordinate as a point (w=1) using a 4x4 matrix.
-    /// This is typically used for transforming positions.
+    /// Transforms the coordinate as a point (w = 1) using a 4x4 view matrix that contains only
+    /// rotation (upper-left 3×3) and no translation. Because the last column is `[0, 0, 0, 1]ᵀ`,
+    /// the homogeneous divide is unnecessary and we can perform a light-weight 3×3 multiply.
     pub fn to_view_space_as_point(&self, matrix: &Array2<f64>) -> Coordinate {
-        let point_homogeneous = ndarray::arr1(&[self.0[0], self.0[1], self.0[2], 1.0]);
-        let transformed_homogeneous = matrix.dot(&point_homogeneous);
+        // SAFETY / ASSUMPTION: `create_view_matrix` guarantees a pure-rotation matrix with
+        // zero translation, so we only need the upper-left 3×3 sub-matrix.
+        let x = self.0[0];
+        let y = self.0[1];
+        let z = self.0[2];
         Coordinate([
-            transformed_homogeneous[0] / transformed_homogeneous[3],
-            transformed_homogeneous[1] / transformed_homogeneous[3],
-            transformed_homogeneous[2] / transformed_homogeneous[3],
+            matrix[[0, 0]] * x + matrix[[0, 1]] * y + matrix[[0, 2]] * z,
+            matrix[[1, 0]] * x + matrix[[1, 1]] * y + matrix[[1, 2]] * z,
+            matrix[[2, 0]] * x + matrix[[2, 1]] * y + matrix[[2, 2]] * z,
         ])
     }
 
-    /// Transforms the coordinate as a vector (w=0) using a 4x4 matrix.
-    /// This is typically used for transforming directions or normals.
+    /// Transforms the coordinate as a vector (w = 0) using the rotation component of the 4×4 view
+    /// matrix. This avoids allocating temporary arrays and heavy `ndarray::dot` calls that are
+    /// costly inside tight inner loops.
     pub fn to_view_space_as_vector(&self, matrix: &Array2<f64>) -> Coordinate {
-        let vector_homogeneous = ndarray::arr1(&[self.0[0], self.0[1], self.0[2], 0.0]);
-        let transformed_homogeneous = matrix.dot(&vector_homogeneous);
+        let x = self.0[0];
+        let y = self.0[1];
+        let z = self.0[2];
         Coordinate([
-            transformed_homogeneous[0],
-            transformed_homogeneous[1],
-            transformed_homogeneous[2],
+            matrix[[0, 0]] * x + matrix[[0, 1]] * y + matrix[[0, 2]] * z,
+            matrix[[1, 0]] * x + matrix[[1, 1]] * y + matrix[[1, 2]] * z,
+            matrix[[2, 0]] * x + matrix[[2, 1]] * y + matrix[[2, 2]] * z,
         ])
     }
 

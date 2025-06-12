@@ -12,6 +12,8 @@ use rayon::prelude::*;
 use std::f64;
 
 /// Finds outlier pixels by comparing depth to neighbors.
+/// This implementation uses integral images to compute the neighbourhood sum and count in
+/// constant time per pixel, reducing the overall complexity from O(N * w^2) to O(N).
 fn find_outliers(
     z_buffer: &Array2<f64>, // Z-buffer
     w: usize,               // Filter window radius
@@ -19,62 +21,81 @@ fn find_outliers(
     cols: usize,            // Total columns
     filter_threshold: f64,  // Depth difference threshold
 ) -> Vec<(usize, usize)> {
-    let row_start = w;
-    let col_start = w;
-    let num_inner_rows = rows.saturating_sub(2 * w);
-    let num_inner_cols = cols.saturating_sub(2 * w);
-    if num_inner_rows == 0 || num_inner_cols == 0 {
+    if rows <= 2 * w || cols <= 2 * w {
         return Vec::new();
     }
-    (0..num_inner_rows)
+
+    // Build two integral images: one for the depth sum of valid pixels and one for the count
+    // of valid pixels. Using `f64` for the count keeps the math homogeneous.
+    let mut integral_sum = Array2::<f64>::zeros((rows, cols));
+    let mut integral_count = Array2::<f64>::zeros((rows, cols));
+
+    // First pass: populate integral images.
+    for r in 0..rows {
+        let mut row_sum = 0.0;
+        let mut row_count = 0.0;
+        for c in 0..cols {
+            let val = z_buffer[[r, c]];
+            let is_valid = val.is_finite() && val < f64::INFINITY;
+            if is_valid {
+                row_sum += val;
+                row_count += 1.0;
+            }
+            let above_sum = if r > 0 { integral_sum[[r - 1, c]] } else { 0.0 };
+            let above_cnt = if r > 0 {
+                integral_count[[r - 1, c]]
+            } else {
+                0.0
+            };
+            integral_sum[[r, c]] = row_sum + above_sum;
+            integral_count[[r, c]] = row_count + above_cnt;
+        }
+    }
+
+    // Helper closure to query a rectangle sum in O(1) using the integral image.
+    let rect_stats = |sum_img: &Array2<f64>, r0: usize, c0: usize, r1: usize, c1: usize| -> f64 {
+        let mut result = sum_img[[r1, c1]];
+        if r0 > 0 {
+            result -= sum_img[[r0 - 1, c1]];
+        }
+        if c0 > 0 {
+            result -= sum_img[[r1, c0 - 1]];
+        }
+        if r0 > 0 && c0 > 0 {
+            result += sum_img[[r0 - 1, c0 - 1]];
+        }
+        result
+    };
+
+    // Scan through the inner pixels in parallel to find outliers.
+    let inner_rows = (w..rows - w).collect::<Vec<_>>();
+    inner_rows
         .into_par_iter()
-        .flat_map(|r_offset| {
-            let r = row_start + r_offset;
-            let mut row_outlier_coords = Vec::new();
-            for c_offset in 0..num_inner_cols {
-                let c = col_start + c_offset;
+        .flat_map(|r| {
+            let mut row_outliers = Vec::new();
+            for c in w..cols - w {
                 let center_depth = z_buffer[[r, c]];
-                // Skip if the center pixel depth is invalid (background).
-                if center_depth == f64::INFINITY || center_depth == f64::NEG_INFINITY {
+                if !center_depth.is_finite() || center_depth == f64::INFINITY {
                     continue;
                 }
-                // Also skip NaNs just in case
-                if !center_depth.is_finite() {
-                    continue;
-                }
-                // Calculate the average depth of *valid* neighbors.
-                let mut sum_depth = 0.0;
-                let mut count_neighbors = 0.0;
-                let r_start_nb = r - w;
-                let r_end_nb = r + w + 1;
-                let c_start_nb = c - w;
-                let c_end_nb = c + w + 1;
-                for nr in r_start_nb..r_end_nb {
-                    for nc in c_start_nb..c_end_nb {
-                        if nr == r && nc == c {
-                            continue;
-                        }
-                        let neighbor_depth = z_buffer[[nr, nc]];
-                        // Check if neighbor is valid (not background and finite)
-                        let is_valid_neighbor =
-                            neighbor_depth < f64::INFINITY && neighbor_depth.is_finite();
-                        if is_valid_neighbor {
-                            sum_depth += neighbor_depth;
-                            count_neighbors += 1.0;
-                        }
-                    }
-                }
-                // Check for outlier condition
+                // Rectangle bounds for the neighbourhood (inclusive indices)
+                let r0 = r - w;
+                let c0 = c - w;
+                let r1 = r + w;
+                let c1 = c + w;
+
+                // Sum and count of depths in the neighbourhood
+                let sum_depth = rect_stats(&integral_sum, r0, c0, r1, c1) - center_depth;
+                let count_neighbors = rect_stats(&integral_count, r0, c0, r1, c1) - 1.0; // exclude centre
+
                 if count_neighbors > 0.0 {
-                    let avg_neighbor_depth = sum_depth / count_neighbors;
-                    let depth_diff = center_depth - avg_neighbor_depth;
-                    let is_outlier = depth_diff > filter_threshold;
-                    if is_outlier {
-                        row_outlier_coords.push((r, c));
+                    let avg_depth = sum_depth / count_neighbors;
+                    if center_depth - avg_depth > filter_threshold {
+                        row_outliers.push((r, c));
                     }
                 }
             }
-            row_outlier_coords
+            row_outliers
         })
         .collect()
 }

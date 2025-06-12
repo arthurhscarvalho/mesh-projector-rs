@@ -36,16 +36,6 @@ pub fn compute_projection(
             );
         }
     }
-    // Create occupancy map
-    for r in 0..rows {
-        for c in 0..cols {
-            let depth_val = buffers.z_buffer[[r, c]];
-            let is_occupied = depth_val < f64::INFINITY && depth_val.is_finite();
-            if is_occupied {
-                buffers.occupancy_map[[r, c]] = 255;
-            }
-        }
-    }
     // Apply outlier filtering
     filter_outliers(&mut buffers, &settings, max_bound as f64);
     // Vertically flip buffers

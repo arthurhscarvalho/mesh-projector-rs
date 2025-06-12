@@ -31,10 +31,10 @@ pub fn calculate_lighting(
     {
         return base_color_linear;
     }
-    // Convert material properties from sRGB to linear space
-    let linear_ka = Color::from(material.ka).to_linear();
-    let linear_kd = Color::from(material.kd).to_linear();
-    let linear_ks = Color::from(material.ks).to_linear();
+    // Material coefficients are stored in linear space; avoid costly per-pixel gamma conversion
+    let linear_ka = Color::from(material.ka);
+    let linear_kd = Color::from(material.kd);
+    let linear_ks = Color::from(material.ks);
     // Transform normal and vertex position to view space
     let normal_vs = normal_ws.to_view_space_as_vector(transformation_matrix);
     let vertex_position_vs = vertex_position_ws.to_view_space_as_point(transformation_matrix);

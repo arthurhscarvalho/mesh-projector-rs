@@ -10,7 +10,9 @@ use crate::projector::geometry::{
 };
 use crate::projector::lighting::calculate_lighting;
 use crate::projector::sampling::sample_texture_color_bilinear;
+use crate::types::color::srgb_byte_to_linear;
 use crate::types::color::Color;
+use crate::types::color::Color as LinearColor;
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{Mesh, MeshMode};
 
@@ -268,16 +270,17 @@ pub fn rasterize_triangle(
             }
             // Interpolate attributes using the new shared function
             let attributes = interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
-            // Calculate final color with lighting
+            // Calculate final color with lighting (linear space)
             let final_color_linear =
                 calculate_lighting(&attributes, &view_config, &submesh.material, &mesh.mode);
-            // Convert the final color to sRGB
-            let final_color_srgb = final_color_linear.to_srgb_denormalized();
+            // Fast linear→sRGB conversion using LUT
+            let final_color_srgb = final_color_linear.to_srgb8();
             // Update buffers
             buffers.z_buffer[[row, col]] = interpolated_z;
-            buffers.image[[row, col, 0]] = final_color_srgb.r() as u8;
-            buffers.image[[row, col, 1]] = final_color_srgb.g() as u8;
-            buffers.image[[row, col, 2]] = final_color_srgb.b() as u8;
+            buffers.image[[row, col, 0]] = final_color_srgb[0];
+            buffers.image[[row, col, 1]] = final_color_srgb[1];
+            buffers.image[[row, col, 2]] = final_color_srgb[2];
+            buffers.occupancy_map[[row, col]] = 255;
             // Depth map (scaled to 0-255)
             let depth_val_norm = {
                 let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
@@ -296,14 +299,20 @@ pub fn rasterize_triangle(
             let interpolated_normal_vs = attributes
                 .normal_ws
                 .to_view_space_as_vector(&view_config.transformation_matrix);
-            // Normalize the normal vector from [-1, 1] to the [0, 1] range
-            let normals_normalized: Color = interpolated_normal_vs.map(|x| (x + 1.0) / 2.0).into();
-            let normals_srgb: Color = normals_normalized.to_srgb_denormalized();
-            // Update the normal map
+            // Normalize the normal vector from [-1,1] to [0,1] and encode to 8-bit directly
+            let nx = ((interpolated_normal_vs.x() + 1.0) * 0.5 * 255.0)
+                .round()
+                .clamp(0.0, 255.0);
+            let ny = ((interpolated_normal_vs.y() + 1.0) * 0.5 * 255.0)
+                .round()
+                .clamp(0.0, 255.0);
+            let nz = ((interpolated_normal_vs.z() + 1.0) * 0.5 * 255.0)
+                .round()
+                .clamp(0.0, 255.0);
             let normal_map = &mut buffers.normal_map;
-            normal_map[[row, col, 0]] = normals_srgb.r() as u8;
-            normal_map[[row, col, 1]] = normals_srgb.g() as u8;
-            normal_map[[row, col, 2]] = normals_srgb.b() as u8;
+            normal_map[[row, col, 0]] = nx as u8;
+            normal_map[[row, col, 1]] = ny as u8;
+            normal_map[[row, col, 2]] = nz as u8;
         }
     }
 }
