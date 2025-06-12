@@ -10,9 +10,7 @@ use crate::projector::geometry::{
 };
 use crate::projector::lighting::calculate_lighting;
 use crate::projector::sampling::sample_texture_color_bilinear;
-use crate::types::color::srgb_byte_to_linear;
 use crate::types::color::Color;
-use crate::types::color::Color as LinearColor;
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{Mesh, MeshMode};
 
