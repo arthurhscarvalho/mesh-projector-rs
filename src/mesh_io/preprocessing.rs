@@ -162,14 +162,15 @@ fn scale_vertices_to_precision(vertices: &mut Array2<f64>, precision: u32) {
 
     let max_dimension = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
     let target_max_val = (1 << precision) as f64 - 1.0;
-    let safety_margin = 0.95; // Use 95% of available space
+    // The safety margin is the amount of space to leave at the edges of the cube.
+    let safety_margin = 1.0;
     let scale_factor = (target_max_val * safety_margin) / max_dimension;
 
     info!(
         "Scaling vertices. Max dimension: {}, Scale factor: {} (with {}% safety margin)",
         max_dimension,
         scale_factor,
-        safety_margin * 100.0
+        100.0 - safety_margin * 100.0
     );
 
     apply_scale_factor(vertices, scale_factor);
