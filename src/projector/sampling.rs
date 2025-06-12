@@ -1,6 +1,7 @@
 //! Provides utilities for sampling colors from textures, including bilinear filtering,
 //! to support accurate texture mapping in the projector module.
 
+use crate::types::color::Color;
 use ndarray::ArrayView3;
 
 /// Samples the texture color using bilinear filtering.
@@ -12,13 +13,17 @@ pub fn sample_texture_color_bilinear(
     channels: usize,
     height_f64: f64,
     width_f64: f64,
-) -> [f64; 3] {
+) -> Color {
     // Return fixed-size array [R, G, B] in [0,1] range
     let tex_xf = interp_u_coord * width_f64;
+    // Small fudge factor to ensure that, due to floating-point rounding,
+    // you never sample outside the valid range of the texture array
+    // when doing bilinear interpolation
+    const FUDGE_FACTOR: f64 = 1.0001;
     // Get texture coordinates
     let tex_yf = interp_v_coord * height_f64;
-    let x0f = tex_xf.max(0.0).min(width_f64 - 1.0001);
-    let y0f = tex_yf.max(0.0).min(height_f64 - 1.0001);
+    let x0f = tex_xf.max(0.0).min(width_f64 - FUDGE_FACTOR);
+    let y0f = tex_yf.max(0.0).min(height_f64 - FUDGE_FACTOR);
     let x0 = x0f as usize;
     let y0 = y0f as usize;
     let x1 = (x0 + 1).min(width_f64 as usize - 1);
@@ -26,7 +31,7 @@ pub fn sample_texture_color_bilinear(
     let wx = x0f - x0 as f64;
     let wy = y0f - y0 as f64;
     // Initialize sampled color
-    let mut sampled_color = [0.0f64; 3];
+    let mut sampled_color = [0.0; 3];
     // If 3 channels (RGB)
     if channels >= 3 {
         for chan in 0..3 {
@@ -41,13 +46,7 @@ pub fn sample_texture_color_bilinear(
             sampled_color[chan] = interpolated_channel / 255.0; // Normalize u8 to f64 [0, 1]
         }
     } else {
-        // Fallback for grayscale or unexpected channel count? Default to gray.
-        let gray_val = if channels == 1 {
-            texture[[y0, x0, 0]] as f64 / 255.0
-        } else {
-            0.5
-        };
-        sampled_color = [gray_val; 3];
+        panic!("Expected 3 channels (RGB), got {}", channels);
     }
-    sampled_color
+    Color::from_srgb(sampled_color[0], sampled_color[1], sampled_color[2])
 }

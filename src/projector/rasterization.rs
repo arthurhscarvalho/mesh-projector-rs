@@ -160,15 +160,14 @@ pub fn interpolate_triangle_attributes(
         }
         MeshMode::ObjTexture | MeshMode::Full => {
             if let Some(tex_image) = &mesh.texture.texture {
-                let sampled_srgb = sample_texture_color_bilinear(
+                sample_texture_color_bilinear(
                     uv.0,
                     uv.1,
                     tex_image.view(),
                     mesh.texture.channels,
                     mesh.texture.height_f64,
                     mesh.texture.width_f64,
-                );
-                Color::from_srgb(sampled_srgb[0], sampled_srgb[1], sampled_srgb[2])
+                )
             } else {
                 DEFAULT_MISSING_TEXTURE_COLOR
             }
