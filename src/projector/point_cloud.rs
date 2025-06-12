@@ -101,7 +101,8 @@ pub fn discretize_mesh_to_point_cloud(
                         &view_config,
                         &submesh.material,
                         mesh.mode,
-                    );
+                    )
+                    .to_srgb_denormalized();
                     // Add point and color to the flatten arrays
                     points.push(attributes.position_ws.x());
                     points.push(attributes.position_ws.y());
