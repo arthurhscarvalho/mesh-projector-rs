@@ -15,7 +15,8 @@ pub fn load_texture(texture_path: &str) -> MeshResult<Array3<u8>> {
         ))
     })?;
 
-    let rgb_img = img.to_rgb8();
+    // Convert to RGB8 and obtain raw vec without an explicit per-pixel loop
+    let rgb_img = img.into_rgb8();
     let (width, height) = rgb_img.dimensions();
 
     if width == 0 || height == 0 {
@@ -25,18 +26,15 @@ pub fn load_texture(texture_path: &str) -> MeshResult<Array3<u8>> {
         )));
     }
 
-    let mut texture_array = Array3::zeros((height as usize, width as usize, 3));
+    let raw_pixels = rgb_img.into_raw(); // Vec<u8> in RGBRGB... layout
 
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = rgb_img.get_pixel(x, y);
-            texture_array[[y as usize, x as usize, 0]] = pixel[0];
-            texture_array[[y as usize, x as usize, 1]] = pixel[1];
-            texture_array[[y as usize, x as usize, 2]] = pixel[2];
-        }
-    }
-
-    Ok(texture_array)
+    // SAFETY: width * height * 3 is guaranteed by the image crate
+    Array3::from_shape_vec((height as usize, width as usize, 3), raw_pixels).map_err(|e| {
+        MeshError::TextureProcessingError(format!(
+            "Failed to convert texture buffer into ndarray: {}",
+            e
+        ))
+    })
 }
 
 /// Process UV coordinates from raw vertex texture coordinates
@@ -80,15 +78,13 @@ pub fn convert_vertex_positions(positions: &[f32]) -> MeshResult<Array2<f64>> {
     }
 
     let vertex_count = positions.len() / 3;
-    let mut vertices = Array2::zeros((vertex_count, 3));
 
-    for i in 0..vertex_count {
-        for j in 0..3 {
-            vertices[[i, j]] = positions[i * 3 + j] as f64;
-        }
-    }
+    // Convert and collect f32 -> f64 in a single pass
+    let vertices_vec: Vec<f64> = positions.iter().map(|&v| v as f64).collect();
 
-    Ok(vertices)
+    Array2::from_shape_vec((vertex_count, 3), vertices_vec).map_err(|e| {
+        MeshError::InvalidVertexData(format!("Failed to convert vertex positions: {}", e))
+    })
 }
 
 /// Convert triangle indices from u32 to usize array format
@@ -100,15 +96,12 @@ pub fn convert_triangle_indices(indices: &[u32]) -> MeshResult<Array2<usize>> {
     }
 
     let triangle_count = indices.len() / 3;
-    let mut triangles = Array2::zeros((triangle_count, 3));
 
-    for i in 0..triangle_count {
-        for j in 0..3 {
-            triangles[[i, j]] = indices[i * 3 + j] as usize;
-        }
-    }
+    let triangles_vec: Vec<usize> = indices.iter().map(|&v| v as usize).collect();
 
-    Ok(triangles)
+    Array2::from_shape_vec((triangle_count, 3), triangles_vec).map_err(|e| {
+        MeshError::InvalidTriangleData(format!("Failed to convert triangle indices: {}", e))
+    })
 }
 
 /// Convert vertex normals from f32 to f64 array format
@@ -121,15 +114,11 @@ pub fn convert_vertex_normals(normals: &[f32], vertex_count: usize) -> MeshResul
         )));
     }
 
-    let mut normals_arr = Array2::zeros((vertex_count, 3));
+    let normals_vec: Vec<f64> = normals.iter().map(|&v| v as f64).collect();
 
-    for i in 0..vertex_count {
-        for j in 0..3 {
-            normals_arr[[i, j]] = normals[i * 3 + j] as f64;
-        }
-    }
-
-    Ok(normals_arr)
+    Array2::from_shape_vec((vertex_count, 3), normals_vec).map_err(|e| {
+        MeshError::InvalidVertexData(format!("Failed to convert vertex normals: {}", e))
+    })
 }
 
 /// Convert vertex colors from f32 to f64 array format
@@ -142,16 +131,11 @@ pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<
         )));
     }
 
-    let mut colors_arr = Array2::zeros((vertex_count, 3));
+    let colors_vec: Vec<f64> = colors.iter().map(|&v| v as f64).collect();
 
-    for i in 0..vertex_count {
-        for j in 0..3 {
-            // Values are typically 0.0-1.0 range from tobj
-            colors_arr[[i, j]] = colors[i * 3 + j] as f64;
-        }
-    }
-
-    Ok(colors_arr)
+    Array2::from_shape_vec((vertex_count, 3), colors_vec).map_err(|e| {
+        MeshError::InvalidVertexData(format!("Failed to convert vertex colors: {}", e))
+    })
 }
 
 /// Create triangle UV coordinates directly from texture coordinate indices
