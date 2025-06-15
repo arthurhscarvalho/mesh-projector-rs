@@ -111,12 +111,14 @@ fn process_texture_for_mode(
     })?;
 
     let texture_data = load_texture(tex_path)?;
-    info!(
-        "Shared texture load successful: {} ({}x{}x{})",
-        tex_path,
+    let (tex_height, tex_width, tex_channels) = (
         texture_data.shape()[0],
         texture_data.shape()[1],
-        texture_data.shape()[2]
+        texture_data.shape()[2],
+    );
+    info!(
+        "Shared texture load successful: {} ({}x{}x{})",
+        tex_path, tex_height, tex_width, tex_channels
     );
 
     // Check if we have separate texture coordinate indices (single_index: false)
@@ -140,11 +142,11 @@ fn process_texture_for_mode(
     };
 
     Ok(MeshTexture {
-        texture: Some(texture_data.clone()),
+        texture: Some(texture_data),
         triangle_uvs: Some(triangle_uvs),
-        channels: texture_data.shape()[2],
-        height_f64: texture_data.shape()[0] as f64,
-        width_f64: texture_data.shape()[1] as f64,
+        channels: tex_channels,
+        height_f64: tex_height as f64,
+        width_f64: tex_width as f64,
     })
 }
 

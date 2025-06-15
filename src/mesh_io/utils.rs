@@ -266,9 +266,15 @@ fn validate_texture_path(texture_path: &str) -> MeshResult<()> {
 
 /// Aggregate vertex data from multiple models for shared texture processing
 pub fn aggregate_model_data(models: &[tobj::Model]) -> (Vec<f32>, Vec<f32>, usize) {
-    let mut all_positions = Vec::new();
-    let mut all_texcoords = Vec::new();
-    let mut total_vertex_count = 0;
+    // First pass: compute total lengths so we can reserve exact capacity.
+    let total_positions_len: usize = models.iter().map(|m| m.mesh.positions.len()).sum();
+    let total_vertex_count: usize = models.iter().map(|m| m.mesh.positions.len() / 3).sum();
+
+    let mut all_positions = Vec::with_capacity(total_positions_len);
+    // Each vertex can contribute up to 2 texcoords (u,v)
+    let mut all_texcoords = Vec::with_capacity(total_vertex_count * 2);
+
+    let mut processed_vertex_count = 0; // we will re-compute below for return value
 
     for (i, model) in models.iter().enumerate() {
         log::info!(
@@ -347,16 +353,16 @@ pub fn aggregate_model_data(models: &[tobj::Model]) -> (Vec<f32>, Vec<f32>, usiz
             }
         }
 
-        total_vertex_count += model.mesh.positions.len() / 3;
+        processed_vertex_count += model.mesh.positions.len() / 3;
     }
 
     log::info!(
         "Aggregated data - total_vertex_count: {}, all_texcoords.len(): {}",
-        total_vertex_count,
+        processed_vertex_count,
         all_texcoords.len()
     );
 
-    (all_positions, all_texcoords, total_vertex_count)
+    (all_positions, all_texcoords, processed_vertex_count)
 }
 
 /// Create global triangle indices for UV mapping
