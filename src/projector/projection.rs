@@ -16,7 +16,7 @@ pub fn compute_projection(
     mesh: &Mesh,
     settings: &ProjectionConfig,
     view_config: &ViewConfig,
-) -> (Array3<u8>, Array3<u8>, Array3<u8>, Array2<u8>, u64) {
+) -> (Array3<u8>, Array2<u8>, Array3<u8>, Array2<u8>, u64) {
     let max_bound: u64 = 1 << settings.precision;
     let rows = max_bound as usize;
     let cols = max_bound as usize;

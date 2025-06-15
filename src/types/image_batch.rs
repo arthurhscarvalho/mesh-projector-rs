@@ -12,7 +12,7 @@ use rayon::iter::IntoParallelIterator;
 /// - `occupancy_maps`: (N, H, W) array indicating pixel occupancy.
 pub struct ImageBatch {
     pub images: Array4<u8>,
-    pub depth_maps: Array4<u8>,
+    pub depth_maps: Array3<u8>,
     pub normal_maps: Array4<u8>,
     pub occupancy_maps: Array3<u8>,
 }
@@ -21,7 +21,7 @@ impl ImageBatch {
     pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
         ImageBatch {
             images: Array4::zeros((num_images, rows, cols, channels)),
-            depth_maps: Array4::zeros((num_images, rows, cols, channels)),
+            depth_maps: Array3::zeros((num_images, rows, cols)),
             normal_maps: Array4::zeros((num_images, rows, cols, channels)),
             occupancy_maps: Array3::zeros((num_images, rows, cols)),
         }
@@ -43,14 +43,14 @@ impl ImageBatch {
 
 pub struct ImageBatchIterMut<'a> {
     images: AxisIterMut<'a, u8, ndarray::Dim<[usize; 3]>>,
-    depth_maps: AxisIterMut<'a, u8, ndarray::Dim<[usize; 3]>>,
+    depth_maps: AxisIterMut<'a, u8, ndarray::Dim<[usize; 2]>>,
     normal_maps: AxisIterMut<'a, u8, ndarray::Dim<[usize; 3]>>,
     occupancy_maps: AxisIterMut<'a, u8, ndarray::Dim<[usize; 2]>>,
 }
 
 pub type ImageBatchItemMut<'a> = (
     ArrayViewMut3<'a, u8>,
-    ArrayViewMut3<'a, u8>,
+    ArrayViewMut2<'a, u8>,
     ArrayViewMut3<'a, u8>,
     ArrayViewMut2<'a, u8>,
 );

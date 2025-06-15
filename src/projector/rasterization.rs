@@ -47,6 +47,7 @@ pub struct TriangleSurface {
     pub face_normal_ws: Coordinate,
 }
 
+#[inline]
 pub fn extract_triangle_vertices_ws(submesh: &SubMesh, triangle_index: usize) -> [Coordinate; 3] {
     let world_vertices = submesh.geometry.vertices.view();
     let triangles = submesh.geometry.triangles.view();
@@ -261,24 +262,19 @@ pub fn rasterize_triangle(
     let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
     let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
     // Project world-space vertices onto the view plane
-    let vertices_proj: [(f64, f64, f64); 3] = triangle_surface
-        .vertices_ws
-        .iter()
-        .map(|&vertex_ws| {
-            let proj_x = vertex_ws.dot(&u_axis_ws) - offset_u_on_plane;
-            let proj_y = vertex_ws.dot(&v_axis_ws) - offset_v_on_plane;
-            let z = vertex_ws.dot(&plane_normal_ws);
-            (proj_x, proj_y, z)
-        })
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
+    let vertices_proj: [Coordinate; 3] = triangle_surface.vertices_ws.map(|vertex_ws| {
+        let proj_x = vertex_ws.dot(&u_axis_ws) - offset_u_on_plane;
+        let proj_y = vertex_ws.dot(&v_axis_ws) - offset_v_on_plane;
+        let z = vertex_ws.dot(&plane_normal_ws);
+        Coordinate::new(proj_x, proj_y, z)
+    });
     // Project vertices onto the view plane
-    let p0_proj = (vertices_proj[0].0, vertices_proj[0].1);
-    let p1_proj = (vertices_proj[1].0, vertices_proj[1].1);
-    let p2_proj = (vertices_proj[2].0, vertices_proj[2].1);
+    let p0_proj = (vertices_proj[0].x(), vertices_proj[0].y());
+    let p1_proj = (vertices_proj[1].x(), vertices_proj[1].y());
+    let p2_proj = (vertices_proj[2].x(), vertices_proj[2].y());
     // Get the bounding box for the triangle
-    let (rows, cols) = (buffers.z_buffer.shape()[0], buffers.z_buffer.shape()[1]);
+    let z_buffer_shape = buffers.z_buffer.shape();
+    let (rows, cols) = (z_buffer_shape[0], z_buffer_shape[1]);
     let Some((min_row, max_row, min_col, max_col)) =
         calculate_bounding_box(p0_proj, p1_proj, p2_proj, rows, cols)
     else {
@@ -295,10 +291,10 @@ pub fn rasterize_triangle(
                 continue;
             }
             let interpolated_z =
-                w0 * vertices_proj[0].2 + w1 * vertices_proj[1].2 + w2 * vertices_proj[2].2;
+                w0 * vertices_proj[0].z() + w1 * vertices_proj[1].z() + w2 * vertices_proj[2].z();
             let current_z = buffers.z_buffer[[row, col]];
             let depth_test_passed = interpolated_z < current_z;
-            // If the depth test passed, interpolate attributes and update buffers
+            // If the depth test passed, interpolate attributes and update buffers, else skip
             if !depth_test_passed {
                 continue;
             }
@@ -331,9 +327,7 @@ pub fn rasterize_triangle(
                 depth_val_norm
             };
             let depth_byte = (depth_val_norm * 255.0).round() as u8;
-            buffers.depth_map[[row, col, 0]] = depth_byte;
-            buffers.depth_map[[row, col, 1]] = depth_byte;
-            buffers.depth_map[[row, col, 2]] = depth_byte;
+            buffers.depth_map[[row, col]] = depth_byte;
             // View-space normals
             let interpolated_normal_vs = interpolated_point
                 .normal_ws

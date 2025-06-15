@@ -31,7 +31,7 @@ fn generate_cube_projections<'py>(
     verbose: bool,
 ) -> PyResult<(
     Py<PyArray4<u8>>,
-    Py<PyArray4<u8>>,
+    Py<PyArray3<u8>>,
     Py<PyArray4<u8>>,
     Py<PyArray3<u8>>,
 )> {
@@ -104,7 +104,7 @@ fn generate_projections<'py>(
     verbose: bool,
 ) -> PyResult<(
     Py<PyArray4<u8>>,
-    Py<PyArray4<u8>>,
+    Py<PyArray3<u8>>,
     Py<PyArray4<u8>>,
     Py<PyArray3<u8>>,
 )> {

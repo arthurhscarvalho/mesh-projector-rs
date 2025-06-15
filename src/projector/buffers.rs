@@ -15,7 +15,7 @@ pub struct Buffers {
     /// The rendered color image (H, W, C).
     pub image: Array3<u8>,
     /// The rendered depth map (H, W, C).
-    pub depth_map: Array3<u8>,
+    pub depth_map: Array2<u8>,
     /// The rendered normal map (H, W, C).
     pub normal_map: Array3<u8>,
     /// The occupancy map (H, W), with 255 for occupied, 0 for empty.
@@ -32,7 +32,7 @@ impl Buffers {
     pub fn new(rows: usize, cols: usize, channels: usize) -> Self {
         Buffers {
             image: Array3::from_elem((rows, cols, channels), BACKGROUND_BRIGHTNESS),
-            depth_map: Array3::zeros((rows, cols, channels)),
+            depth_map: Array2::zeros((rows, cols)),
             normal_map: Array3::zeros((rows, cols, channels)),
             occupancy_map: Array2::zeros((rows, cols)),
             z_buffer: Array2::from_elem((rows, cols), f64::INFINITY),
