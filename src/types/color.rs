@@ -31,7 +31,7 @@ static LINEAR_LUT: Lazy<[f64; 256]> = Lazy::new(|| {
 /// Fast conversion from linear [0,1] to 8-bit sRGB using the LUT.
 #[inline]
 fn linear_to_srgb_byte(linear: f64) -> u8 {
-    let idx = (linear.clamp(0.0, 1.0) * 255.0).round() as usize;
+    let idx = (linear * 255.0).round().clamp(0.0, 255.0) as usize;
     SRGB_LUT[idx]
 }
 
