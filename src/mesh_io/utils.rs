@@ -1,7 +1,7 @@
 //! Utility functions for mesh I/O operations.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use ndarray::{Array, Array2, Array3};
+use ndarray::{Array2, Array3};
 use std::path::Path;
 
 /// Load a texture image and convert it to an RGB ndarray
@@ -51,22 +51,25 @@ pub fn process_uv_coordinates(
         )));
     }
 
-    let mut uvs_arr = Array::zeros((vertex_count, 2));
+    // Allocate the full buffer up-front and fill it using a single pass iterator
+    let mut uvs_vec: Vec<f64> = Vec::with_capacity(vertex_texcoords.len());
 
-    for i in 0..vertex_count {
-        for j in 0..2 {
-            let mut value = vertex_texcoords[i * 2 + j] as f64;
-            value = value.clamp(0.0, 1.0); // Clamp UVs to valid range
+    for chunk in vertex_texcoords.chunks_exact(2) {
+        // Safe because chunks_exact(2) guarantees size == 2
+        let u = chunk[0].clamp(0.0, 1.0) as f64;
+        let mut v = chunk[1].clamp(0.0, 1.0) as f64;
 
-            if j == 1 && flip_v_coordinate {
-                value = 1.0 - value; // Flip V coordinate
-            }
-
-            uvs_arr[[i, j]] = value;
+        if flip_v_coordinate {
+            v = 1.0 - v;
         }
+
+        uvs_vec.push(u);
+        uvs_vec.push(v);
     }
 
-    Ok(uvs_arr)
+    // SAFETY: we validated the length above and preallocated exactly len == vertex_count * 2
+    Array2::from_shape_vec((vertex_count, 2), uvs_vec)
+        .map_err(|e| MeshError::InvalidUvData(format!("Failed to convert UV coordinates: {}", e)))
 }
 
 /// Convert vertex positions from f32 to f64 array format
@@ -144,7 +147,10 @@ pub fn create_triangle_uvs_from_indices(
     models: &[tobj::Model],
     flip_v_coordinate: bool,
 ) -> MeshResult<Array2<f64>> {
-    let mut all_triangle_uvs = Vec::new();
+    // Pre-allocate the buffer to avoid frequent reallocations. Each triangle corner contributes
+    // exactly 2 floating-point values (U and V).
+    let estimated_corners: usize = models.iter().map(|m| m.mesh.indices.len()).sum();
+    let mut all_triangle_uvs = Vec::with_capacity(estimated_corners * 2);
 
     for model in models {
         let mesh = &model.mesh;

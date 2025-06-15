@@ -41,24 +41,18 @@ fn save_rgb_image(
     rows: usize,
     cols: usize,
 ) -> MeshResult<()> {
-    let image_data = image.clone();
-    let buffer = create_image_buffer(image_data, cols, rows)?;
+    // SAFETY: ndarray stores values in a contiguous Vec<u8>, which we can reuse directly.
+    // This avoids an intermediate deep copy of the entire image.
+    let slice = image.as_slice().ok_or_else(|| {
+        MeshError::ImageBufferError("Image array is not contiguous in memory".to_string())
+    })?;
+
+    // We still need to create an owned Vec for ImageBuffer, but we avoid an *additional* clone
+    // that was previously performed on the Array3 itself.
+    let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(cols as u32, rows as u32, slice.to_vec())
+        .ok_or_else(|| MeshError::ImageBufferError("Failed to create image buffer".to_string()))?;
     let image_path = output_dir.join(format!("image_{:04}.png", view_index));
     save_image_buffer(buffer, &image_path)
-}
-
-/// Create image buffer from array data
-fn create_image_buffer(
-    image_data: Array3<u8>,
-    cols: usize,
-    rows: usize,
-) -> MeshResult<ImageBuffer<Rgb<u8>, Vec<u8>>> {
-    ImageBuffer::<Rgb<u8>, _>::from_raw(
-        cols as u32,
-        rows as u32,
-        image_data.into_raw_vec_and_offset().0,
-    )
-    .ok_or_else(|| MeshError::ImageBufferError("Failed to create image buffer".to_string()))
 }
 
 /// Save image buffer to file
