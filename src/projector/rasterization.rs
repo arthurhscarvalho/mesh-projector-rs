@@ -12,7 +12,7 @@ use crate::projector::lighting::calculate_lighting;
 use crate::projector::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{Mesh, MeshMode};
+use crate::types::mesh::{Mesh, MeshMode, SubMesh};
 
 /// Stores the interpolated attributes at a point on a triangle surface.
 ///
@@ -47,8 +47,28 @@ pub struct TriangleSurface {
     pub face_normal_ws: Coordinate,
 }
 
+pub fn extract_triangle_vertices_ws(submesh: &SubMesh, triangle_index: usize) -> [Coordinate; 3] {
+    let world_vertices = submesh.geometry.vertices.view();
+    let triangles = submesh.geometry.triangles.view();
+    // Get vertex indices
+    let tri_indices = triangles.row(triangle_index);
+    let i0 = &tri_indices[0];
+    let i1 = &tri_indices[1];
+    let i2 = &tri_indices[2];
+    // Get world-space positions
+    let p0_ws_vec = world_vertices.row(*i0);
+    let p1_ws_vec = world_vertices.row(*i1);
+    let p2_ws_vec = world_vertices.row(*i2);
+    let vertices_ws = [
+        Coordinate::new(p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]),
+        Coordinate::new(p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]),
+        Coordinate::new(p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]),
+    ];
+    vertices_ws
+}
+
 /// Extracts triangle data from mesh for processing
-pub fn extract_triangle_data(
+pub fn extract_triangle_surface(
     mesh: &Mesh,
     submesh_index: usize,
     triangle_index: usize,
@@ -69,28 +89,20 @@ pub fn extract_triangle_data(
         current_face_normal_ws[2],
     );
     // Get vertex indices
-    let world_vertices = submesh.geometry.vertices.view();
     let triangles = submesh.geometry.triangles.view();
     let tri_indices = triangles.row(triangle_index);
-    let i0 = tri_indices[0];
-    let i1 = tri_indices[1];
-    let i2 = tri_indices[2];
+    let i0 = &tri_indices[0];
+    let i1 = &tri_indices[1];
+    let i2 = &tri_indices[2];
     // Get world-space positions
-    let p0_ws_vec = world_vertices.row(i0);
-    let p1_ws_vec = world_vertices.row(i1);
-    let p2_ws_vec = world_vertices.row(i2);
-    let vertices_ws = [
-        Coordinate::new(p0_ws_vec[0], p0_ws_vec[1], p0_ws_vec[2]),
-        Coordinate::new(p1_ws_vec[0], p1_ws_vec[1], p1_ws_vec[2]),
-        Coordinate::new(p2_ws_vec[0], p2_ws_vec[1], p2_ws_vec[2]),
-    ];
+    let vertices_ws = extract_triangle_vertices_ws(submesh, triangle_index);
     // Get normals (use vertex normals if available, otherwise face normal)
     let mut normals_ws = [face_normal_ws; 3];
     if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
         let v_normals_ws_view = v_normals_ws.view();
-        let n0_v_ws = v_normals_ws_view.row(i0);
-        let n1_v_ws = v_normals_ws_view.row(i1);
-        let n2_v_ws = v_normals_ws_view.row(i2);
+        let n0_v_ws = v_normals_ws_view.row(*i0);
+        let n1_v_ws = v_normals_ws_view.row(*i1);
+        let n2_v_ws = v_normals_ws_view.row(*i2);
         normals_ws = [
             Coordinate::new(n0_v_ws[0], n0_v_ws[1], n0_v_ws[2]),
             Coordinate::new(n1_v_ws[0], n1_v_ws[1], n1_v_ws[2]),
@@ -118,11 +130,11 @@ pub fn extract_triangle_data(
     let mut colors = [Color::white(); 3];
     if mesh.mode == MeshMode::ObjOnly {
         if let Some(v_colors) = &submesh.geometry.vertex_colors {
-            if i0 < v_colors.nrows() && i1 < v_colors.nrows() && i2 < v_colors.nrows() {
+            if *i0 < v_colors.nrows() && *i1 < v_colors.nrows() && *i2 < v_colors.nrows() {
                 let v_colors_view = v_colors.view();
-                let c0v = v_colors_view.row(i0);
-                let c1v = v_colors_view.row(i1);
-                let c2v = v_colors_view.row(i2);
+                let c0v = v_colors_view.row(*i0);
+                let c1v = v_colors_view.row(*i1);
+                let c2v = v_colors_view.row(*i2);
                 colors = [
                     Color::from_srgb(c0v[0], c0v[1], c0v[2]),
                     Color::from_srgb(c1v[0], c1v[1], c1v[2]),
@@ -141,34 +153,58 @@ pub fn extract_triangle_data(
     }
 }
 
-/// Interpolates attributes at a specific barycentric coordinate within a triangle
-pub fn interpolate_triangle_attributes(
-    triangle_data: &TriangleSurface,
+#[inline]
+pub fn interpolate_coordinates(
+    barycentric_coords: &(f64, f64, f64),
+    coordinates: &[Coordinate; 3],
+) -> Coordinate {
+    let interpolated_coordinate = coordinates[0] * barycentric_coords.0
+        + coordinates[1] * barycentric_coords.1
+        + coordinates[2] * barycentric_coords.2;
+    interpolated_coordinate
+}
+
+#[inline]
+pub fn interpolate_uvs(barycentric_coords: &(f64, f64, f64), uvs: &[(f64, f64); 3]) -> (f64, f64) {
+    let interpolated_uv = (
+        uvs[0].0 * barycentric_coords.0
+            + uvs[1].0 * barycentric_coords.1
+            + uvs[2].0 * barycentric_coords.2,
+        uvs[0].1 * barycentric_coords.0
+            + uvs[1].1 * barycentric_coords.1
+            + uvs[2].1 * barycentric_coords.2,
+    );
+    interpolated_uv
+}
+
+#[inline]
+pub fn interpolate_colors(barycentric_coords: &(f64, f64, f64), colors: &[Color; 3]) -> Color {
+    let interpolated_color = colors[0] * barycentric_coords.0
+        + colors[1] * barycentric_coords.1
+        + colors[2] * barycentric_coords.2;
+    interpolated_color
+}
+
+/// Interpolates triangle surface at a specific barycentric coordinate within a triangle
+/// returning a TrianglePoint struct with the interpolated triangle.
+pub fn interpolate_triangle_surface(
+    triangle_surface: &TriangleSurface,
     barycentric_coords: (f64, f64, f64), // (w0, w1, w2)
     mesh: &Mesh,
 ) -> TrianglePoint {
-    let (w0, w1, w2) = barycentric_coords;
     // Interpolate position
-    let position_ws = triangle_data.vertices_ws[0] * w0
-        + triangle_data.vertices_ws[1] * w1
-        + triangle_data.vertices_ws[2] * w2;
+    let position_ws = interpolate_coordinates(&barycentric_coords, &triangle_surface.vertices_ws);
     // Interpolate normal and normalize
-    let mut normal_ws = triangle_data.normals_ws[0] * w0
-        + triangle_data.normals_ws[1] * w1
-        + triangle_data.normals_ws[2] * w2;
+    let mut normal_ws = interpolate_coordinates(&barycentric_coords, &triangle_surface.normals_ws);
     normal_ws.normalize();
     // Interpolate UV
-    let uv = (
-        w0 * triangle_data.uvs[0].0 + w1 * triangle_data.uvs[1].0 + w2 * triangle_data.uvs[2].0,
-        w0 * triangle_data.uvs[0].1 + w1 * triangle_data.uvs[1].1 + w2 * triangle_data.uvs[2].1,
-    );
+    let uv = interpolate_uvs(&barycentric_coords, &triangle_surface.uvs);
     // Calculate base color based on mesh mode
     let base_color = match mesh.mode {
         MeshMode::ObjOnly => {
             // Interpolate vertex colors
-            let interpolated_color = triangle_data.colors[0] * w0
-                + triangle_data.colors[1] * w1
-                + triangle_data.colors[2] * w2;
+            let interpolated_color =
+                interpolate_colors(&barycentric_coords, &triangle_surface.colors);
             Color::new(
                 interpolated_color.r().max(0.0),
                 interpolated_color.g().max(0.0),
@@ -209,9 +245,9 @@ pub fn rasterize_triangle(
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
     // Extract triangle data
-    let triangle_data = extract_triangle_data(mesh, submesh_index, triangle_index);
+    let triangle_surface = extract_triangle_surface(mesh, submesh_index, triangle_index);
     // Back-face Culling (using world-space face normal and world-space view direction)
-    if !is_triangle_visible(triangle_data.face_normal_ws, view_config.view_direction) {
+    if !is_triangle_visible(triangle_surface.face_normal_ws, view_config.view_direction) {
         return;
     }
     // Define projection plane axes from the rotation matrix
@@ -225,7 +261,7 @@ pub fn rasterize_triangle(
     let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
     let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
     // Project world-space vertices onto the view plane
-    let vertices_proj: [(f64, f64, f64); 3] = triangle_data
+    let vertices_proj: [(f64, f64, f64); 3] = triangle_surface
         .vertices_ws
         .iter()
         .map(|&vertex_ws| {
@@ -266,11 +302,16 @@ pub fn rasterize_triangle(
             if !depth_test_passed {
                 continue;
             }
-            // Interpolate attributes using the new shared function
-            let attributes = interpolate_triangle_attributes(&triangle_data, (w0, w1, w2), mesh);
+            // Interpolate triangle
+            let interpolated_point =
+                interpolate_triangle_surface(&triangle_surface, (w0, w1, w2), &mesh);
             // Calculate final color with lighting (linear space)
-            let final_color_linear =
-                calculate_lighting(&attributes, &view_config, &submesh.material, &mesh.mode);
+            let final_color_linear = calculate_lighting(
+                &interpolated_point,
+                &view_config,
+                &submesh.material,
+                &mesh.mode,
+            );
             // Fast linear→sRGB conversion using LUT
             let final_color_srgb = final_color_linear.to_srgb8();
             // Update buffers
@@ -294,7 +335,7 @@ pub fn rasterize_triangle(
             buffers.depth_map[[row, col, 1]] = depth_byte;
             buffers.depth_map[[row, col, 2]] = depth_byte;
             // View-space normals
-            let interpolated_normal_vs = attributes
+            let interpolated_normal_vs = interpolated_point
                 .normal_ws
                 .to_view_space_as_vector(&view_config.transformation_matrix);
             // Normalize the normal vector from [-1,1] to [0,1] and encode to 8-bit directly

@@ -29,22 +29,21 @@ pub fn discretize_mesh_to_point_cloud(
     let max_bound: u64 = 1 << settings.precision;
     let max_bound_f64: f64 = max_bound as f64;
     let density_factor = settings.point_cloud_density_factor;
-    // Initialize point cloud buffers
-    let mut points = Vec::new();
-    let mut colors = Vec::new();
-    let mut num_points: usize = 0;
     // Calculate total mesh area for density calculation
-    let mut total_mesh_area = 0.0;
-    for submesh_index in 0..mesh.submeshes.len() {
-        let submesh = &mesh.submeshes[submesh_index];
-        let num_faces = submesh.geometry.triangles.nrows();
-        for triangle_index in 0..num_faces {
-            let triangle_data =
-                rasterization::extract_triangle_data(&mesh, submesh_index, triangle_index);
-            let triangle_area = geometry::calculate_triangle_area(&triangle_data.vertices_ws);
-            total_mesh_area += triangle_area;
+    let total_mesh_area = {
+        let mut total_mesh_area = 0.0;
+        for submesh_index in 0..mesh.submeshes.len() {
+            let submesh = &mesh.submeshes[submesh_index];
+            let num_faces = submesh.geometry.triangles.nrows();
+            for triangle_index in 0..num_faces {
+                let vertices_ws =
+                    rasterization::extract_triangle_vertices_ws(&submesh, triangle_index);
+                let triangle_area = geometry::calculate_triangle_area(&vertices_ws);
+                total_mesh_area += triangle_area;
+            }
         }
-    }
+        total_mesh_area
+    };
     // Density factor is the number of points per unit area.
     let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
     // Define a transformation matrix for the world coordinates
@@ -67,16 +66,19 @@ pub fn discretize_mesh_to_point_cloud(
         max_bound_f64,
         light_source,
     };
+    // Initialize point cloud buffers
+    let mut points = Vec::new();
+    let mut colors = Vec::new();
     // Process each submesh
     for submesh_index in 0..mesh.submeshes.len() {
         let submesh = &mesh.submeshes[submesh_index];
         let num_faces = submesh.geometry.triangles.nrows();
         for triangle_index in 0..num_faces {
             // Extract triangle data
-            let triangle_data =
-                rasterization::extract_triangle_data(&mesh, submesh_index, triangle_index);
+            let triangle_surface =
+                rasterization::extract_triangle_surface(&mesh, submesh_index, triangle_index);
             // Calculate triangle area
-            let triangle_area = geometry::calculate_triangle_area(&triangle_data.vertices_ws);
+            let triangle_area = geometry::calculate_triangle_area(&triangle_surface.vertices_ws);
             // Calculate number of subdivisions based on triangle area and density
             // We need to ensure that the number of subdivisions is at least 1
             let n_subdiv = (triangle_area * density).sqrt().floor().max(1.0) as usize;
@@ -91,10 +93,10 @@ pub fn discretize_mesh_to_point_cloud(
                         continue;
                     }
                     // Use the shared interpolation function
-                    let interpolated_point = rasterization::interpolate_triangle_attributes(
-                        &triangle_data,
+                    let interpolated_point = rasterization::interpolate_triangle_surface(
+                        &triangle_surface,
                         (u, v, w),
-                        mesh,
+                        &mesh,
                     );
                     // Calculate final color using the shared lighting function
                     let final_color = lighting::calculate_lighting(
@@ -111,11 +113,11 @@ pub fn discretize_mesh_to_point_cloud(
                     colors.push(final_color.r() as u8);
                     colors.push(final_color.g() as u8);
                     colors.push(final_color.b() as u8);
-                    num_points += 1;
                 }
             }
         }
     }
+    let num_points = points.len() / 3; // 3D points are stored as 3 consecutive floats
     let points_array = nd::Array2::from_shape_vec((num_points, 3), points).unwrap();
     let colors_array = nd::Array2::from_shape_vec((num_points, 3), colors).unwrap();
     (points_array, colors_array)
