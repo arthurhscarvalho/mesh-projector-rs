@@ -1,44 +1,44 @@
 //! This module defines the `Color` struct and related functionality for color representation
 //! and manipulation, including conversions between sRGB and linear color spaces.
 
+use once_cell::sync::Lazy;
 use std::ops::{Add, Mul};
-use std::sync::Once;
 
 /// The gamma factor for the sRGB color space.
 const GAMMA: f64 = 2.2;
 /// The inverse gamma factor for the sRGB color space.
 const INVERSE_GAMMA: f64 = 1.0 / GAMMA;
 
-// Pre-computed 8-bit sRGB look-up table for linear intensities 0-255.
-static mut SRGB_LUT: [u8; 256] = [0; 256];
-static mut LINEAR_LUT: [f64; 256] = [0.0; 256];
-static INIT_LUT: Once = Once::new();
+// Compute sRGB LUT at first access, safely and once
+static SRGB_LUT: Lazy<[u8; 256]> = Lazy::new(|| {
+    let mut lut = [0; 256];
+    for i in 0..=255 {
+        let x = i as f64 / 255.0;
+        let srgb = x.powf(INVERSE_GAMMA) * 255.0;
+        lut[i] = srgb.round().clamp(0.0, 255.0) as u8;
+    }
+    lut
+});
 
-/// Initializes the global sRGB look-up table exactly once.
-fn init_srgb_lut() {
-    INIT_LUT.call_once(|| unsafe {
-        for i in 0..=255 {
-            let x = i as f64 / 255.0;
-            let srgb = x.powf(INVERSE_GAMMA) * 255.0 + 0.5; // round
-            SRGB_LUT[i] = srgb.clamp(0.0, 255.0) as u8;
-            LINEAR_LUT[i] = (i as f64 / 255.0).powf(GAMMA);
-        }
-    });
-}
+static LINEAR_LUT: Lazy<[f64; 256]> = Lazy::new(|| {
+    let mut lut = [0.0; 256];
+    for i in 0..=255 {
+        lut[i] = (i as f64 / 255.0).powf(GAMMA);
+    }
+    lut
+});
 
 /// Fast conversion from linear [0,1] to 8-bit sRGB using the LUT.
 #[inline]
 fn linear_to_srgb_byte(linear: f64) -> u8 {
-    init_srgb_lut();
     let idx = (linear.clamp(0.0, 1.0) * 255.0).round() as usize;
-    unsafe { SRGB_LUT[idx] }
+    SRGB_LUT[idx]
 }
 
 /// Fast conversion from 8-bit sRGB to linear [0,1].
 #[inline]
 pub fn srgb_byte_to_linear(b: u8) -> f64 {
-    init_srgb_lut();
-    unsafe { LINEAR_LUT[b as usize] }
+    LINEAR_LUT[b as usize]
 }
 
 /// Represents a color with three components (e.g., R, G, B).

@@ -3,6 +3,7 @@ extern crate log;
 extern crate ndarray as nd;
 extern crate num;
 extern crate numpy;
+extern crate once_cell;
 extern crate pyo3;
 extern crate rayon;
 
