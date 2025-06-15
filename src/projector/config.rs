@@ -26,14 +26,22 @@ pub struct ProjectionConfig {
     pub rotation_config: RotationConfig,
 }
 
+/// Defines the parameters for the point cloud generation.
+pub struct PointCloudConfig {
+    /// The precision/resolution of the output point cloud.
+    pub precision: u64,
+    /// Factor to control the density of points in the discretized point cloud.
+    pub point_cloud_density_factor: f64,
+}
+
 #[allow(dead_code)] // Temporary while we don't parametrize the light source
 /// Defines the source of the light.
 pub enum LightSource {
-    /// Light is fixed in world coordinates.
+    /// Directional light, the light is fixed in world coordinates.
     Directional(Coordinate),
     /// Ambient light, the mesh is always lit by ambient light.
     Ambient,
-    /// Light originates from the camera (headlight camera).
+    /// Headlight camera, the light originates from the camera.
     Camera,
 }
 
@@ -47,11 +55,4 @@ pub struct ViewConfig {
     pub max_bound_f64: f64,
     /// Lighting configuration
     pub light_source: LightSource,
-}
-
-pub struct PointCloudConfig {
-    /// The precision/resolution of the output point cloud.
-    pub precision: u64,
-    /// Factor to control the density of points in the discretized point cloud.
-    pub point_cloud_density_factor: f64,
 }
