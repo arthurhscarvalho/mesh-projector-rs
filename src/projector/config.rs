@@ -26,12 +26,14 @@ pub struct ProjectionConfig {
     pub rotation_config: RotationConfig,
 }
 
+#[allow(dead_code)] // Temporary while we don't parametrize the light source
 /// Defines the source of the light.
 pub enum LightSource {
     /// Light is fixed in world coordinates.
-    #[allow(dead_code)] // Temporary while we don't parametrize the light source
-    World(Coordinate),
-    /// Light originates from the camera.
+    Directional(Coordinate),
+    /// Ambient light, the mesh is always lit by ambient light.
+    Ambient,
+    /// Light originates from the camera (headlight camera).
     Camera,
 }
 

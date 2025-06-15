@@ -43,7 +43,7 @@ pub fn calculate_lighting(
     normal_n_vs.normalize();
     // Determine light direction and light color in view-space
     let (light_dir_vs, light_color) = match light_source {
-        LightSource::World(world_light_pos) => {
+        LightSource::Directional(world_light_pos) => {
             // Treat world_light_pos as a direction vector in world space and transform it
             let mut dir_vs = world_light_pos.to_view_space_as_vector(transformation_matrix);
             dir_vs.normalize();
@@ -63,6 +63,14 @@ pub fn calculate_lighting(
             dir_vs = -dir_vs;
             // Light direction in view space, and white light
             (dir_vs, Color::white())
+        }
+        LightSource::Ambient => {
+            // Ambient lighting: no specific light direction. We emulate uniform illumination
+            // by treating the light as coming from all directions equally. To achieve this,
+            // we set the light direction equal to the surface normal (so the diffuse term
+            // evaluates to 1) and use white light. This effectively disables directional
+            // shading while still preserving material interactions (Ka/Kd/Ks).
+            (normal_n_vs, Color::white())
         }
     };
     // View direction in view space is from surface point to camera (origin in VS)

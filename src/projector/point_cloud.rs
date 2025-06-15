@@ -51,14 +51,15 @@ pub fn discretize_mesh_to_point_cloud(
     let angles = Orientation::new(0.0, 0.0, 0.0);
     let rotation_matrix = angles.to_rotation_matrix();
     let transformation_matrix = create_view_matrix(&rotation_matrix);
-    // Define the view direction
+    // The view direction is set to the third column of the rotation matrix,
+    // which corresponds to the camera's forward (Z) axis in view space.
     let view_direction = Coordinate::new(
         rotation_matrix[[0, 2]],
         rotation_matrix[[1, 2]],
         rotation_matrix[[2, 2]],
     );
     // Define the light source
-    let light_source = LightSource::World((1.0, 1.0, 1.0).into());
+    let light_source = LightSource::Ambient;
     // Create a view config for lighting calculations
     let view_config = ViewConfig {
         view_direction,
