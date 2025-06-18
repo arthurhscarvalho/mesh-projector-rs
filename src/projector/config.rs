@@ -31,7 +31,7 @@ pub struct PointCloudConfig {
     /// The precision/resolution of the output point cloud.
     pub precision: u64,
     /// Factor to control the density of points in the discretized point cloud.
-    pub point_cloud_density_factor: f64,
+    pub point_cloud_density_factor: f32,
 }
 
 #[allow(dead_code)] // Temporary while we don't parametrize the light source
@@ -50,9 +50,9 @@ pub struct ViewConfig {
     /// Normalized view direction vector corresponding to this projection
     pub view_direction: Coordinate,
     /// View matrix that transforms from world space to view space.
-    pub transformation_matrix: Array2<f64>,
+    pub transformation_matrix: Array2<f32>,
     /// The maximum bound of the projection space, used for scaling depth values.
-    pub max_bound_f64: f64,
+    pub max_bound_f32: f32,
     /// Lighting configuration
     pub light_source: LightSource,
 }

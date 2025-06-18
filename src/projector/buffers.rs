@@ -8,7 +8,7 @@
 
 use crate::projector::constants::BACKGROUND_BRIGHTNESS;
 use ndarray::{Array2, Array3, Axis};
-use std::f64;
+use std::f32;
 
 /// Holds buffers generated during the projection process.
 pub struct Buffers {
@@ -21,7 +21,7 @@ pub struct Buffers {
     /// The occupancy map (H, W), with 255 for occupied, 0 for empty.
     pub occupancy_map: Array2<u8>,
     /// Z-buffer (raw depth values) (H, W). Stores the depth of the closest fragment.
-    pub z_buffer: Array2<f64>,
+    pub z_buffer: Array2<f32>,
     /// The number of outliers filtered out.
     pub outlier_count: u64,
 }
@@ -35,7 +35,7 @@ impl Buffers {
             depth_map: Array2::zeros((rows, cols)),
             normal_map: Array3::zeros((rows, cols, channels)),
             occupancy_map: Array2::zeros((rows, cols)),
-            z_buffer: Array2::from_elem((rows, cols), f64::INFINITY),
+            z_buffer: Array2::from_elem((rows, cols), f32::INFINITY),
             outlier_count: 0,
         }
     }

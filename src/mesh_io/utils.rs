@@ -42,7 +42,7 @@ pub fn process_uv_coordinates(
     vertex_texcoords: &[f32],
     vertex_count: usize,
     flip_v_coordinate: bool,
-) -> MeshResult<Array2<f64>> {
+) -> MeshResult<Array2<f32>> {
     if vertex_texcoords.len() != vertex_count * 2 {
         return Err(MeshError::InvalidUvData(format!(
             "UV coordinates length {} doesn't match vertex count {} * 2",
@@ -52,12 +52,12 @@ pub fn process_uv_coordinates(
     }
 
     // Allocate the full buffer up-front and fill it using a single pass iterator
-    let mut uvs_vec: Vec<f64> = Vec::with_capacity(vertex_texcoords.len());
+    let mut uvs_vec: Vec<f32> = Vec::with_capacity(vertex_texcoords.len());
 
     for chunk in vertex_texcoords.chunks_exact(2) {
         // Safe because chunks_exact(2) guarantees size == 2
-        let u = chunk[0].clamp(0.0, 1.0) as f64;
-        let mut v = chunk[1].clamp(0.0, 1.0) as f64;
+        let u = chunk[0].clamp(0.0, 1.0) as f32;
+        let mut v = chunk[1].clamp(0.0, 1.0) as f32;
 
         if flip_v_coordinate {
             v = 1.0 - v;
@@ -72,8 +72,8 @@ pub fn process_uv_coordinates(
         .map_err(|e| MeshError::InvalidUvData(format!("Failed to convert UV coordinates: {}", e)))
 }
 
-/// Convert vertex positions from f32 to f64 array format
-pub fn convert_vertex_positions(positions: &[f32]) -> MeshResult<Array2<f64>> {
+/// Convert vertex positions from f32 to f32 array format
+pub fn convert_vertex_positions(positions: &[f32]) -> MeshResult<Array2<f32>> {
     if positions.len() % 3 != 0 {
         return Err(MeshError::InvalidVertexData(
             "Position array length must be divisible by 3".to_string(),
@@ -82,8 +82,8 @@ pub fn convert_vertex_positions(positions: &[f32]) -> MeshResult<Array2<f64>> {
 
     let vertex_count = positions.len() / 3;
 
-    // Convert and collect f32 -> f64 in a single pass
-    let vertices_vec: Vec<f64> = positions.iter().map(|&v| v as f64).collect();
+    // Convert and collect f32 -> f32 in a single pass
+    let vertices_vec: Vec<f32> = positions.iter().map(|&v| v as f32).collect();
 
     Array2::from_shape_vec((vertex_count, 3), vertices_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex positions: {}", e))
@@ -107,8 +107,8 @@ pub fn convert_triangle_indices(indices: &[u32]) -> MeshResult<Array2<usize>> {
     })
 }
 
-/// Convert vertex normals from f32 to f64 array format
-pub fn convert_vertex_normals(normals: &[f32], vertex_count: usize) -> MeshResult<Array2<f64>> {
+/// Convert vertex normals from f32 to f32 array format
+pub fn convert_vertex_normals(normals: &[f32], vertex_count: usize) -> MeshResult<Array2<f32>> {
     if normals.len() != vertex_count * 3 {
         return Err(MeshError::InvalidVertexData(format!(
             "Normal array length {} doesn't match vertex count {} * 3",
@@ -117,15 +117,15 @@ pub fn convert_vertex_normals(normals: &[f32], vertex_count: usize) -> MeshResul
         )));
     }
 
-    let normals_vec: Vec<f64> = normals.iter().map(|&v| v as f64).collect();
+    let normals_vec: Vec<f32> = normals.iter().map(|&v| v as f32).collect();
 
     Array2::from_shape_vec((vertex_count, 3), normals_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex normals: {}", e))
     })
 }
 
-/// Convert vertex colors from f32 to f64 array format
-pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<Array2<f64>> {
+/// Convert vertex colors from f32 to f32 array format
+pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<Array2<f32>> {
     if colors.len() != vertex_count * 3 {
         return Err(MeshError::InvalidVertexData(format!(
             "Color array length {} doesn't match vertex count {} * 3",
@@ -134,7 +134,7 @@ pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<
         )));
     }
 
-    let colors_vec: Vec<f64> = colors.iter().map(|&v| v as f64).collect();
+    let colors_vec: Vec<f32> = colors.iter().map(|&v| v as f32).collect();
 
     Array2::from_shape_vec((vertex_count, 3), colors_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex colors: {}", e))
@@ -146,7 +146,7 @@ pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<
 pub fn create_triangle_uvs_from_indices(
     models: &[tobj::Model],
     flip_v_coordinate: bool,
-) -> MeshResult<Array2<f64>> {
+) -> MeshResult<Array2<f32>> {
     // Pre-allocate the buffer to avoid frequent reallocations. Each triangle corner contributes
     // exactly 2 floating-point values (U and V).
     let estimated_corners: usize = models.iter().map(|m| m.mesh.indices.len()).sum();
@@ -180,8 +180,8 @@ pub fn create_triangle_uvs_from_indices(
         for &texcoord_idx in &mesh.texcoord_indices {
             let idx = texcoord_idx as usize;
             if idx * 2 + 1 < mesh.texcoords.len() {
-                let mut u = mesh.texcoords[idx * 2] as f64;
-                let mut v = mesh.texcoords[idx * 2 + 1] as f64;
+                let mut u = mesh.texcoords[idx * 2] as f32;
+                let mut v = mesh.texcoords[idx * 2 + 1] as f32;
 
                 // Clamp UV coordinates to valid range
                 u = u.clamp(0.0, 1.0);
@@ -214,9 +214,9 @@ pub fn create_triangle_uvs_from_indices(
 
 /// Create triangle UV coordinates from global vertex UVs and triangle indices
 pub fn create_triangle_uvs(
-    vertex_uvs: &Array2<f64>,
+    vertex_uvs: &Array2<f32>,
     all_triangle_indices: &[usize],
-) -> MeshResult<Array2<f64>> {
+) -> MeshResult<Array2<f32>> {
     let num_corners = all_triangle_indices.len();
     if num_corners % 3 != 0 {
         return Err(MeshError::InvalidTriangleData(

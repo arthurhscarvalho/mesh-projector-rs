@@ -6,18 +6,18 @@
 use crate::projector::constants::{BARYCENTRIC_COORD_EPSILON, BARYCENTRIC_EPSILON};
 use crate::types::coordinate::Coordinate;
 use nd::{array, Array2, ArrayView2};
-use std::f64;
+use std::f32;
 
 /// Computes barycentric coordinates (u, v, w) for point P relative to triangle ABC in 2D.
 ///
 /// Returns `Some((u, v, w))` such that P = uA + vB + wC, where u+v+w = 1.
 /// Returns `None` if the triangle is degenerate (vertices are collinear, denominator is close to zero).
 pub fn barycentric(
-    a: (f64, f64), // Projected coordinates of vertex A
-    b: (f64, f64), // Projected coordinates of vertex B
-    c: (f64, f64), // Projected coordinates of vertex C
-    p: (f64, f64), // Coordinates of the point P (e.g., pixel center)
-) -> Option<(f64, f64, f64)> {
+    a: (f32, f32), // Projected coordinates of vertex A
+    b: (f32, f32), // Projected coordinates of vertex B
+    c: (f32, f32), // Projected coordinates of vertex C
+    p: (f32, f32), // Coordinates of the point P (e.g., pixel center)
+) -> Option<(f32, f32, f32)> {
     // Vectors from A to B (v0) and A to C (v1)
     let v0x = b.0 - a.0;
     let v0y = b.1 - a.1;
@@ -50,11 +50,11 @@ pub fn barycentric(
 /// Precomputes the geometric (unnormalized) normal vector for each triangle face.
 /// The normal is calculated using the cross product of two edge vectors (p1-p0) x (p2-p0).
 pub fn precompute_triangle_normals(
-    points: ArrayView2<f64>,      // Vertex positions (N, 3)
+    points: ArrayView2<f32>,      // Vertex positions (N, 3)
     triangles: ArrayView2<usize>, // Triangle vertex indices (M, 3)
-) -> Array2<f64> {
+) -> Array2<f32> {
     let num_faces = triangles.nrows();
-    let mut triangle_normals = Array2::<f64>::zeros((num_faces, 3));
+    let mut triangle_normals = Array2::<f32>::zeros((num_faces, 3));
     // This loop computes the normal for each triangle face.
     // It could be parallelized if num_faces is extremely large, but for typical meshes,
     // sequential computation is often fast enough and simpler.
@@ -113,9 +113,9 @@ pub fn is_triangle_visible(
 /// Returns `Some((min_row, max_row, min_col, max_col))` if the box is valid and at least
 /// partially on-screen, otherwise returns `None`.
 pub fn calculate_bounding_box(
-    p0_proj: (f64, f64), // Projected point 0 (p_axis_val, q_axis_val) -> (col, row)
-    p1_proj: (f64, f64), // Projected point 1
-    p2_proj: (f64, f64), // Projected point 2
+    p0_proj: (f32, f32), // Projected point 0 (p_axis_val, q_axis_val) -> (col, row)
+    p1_proj: (f32, f32), // Projected point 1
+    p2_proj: (f32, f32), // Projected point 2
     rows: usize,         // Number of rows in the target image buffer
     cols: usize,         // Number of columns in the target image buffer
 ) -> Option<(usize, usize, usize, usize)> {
@@ -149,14 +149,14 @@ pub fn calculate_bounding_box(
 
 /// Checks if a point defined by barycentric coordinates is inside the triangle.
 /// Uses a small tolerance `BARYCENTRIC_COORD_EPSILON` to account for floating-point inaccuracies.
-pub fn is_inside_triangle(u: f64, v: f64, w: f64) -> bool {
+pub fn is_inside_triangle(u: f32, v: f32, w: f32) -> bool {
     u >= BARYCENTRIC_COORD_EPSILON
         && v >= BARYCENTRIC_COORD_EPSILON
         && w >= BARYCENTRIC_COORD_EPSILON
 }
 
 /// Calculates the area of a triangle given its vertices.
-pub fn calculate_triangle_area(vertices: &[Coordinate; 3]) -> f64 {
+pub fn calculate_triangle_area(vertices: &[Coordinate; 3]) -> f32 {
     let ab = vertices[1] - vertices[0];
     let ac = vertices[2] - vertices[0];
     let cross = ab.cross(&ac);
@@ -168,7 +168,7 @@ pub fn calculate_triangle_area(vertices: &[Coordinate; 3]) -> f64 {
 /// For orthographic projection, the camera is the projection plane itself.
 /// This creates a view matrix that transforms from world space to view space,
 /// where the view direction becomes the Z axis.
-pub fn create_view_matrix(rotation_matrix: &Array2<f64>) -> Array2<f64> {
+pub fn create_view_matrix(rotation_matrix: &Array2<f32>) -> Array2<f32> {
     // In orthographic projection, we don't position the camera at a distance
     // Instead, the projection plane itself acts as the camera
     // The rotation matrix should already be set up to transform the view direction to the Z axis

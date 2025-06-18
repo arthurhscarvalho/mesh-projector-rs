@@ -121,9 +121,9 @@ fn generate_projections<'py>(
     log::info!("Entering Rust generate_projections backend");
     // Set up projection settings for rotation-based projection
     let rotation_steps: u32 = 64;
-    let angle_delta_x: f64 = 0.0;
-    let angle_delta_y: f64 = std::f64::consts::PI / 32.0;
-    let angle_delta_z: f64 = 0.0;
+    let angle_delta_x: f32 = 0.0;
+    let angle_delta_y: f32 = std::f32::consts::PI / 32.0;
+    let angle_delta_z: f32 = 0.0;
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
     let mesh = match mesh_io::load_mesh_auto(
         obj_path,
@@ -205,9 +205,9 @@ fn generate_projections_rotation<'py>(
     log::info!("Entering Rust generate_projections backend");
     // Set up projection settings for rotation-based projection
     let rotation_steps: u32 = 32;
-    let angle_delta_x: f64 = 0.0;
-    let angle_delta_y: f64 = std::f64::consts::PI / 4.0;
-    let angle_delta_z: f64 = 0.0;
+    let angle_delta_x: f32 = 0.0;
+    let angle_delta_y: f32 = std::f32::consts::PI / 4.0;
+    let angle_delta_z: f32 = 0.0;
     // Load and preprocess the mesh using io.rs (mode is automatically inferred)
     let mesh = match mesh_io::load_mesh_auto(
         obj_path,
@@ -263,10 +263,10 @@ fn generate_point_cloud<'py>(
     mtl_path: Option<&str>,
     precision: u64,
     flip_uv: bool,
-    point_cloud_density_factor: f64,
+    point_cloud_density_factor: f32,
     ignore_opacity: bool,
     verbose: bool,
-) -> PyResult<(Py<PyArray2<f64>>, Py<PyArray2<u8>>)> {
+) -> PyResult<(Py<PyArray2<f32>>, Py<PyArray2<u8>>)> {
     // Initialize logger if requested
     if verbose {
         logging::init_logger().map_err(|e| {

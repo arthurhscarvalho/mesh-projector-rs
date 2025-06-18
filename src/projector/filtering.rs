@@ -9,26 +9,26 @@ use crate::projector::constants::{
 };
 use nd::Array2;
 use rayon::prelude::*;
-use std::f64;
+use std::f32;
 
 /// Finds outlier pixels by comparing depth to neighbors.
 /// This implementation uses integral images to compute the neighbourhood sum and count in
 /// constant time per pixel, reducing the overall complexity from O(N * w^2) to O(N).
 fn find_outliers(
-    z_buffer: &Array2<f64>, // Z-buffer
+    z_buffer: &Array2<f32>, // Z-buffer
     w: usize,               // Filter window radius
     rows: usize,            // Total rows
     cols: usize,            // Total columns
-    filter_threshold: f64,  // Depth difference threshold
+    filter_threshold: f32,  // Depth difference threshold
 ) -> Vec<(usize, usize)> {
     if rows <= 2 * w || cols <= 2 * w {
         return Vec::new();
     }
 
     // Build two integral images: one for the depth sum of valid pixels and one for the count
-    // of valid pixels. Using `f64` for the count keeps the math homogeneous.
-    let mut integral_sum = Array2::<f64>::zeros((rows, cols));
-    let mut integral_count = Array2::<f64>::zeros((rows, cols));
+    // of valid pixels. Using `f32` for the count keeps the math homogeneous.
+    let mut integral_sum = Array2::<f32>::zeros((rows, cols));
+    let mut integral_count = Array2::<f32>::zeros((rows, cols));
 
     // First pass: populate integral images.
     for r in 0..rows {
@@ -36,7 +36,7 @@ fn find_outliers(
         let mut row_count = 0.0;
         for c in 0..cols {
             let val = z_buffer[[r, c]];
-            let is_valid = val.is_finite() && val < f64::INFINITY;
+            let is_valid = val.is_finite() && val < f32::INFINITY;
             if is_valid {
                 row_sum += val;
                 row_count += 1.0;
@@ -53,7 +53,7 @@ fn find_outliers(
     }
 
     // Helper closure to query a rectangle sum in O(1) using the integral image.
-    let rect_stats = |sum_img: &Array2<f64>, r0: usize, c0: usize, r1: usize, c1: usize| -> f64 {
+    let rect_stats = |sum_img: &Array2<f32>, r0: usize, c0: usize, r1: usize, c1: usize| -> f32 {
         let mut result = sum_img[[r1, c1]];
         if r0 > 0 {
             result -= sum_img[[r0 - 1, c1]];
@@ -75,7 +75,7 @@ fn find_outliers(
             let mut row_outliers = Vec::new();
             for c in w..cols - w {
                 let center_depth = z_buffer[[r, c]];
-                if !center_depth.is_finite() || center_depth == f64::INFINITY {
+                if !center_depth.is_finite() || center_depth == f32::INFINITY {
                     continue;
                 }
                 // Rectangle bounds for the neighbourhood (inclusive indices)
@@ -101,7 +101,7 @@ fn find_outliers(
 }
 
 /// Filters outlier pixels for all image layers and applies the filtering to the images.
-pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectionConfig, max_bound: f64) {
+pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectionConfig, max_bound: f32) {
     let filtering_window_radius = settings.filtering_window_radius;
     // Return outlier counts array
     let rows = buffers.z_buffer.shape()[0];

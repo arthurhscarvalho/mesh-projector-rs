@@ -15,19 +15,19 @@ use ndarray::Array2;
 /// across the triangle surfaces in 3D space.
 ///
 /// Returns:
-/// - points: Array2<f64> - 3D points in the range [0, max_bound]
+/// - points: Array2<f32> - 3D points in the range [0, max_bound]
 /// - colors: Array2<u8> - RGB colors for each point (0-255 range)
 pub fn discretize_mesh_to_point_cloud(
     mesh: &Mesh,
     settings: &PointCloudConfig,
-) -> (Array2<f64>, Array2<u8>) {
+) -> (Array2<f32>, Array2<u8>) {
     log::info!(
         "Initializing 3D mesh discretization. Mode: {:?}, Precision: {}",
         mesh.mode,
         settings.precision
     );
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
+    let max_bound_f32: f32 = max_bound as f32;
     let density_factor = settings.point_cloud_density_factor;
     // Calculate total mesh area for density calculation
     let total_mesh_area = {
@@ -45,7 +45,7 @@ pub fn discretize_mesh_to_point_cloud(
         total_mesh_area
     };
     // Density factor is the number of points per unit area.
-    let density = (density_factor * max_bound_f64.powf(2.0)) / total_mesh_area.max(1e-9);
+    let density = (density_factor * max_bound_f32.powf(2.0)) / total_mesh_area.max(1e-9);
     // Define a transformation matrix for the world coordinates
     let angles = Orientation::new(0.0, 0.0, 0.0);
     let rotation_matrix = angles.to_rotation_matrix();
@@ -63,7 +63,7 @@ pub fn discretize_mesh_to_point_cloud(
     let view_config = ViewConfig {
         view_direction,
         transformation_matrix,
-        max_bound_f64,
+        max_bound_f32,
         light_source,
     };
     // Initialize point cloud buffers
@@ -86,8 +86,8 @@ pub fn discretize_mesh_to_point_cloud(
             for i in 0..=n_subdiv {
                 for j in 0..=(n_subdiv - i) {
                     // Calculate barycentric coordinates
-                    let u = i as f64 / n_subdiv as f64;
-                    let v = j as f64 / n_subdiv as f64;
+                    let u = i as f32 / n_subdiv as f32;
+                    let v = j as f32 / n_subdiv as f32;
                     let w = 1.0 - u - v;
                     if u < 0.0 || v < 0.0 || w < 0.0 {
                         continue;

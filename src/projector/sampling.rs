@@ -7,29 +7,29 @@ use ndarray::ArrayView3;
 /// Samples the texture color using bilinear filtering.
 /// Assumes texture data is valid.
 pub fn sample_texture_color_bilinear(
-    interp_u_coord: f64,
-    interp_v_coord: f64,
+    interp_u_coord: f32,
+    interp_v_coord: f32,
     texture: ArrayView3<u8>,
     channels: usize,
-    height_f64: f64,
-    width_f64: f64,
+    height_f32: f32,
+    width_f32: f32,
 ) -> Color {
     // Return fixed-size array [R, G, B] in [0,1] range
-    let tex_xf = interp_u_coord * width_f64;
+    let tex_xf = interp_u_coord * width_f32;
     // Small fudge factor to ensure that, due to floating-point rounding,
     // you never sample outside the valid range of the texture array
     // when doing bilinear interpolation
-    const FUDGE_FACTOR: f64 = 1.0001;
+    const FUDGE_FACTOR: f32 = 1.0001;
     // Get texture coordinates
-    let tex_yf = interp_v_coord * height_f64;
-    let x0f = tex_xf.max(0.0).min(width_f64 - FUDGE_FACTOR);
-    let y0f = tex_yf.max(0.0).min(height_f64 - FUDGE_FACTOR);
+    let tex_yf = interp_v_coord * height_f32;
+    let x0f = tex_xf.max(0.0).min(width_f32 - FUDGE_FACTOR);
+    let y0f = tex_yf.max(0.0).min(height_f32 - FUDGE_FACTOR);
     let x0 = x0f as usize;
     let y0 = y0f as usize;
-    let x1 = (x0 + 1).min(width_f64 as usize - 1);
-    let y1 = (y0 + 1).min(height_f64 as usize - 1);
-    let wx = x0f - x0 as f64;
-    let wy = y0f - y0 as f64;
+    let x1 = (x0 + 1).min(width_f32 as usize - 1);
+    let y1 = (y0 + 1).min(height_f32 as usize - 1);
+    let wx = x0f - x0 as f32;
+    let wy = y0f - y0 as f32;
     // Initialize sampled color
     let mut sampled_color = [0.0; 3];
     // If 3 channels (RGB)

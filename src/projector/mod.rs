@@ -36,7 +36,7 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
     );
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
+    let max_bound_f32: f32 = max_bound as f32;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
@@ -51,8 +51,8 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
         return image_batch;
     }
     // Set view configs for cube projection
-    const PI: f64 = std::f64::consts::PI;
-    const VIEW_ANGLES: [[f64; 3]; 6] = [
+    const PI: f32 = std::f32::consts::PI;
+    const VIEW_ANGLES: [[f32; 3]; 6] = [
         [0.0, 0.0, 0.0],       // Front: Cam at +Z, looking -Z. No rotation.
         [0.0, PI, 0.0],        // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
         [0.0, PI / 2.0, 0.0],  // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
@@ -76,7 +76,7 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
         view_configs.push(ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
-            max_bound_f64,
+            max_bound_f32,
             light_source: config::LightSource::Camera,
         });
     }
@@ -118,7 +118,7 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
     );
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
+    let max_bound_f32: f32 = max_bound as f32;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
@@ -137,9 +137,9 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
     for i in 0..num_views {
         // Create orientation from the view angles
         let angles = Orientation::new(
-            rotation_config.angle_deltas.pitch() * i as f64,
-            rotation_config.angle_deltas.yaw() * i as f64,
-            rotation_config.angle_deltas.roll() * i as f64,
+            rotation_config.angle_deltas.pitch() * i as f32,
+            rotation_config.angle_deltas.yaw() * i as f32,
+            rotation_config.angle_deltas.roll() * i as f32,
         );
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
@@ -153,7 +153,7 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
         view_configs.push(ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
-            max_bound_f64,
+            max_bound_f32,
             light_source: config::LightSource::Camera,
         });
     }
@@ -197,7 +197,7 @@ pub fn compute_and_save_rotation_projections(
     );
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f64: f64 = max_bound as f64;
+    let max_bound_f32: f32 = max_bound as f32;
     // Determine number of views and prepare view configurations
     let rotation_config = &settings.rotation_config;
     let num_steps = rotation_config.num_steps;
@@ -211,9 +211,9 @@ pub fn compute_and_save_rotation_projections(
     for i in 0..num_steps {
         // Create orientation from the view angles
         let angles = Orientation::new(
-            rotation_config.angle_deltas.pitch() * i as f64,
-            rotation_config.angle_deltas.yaw() * i as f64,
-            rotation_config.angle_deltas.roll() * i as f64,
+            rotation_config.angle_deltas.pitch() * i as f32,
+            rotation_config.angle_deltas.yaw() * i as f32,
+            rotation_config.angle_deltas.roll() * i as f32,
         );
         // Create rotation matrix from the orientation
         let rotation_matrix = angles.to_rotation_matrix();
@@ -227,7 +227,7 @@ pub fn compute_and_save_rotation_projections(
         view_configs.push(ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
-            max_bound_f64,
+            max_bound_f32,
             light_source: config::LightSource::Camera,
         });
     }
@@ -260,6 +260,6 @@ pub fn compute_and_save_rotation_projections(
 ///
 /// Returns:
 /// A tuple containing the points and their colors.
-pub fn mesh_to_point_cloud(mesh: &Mesh, settings: &PointCloudConfig) -> (Array2<f64>, Array2<u8>) {
+pub fn mesh_to_point_cloud(mesh: &Mesh, settings: &PointCloudConfig) -> (Array2<f32>, Array2<u8>) {
     point_cloud::discretize_mesh_to_point_cloud(mesh, settings)
 }

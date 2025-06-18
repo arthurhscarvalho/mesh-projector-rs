@@ -40,7 +40,7 @@ pub struct TriangleSurface {
     /// The normals at each vertex in world space.
     pub normals_ws: [Coordinate; 3],
     /// The UV texture coordinates for each vertex, as (u, v) pairs.
-    pub uvs: [(f64, f64); 3],
+    pub uvs: [(f32, f32); 3],
     /// The linear-space color at each vertex, used in ObjOnly mode.
     pub colors: [Color; 3],
     /// The face normal of the triangle in world space.
@@ -156,7 +156,7 @@ pub fn extract_triangle_surface(
 
 #[inline]
 pub fn interpolate_coordinates(
-    barycentric_coords: &(f64, f64, f64),
+    barycentric_coords: &(f32, f32, f32),
     coordinates: &[Coordinate; 3],
 ) -> Coordinate {
     let interpolated_coordinate = coordinates[0] * barycentric_coords.0
@@ -166,7 +166,7 @@ pub fn interpolate_coordinates(
 }
 
 #[inline]
-pub fn interpolate_uvs(barycentric_coords: &(f64, f64, f64), uvs: &[(f64, f64); 3]) -> (f64, f64) {
+pub fn interpolate_uvs(barycentric_coords: &(f32, f32, f32), uvs: &[(f32, f32); 3]) -> (f32, f32) {
     let interpolated_uv = (
         uvs[0].0 * barycentric_coords.0
             + uvs[1].0 * barycentric_coords.1
@@ -179,7 +179,7 @@ pub fn interpolate_uvs(barycentric_coords: &(f64, f64, f64), uvs: &[(f64, f64); 
 }
 
 #[inline]
-pub fn interpolate_colors(barycentric_coords: &(f64, f64, f64), colors: &[Color; 3]) -> Color {
+pub fn interpolate_colors(barycentric_coords: &(f32, f32, f32), colors: &[Color; 3]) -> Color {
     let interpolated_color = colors[0] * barycentric_coords.0
         + colors[1] * barycentric_coords.1
         + colors[2] * barycentric_coords.2;
@@ -190,7 +190,7 @@ pub fn interpolate_colors(barycentric_coords: &(f64, f64, f64), colors: &[Color;
 /// returning a TrianglePoint struct with the interpolated triangle.
 pub fn interpolate_triangle_surface(
     triangle_surface: &TriangleSurface,
-    barycentric_coords: (f64, f64, f64), // (w0, w1, w2)
+    barycentric_coords: (f32, f32, f32), // (w0, w1, w2)
     mesh: &Mesh,
 ) -> TrianglePoint {
     // Interpolate position
@@ -219,8 +219,8 @@ pub fn interpolate_triangle_surface(
                     uv.1,
                     tex_image.view(),
                     mesh.texture.channels,
-                    mesh.texture.height_f64,
-                    mesh.texture.width_f64,
+                    mesh.texture.height_f32,
+                    mesh.texture.width_f32,
                 )
             } else {
                 DEFAULT_MISSING_TEXTURE_COLOR
@@ -257,7 +257,7 @@ pub fn rasterize_triangle(
     let v_axis_ws = Coordinate::new(view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]);
     let plane_normal_ws = view_config.view_direction;
     // Calculate cube center coordinates
-    let cube_center = (view_config.max_bound_f64 - 1.0) / 2.0;
+    let cube_center = (view_config.max_bound_f32 - 1.0) / 2.0;
     let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
     let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
     let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
@@ -283,7 +283,7 @@ pub fn rasterize_triangle(
     // Rasterize the triangle
     for row in min_row..max_row {
         for col in min_col..max_col {
-            let pixel_center = (col as f64 + 0.5, row as f64 + 0.5);
+            let pixel_center = (col as f32 + 0.5, row as f32 + 0.5);
             let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
                 continue;
             };
@@ -318,7 +318,7 @@ pub fn rasterize_triangle(
             buffers.occupancy_map[[row, col]] = 255;
             // Depth map (scaled to 0-255)
             let depth_val_norm = {
-                let mut depth_val_norm = (interpolated_z / view_config.max_bound_f64)
+                let mut depth_val_norm = (interpolated_z / view_config.max_bound_f32)
                     .abs()
                     .clamp(0.0, 1.0);
                 if interpolated_z > 0.0 {

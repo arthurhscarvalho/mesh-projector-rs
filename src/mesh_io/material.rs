@@ -146,19 +146,19 @@ fn create_default_material() -> MeshMaterial {
 /// Apply properties from a tobj Material to our MeshMaterial
 fn apply_mtl_properties(material: &mut MeshMaterial, mtl: &tobj::Material, ignore_opacity: bool) {
     if let Some(ambient) = mtl.ambient {
-        material.ka = [ambient[0] as f64, ambient[1] as f64, ambient[2] as f64];
+        material.ka = [ambient[0] as f32, ambient[1] as f32, ambient[2] as f32];
     }
     if let Some(diffuse) = mtl.diffuse {
-        material.kd = [diffuse[0] as f64, diffuse[1] as f64, diffuse[2] as f64];
+        material.kd = [diffuse[0] as f32, diffuse[1] as f32, diffuse[2] as f32];
     }
     if let Some(specular) = mtl.specular {
-        material.ks = [specular[0] as f64, specular[1] as f64, specular[2] as f64];
+        material.ks = [specular[0] as f32, specular[1] as f32, specular[2] as f32];
     }
     if let Some(shininess) = mtl.shininess {
-        material.ns = shininess as f64;
+        material.ns = shininess as f32;
     }
     if let Some(dissolve) = mtl.dissolve {
-        material.opacity = dissolve as f64;
+        material.opacity = dissolve as f32;
     }
     if let Some(illum) = mtl.illumination_model {
         material.illum = illum as i64;
@@ -177,11 +177,11 @@ fn apply_mtl_properties(material: &mut MeshMaterial, mtl: &tobj::Material, ignor
 /// Convert a tobj::Material to our MeshMaterial
 fn convert_tobj_material(mtl: tobj::Material, ignore_opacity: bool) -> MeshMaterial {
     let mut material = MeshMaterial {
-        ka: mtl.ambient.unwrap_or([0.1, 0.1, 0.1]).map(|v| v as f64),
-        kd: mtl.diffuse.unwrap_or([0.8, 0.8, 0.8]).map(|v| v as f64),
-        ks: mtl.specular.unwrap_or([0.1, 0.1, 0.1]).map(|v| v as f64),
-        ns: mtl.shininess.unwrap_or(10.0) as f64,
-        opacity: mtl.dissolve.unwrap_or(1.0) as f64,
+        ka: mtl.ambient.unwrap_or([0.1, 0.1, 0.1]).map(|v| v as f32),
+        kd: mtl.diffuse.unwrap_or([0.8, 0.8, 0.8]).map(|v| v as f32),
+        ks: mtl.specular.unwrap_or([0.1, 0.1, 0.1]).map(|v| v as f32),
+        ns: mtl.shininess.unwrap_or(10.0) as f32,
+        opacity: mtl.dissolve.unwrap_or(1.0) as f32,
         illum: mtl.illumination_model.unwrap_or(2) as i64,
     };
 

@@ -145,8 +145,8 @@ fn process_texture_for_mode(
         texture: Some(texture_data),
         triangle_uvs: Some(triangle_uvs),
         channels: tex_channels,
-        height_f64: tex_height as f64,
-        width_f64: tex_width as f64,
+        height_f32: tex_height as f32,
+        width_f32: tex_width as f32,
     })
 }
 
@@ -156,8 +156,8 @@ fn create_empty_texture() -> MeshTexture {
         texture: None,
         triangle_uvs: None,
         channels: 0,
-        height_f64: 0.0,
-        width_f64: 0.0,
+        height_f32: 0.0,
+        width_f32: 0.0,
     }
 }
 
@@ -233,9 +233,9 @@ fn process_single_submesh(
 fn process_vertex_normals(
     mesh: &tobj::Mesh,
     num_vertices: usize,
-    vertices: &ndarray::Array2<f64>,
+    vertices: &ndarray::Array2<f32>,
     triangles: &ndarray::Array2<usize>,
-) -> MeshResult<Option<ndarray::Array2<f64>>> {
+) -> MeshResult<Option<ndarray::Array2<f32>>> {
     if !mesh.normals.is_empty() && mesh.normals.len() == num_vertices * 3 {
         info!("Using vertex normals from OBJ data.");
 
@@ -277,7 +277,7 @@ fn process_vertex_colors(
     mesh: &tobj::Mesh,
     num_vertices: usize,
     model_name: &str,
-) -> Option<ndarray::Array2<f64>> {
+) -> Option<ndarray::Array2<f32>> {
     if !mesh.vertex_color.is_empty() && mesh.vertex_color.len() == num_vertices * 3 {
         info!(
             "Using vertex colors from OBJ data for model '{}'.",
