@@ -26,26 +26,7 @@ pub fn discretize_mesh_to_point_cloud(
         mesh.mode,
         settings.precision
     );
-    let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f32: f32 = max_bound as f32;
-    let density_factor = settings.point_cloud_density_factor;
-    // Calculate total mesh area for density calculation
-    let total_mesh_area = {
-        let mut total_mesh_area = 0.0;
-        for submesh_index in 0..mesh.submeshes.len() {
-            let submesh = &mesh.submeshes[submesh_index];
-            let num_faces = submesh.geometry.triangles.nrows();
-            for triangle_index in 0..num_faces {
-                let vertices_ws =
-                    rasterization::extract_triangle_vertices_ws(&submesh, triangle_index);
-                let triangle_area = geometry::calculate_triangle_area(&vertices_ws);
-                total_mesh_area += triangle_area;
-            }
-        }
-        total_mesh_area
-    };
-    // Density factor is the number of points per unit area.
-    let density = (density_factor * max_bound_f32.powf(2.0)) / total_mesh_area.max(1e-9);
+    let max_bound_f32 = (1 << settings.precision) as f32;
     // Define a transformation matrix for the world coordinates
     let angles = Orientation::new(0.0, 0.0, 0.0);
     let rotation_matrix = angles.to_rotation_matrix();
@@ -81,7 +62,10 @@ pub fn discretize_mesh_to_point_cloud(
             let triangle_area = geometry::calculate_triangle_area(&triangle_surface.vertices_ws);
             // Calculate number of subdivisions based on triangle area and density
             // We ensure that the number of subdivisions is at least 2 (common practice)
-            let n_subdiv = (triangle_area * density).sqrt().floor().max(2.0) as usize;
+            let n_subdiv = (triangle_area * settings.point_cloud_density_factor)
+                .sqrt()
+                .round()
+                .max(2.0) as usize;
             // Sample points across the triangle surface
             for i in 0..=n_subdiv {
                 for j in 0..=(n_subdiv - i) {
