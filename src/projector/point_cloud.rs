@@ -62,10 +62,9 @@ pub fn discretize_mesh_to_point_cloud(
             let triangle_area = geometry::calculate_triangle_area(&triangle_surface.vertices_ws);
             // Calculate number of subdivisions based on triangle area and density
             // We ensure that the number of subdivisions is at least 2 (common practice)
-            let n_subdiv = (triangle_area * settings.point_cloud_density_factor)
-                .sqrt()
+            let n_subdiv = (triangle_area.sqrt() * settings.point_cloud_density_factor)
                 .round()
-                .max(2.0) as usize;
+                .max(1.0) as usize;
             // Sample points across the triangle surface
             for i in 0..=n_subdiv {
                 for j in 0..=(n_subdiv - i) {
