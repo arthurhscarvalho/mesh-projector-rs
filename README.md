@@ -56,9 +56,10 @@ import mesh_projector as mp
 import os
 
 # 1. Load a mesh from an OBJ file
-# The library automatically detects and uses texture/material files if present.
 mesh = mp.read_mesh(
-    obj_path="assets/Chameleon_Ref_0.obj",
+    obj_path="assets/just_a_girl_C0-L5_deq_tri.obj",
+    texture_path="assets/just_a_girl_C0-L5_deq_tri_0.png",
+    mtl_path="assets/just_a_girl_C0-L5_deq_tri.mtl",
     precision=12,  # Results in 4096x4096 output images
     verbose=True,
 )
