@@ -1,5 +1,6 @@
 # Custom
 *.png
+*.ply
 projections/
 SJTU-TMQA/
 *.lock

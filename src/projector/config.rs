@@ -1,80 +1,34 @@
-// src/projector/config.rs
-//! Projection settings and related structures.
-use crate::projector::constants::NUM_IMAGES;
+//! Configuration types and settings for controlling the 3D mesh projection process.
+//!
+//! This module defines the structures and parameters used to specify projection resolution,
+//! rotation strategies, outlier filtering, and other options that influence how projections
+//! are generated from 3D meshes. These settings are consumed by the projector pipeline to
+//! produce images, depth maps, and related outputs.
+
+use crate::types::orientation::Orientation;
 
 /// Contains all the settings for controlling the projection process.
-#[derive(Debug)]
-pub struct ProjectorConfig {
+pub struct ProjectionConfig {
     /// The precision/resolution of the output images (log2 of dimensions).
     pub precision: u64,
     /// Radius for outlier filtering (0 = disabled).
     pub filtering_window_radius: u64,
+    /// Optional rotation configuration. If None, uses default 6-view orthographic projection.
+    pub rotation_config: RotationConfig,
 }
 
-impl ProjectorConfig {
-    /// Creates a new projection settings object.
-    pub fn new(precision: u64, filtering_window_radius: u64) -> Self {
-        ProjectorConfig {
-            precision,
-            filtering_window_radius,
-        }
-    }
+/// Defines the parameters for the point cloud generation.
+pub struct PointCloudConfig {
+    /// The precision/resolution of the output point cloud.
+    pub precision: u64,
+    /// Factor to control the density of points in the discretized point cloud.
+    pub point_cloud_density_factor: f32,
 }
 
-/// Encapsulates parameters for a single orthographic projection view (camera settings).
-#[derive(Debug)]
-pub struct ViewConfig {
-    /// The axis representing depth relative to the mesh (0=X, 1=Y, 2=Z).
-    pub depth_axis: usize,
-    /// True if this is a front view (looking along the positive direction of `depth_axis`),
-    /// false if it's a back view (looking along the negative direction).
-    pub is_front_view: bool,
-    /// Normalized view direction vector corresponding to this projection.
-    pub view_dir: (f64, f64, f64),
-    /// The primary axis index for the 2D projection plane (e.g., Y if depth is X).
-    /// This typically corresponds to the image's column index.
-    pub p_axis: usize,
-    /// The secondary axis index for the 2D projection plane (e.g., Z if depth is X).
-    /// This typically corresponds to the image's row index.
-    pub q_axis: usize,
-}
-
-impl ViewConfig {
-    /// Creates projection settings based on the image layer index (0 to NUM_IMAGES - 1).
-    /// Layers 0, 2, 4 are front views (+X, +Y, +Z).
-    /// Layers 1, 3, 5 are back views (-X, -Y, -Z).
-    pub fn new(img_layer: usize) -> Self {
-        assert!(
-            img_layer < NUM_IMAGES,
-            "Invalid image layer index: {}",
-            img_layer
-        );
-        let depth_axis = img_layer / 2; // 0 for X, 1 for Y, 2 for Z
-        let view_type = img_layer % 2; // 0 for front, 1 for back
-        let is_front_view = view_type == 0;
-        // Determine view direction based on axis and front/back type
-        let view_dir = match (depth_axis, is_front_view) {
-            (0, true) => (1.0, 0.0, 0.0),   // +X
-            (0, false) => (-1.0, 0.0, 0.0), // -X
-            (1, true) => (0.0, 1.0, 0.0),   // +Y
-            (1, false) => (0.0, -1.0, 0.0), // -Y
-            (2, true) => (0.0, 0.0, 1.0),   // +Z
-            (2, false) => (0.0, 0.0, -1.0), // -Z
-            _ => unreachable!(),            // Should be covered by the assert above
-        };
-        // Define the axes used for the 2D projection plane (P, Q) based on the depth axis
-        // If depth is X (0), plane is YZ (1, 2) -> p=Y, q=Z
-        // If depth is Y (1), plane is XZ (0, 2) -> p=X, q=Z
-        // If depth is Z (2), plane is XY (0, 1) -> p=X, q=Y
-        // Note: The order (p, q) maps to (cols, rows) typically.
-        const PROJECTION_PLANE_AXES: [(usize, usize); 3] = [(1, 2), (0, 2), (0, 1)];
-        let (p_axis, q_axis) = PROJECTION_PLANE_AXES[depth_axis];
-        ViewConfig {
-            depth_axis,
-            is_front_view,
-            view_dir,
-            p_axis,
-            q_axis,
-        }
-    }
+/// Contains settings for controlling mesh rotation during projection.
+pub struct RotationConfig {
+    /// Angle deltas for rotation (pitch, yaw, roll in radians)
+    pub angle_deltas: Orientation,
+    /// Number of steps for each rotation axis
+    pub num_steps: usize,
 }
