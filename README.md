@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="https://i.imgur.com/s6hRFxE.gif" />
+</p>
+
+---
+
 # Mesh Projector
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
