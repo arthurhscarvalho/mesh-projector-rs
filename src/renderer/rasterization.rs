@@ -317,16 +317,22 @@ pub fn rasterize_triangle_to_images(
             buffers.image[[row, col, 1]] = final_color_srgb[1];
             buffers.image[[row, col, 2]] = final_color_srgb[2];
             buffers.occupancy_map[[row, col]] = 255;
-            // Depth map (scaled to 0-255)
-            let depth_val_norm = {
-                let mut depth_val_norm = (interpolated_z / view_config.max_bound_f32)
-                    .abs()
-                    .clamp(0.0, 1.0);
-                if interpolated_z > 0.0 {
-                    depth_val_norm = 1.0 - depth_val_norm;
-                }
-                depth_val_norm
-            };
+            // Compute the signed depth range spanned by the bounding cube along the current
+            // view direction.  For each axis we take either 0 or `max_bound_f32` depending
+            // on the sign of the corresponding component of the view direction, thereby
+            // obtaining the minimum and maximum possible dot-products without enumerating
+            // all eight corners explicitly.  This gives the *exact* depth range even for
+            // arbitrary (non-axis aligned) view directions.
+            let vd = view_config.view_direction;
+            let max_depth_along_view =
+                view_config.max_bound_f32 * (vd.x().max(0.0) + vd.y().max(0.0) + vd.z().max(0.0));
+            let min_depth_along_view =
+                view_config.max_bound_f32 * (vd.x().min(0.0) + vd.y().min(0.0) + vd.z().min(0.0));
+            let depth_range = max_depth_along_view - min_depth_along_view;
+            // Normalise such that "near" (smaller z) becomes 1 and "far" (larger z) becomes
+            // 0, independent of the sign of the view direction components.
+            let depth_val_norm =
+                ((max_depth_along_view - interpolated_z) / depth_range).clamp(0.0, 1.0);
             let depth_byte = (depth_val_norm * 255.0).round() as u8;
             buffers.depth_map[[row, col]] = depth_byte;
             // View-space normals
