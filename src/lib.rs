@@ -207,7 +207,7 @@ fn project_to_image_by_rotation_to_file<'py>(
         rotation_config,
     };
     // Call the backend to compute projections
-    let output_dir = Path::new("projections");
+    let output_dir = Path::new("rotation_projections");
     py.allow_threads(|| {
         projector::project_to_image_by_rotation_to_file(&mesh, &settings, &output_dir)
     });

@@ -58,6 +58,9 @@ def read_mesh(
         texture_path (Optional[str], optional): Path to the texture image file (if available).
         mtl_path (Optional[str], optional): Path to the MTL material file (if available).
         precision (int, optional): Precision for mesh normalization and rasterization (default: 12).
+            Higher precision results in higher resolution.
+            The mesh will be scaled to 2^precision.
+            The default precision is 12, which results in 4096x4096 resolution for the bounding cube.
         flip_uv (bool, optional): Whether to flip the V coordinate of UVs (default: True).
         ignore_opacity (bool, optional): If True, ignore opacity/alpha in materials and textures (default: False).
         verbose (bool, optional): If True, enable verbose logging from the Rust backend (default: False).
