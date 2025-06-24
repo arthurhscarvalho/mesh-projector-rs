@@ -13,7 +13,7 @@ if __name__ == "__main__":
     VERBOSE = True
     FILTERING = 0
     # Read the mesh (obj-only mode, no texture or mtl file is needed)
-    # The renderer will not use any textures, only the geometry and triangle colors,
+    # The renderer will not use any textures, only the geometry and triangle colors (if present),
     # and no shading is applied
     mesh = mp.read_mesh(
         obj_path=OBJ_PATH,
