@@ -8,6 +8,7 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::{PointCloudConfig, ProjectionConfig, RotationConfig};
+use crate::types::mesh::Mesh;
 use crate::types::orientation::Orientation;
 use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
@@ -20,34 +21,26 @@ mod projector;
 mod renderer;
 mod types;
 
+#[pyclass]
+pub struct MeshWrapper {
+    pub mesh: Mesh,
+    pub precision: u64,
+}
+
 #[pyfunction]
-fn project_to_image_on_bounding_cube<'py>(
-    py: Python<'py>,
+fn read_mesh<'py>(
+    _py: Python<'py>,
     obj_path: &str,
     texture_path: Option<&str>,
     mtl_path: Option<&str>,
     precision: u64,
-    filtering_radius: u64,
     flip_uv: bool,
     ignore_opacity: bool,
     verbose: bool,
-) -> PyResult<(
-    Py<PyArray4<u8>>,
-    Py<PyArray3<u8>>,
-    Py<PyArray4<u8>>,
-    Py<PyArray3<u8>>,
-)> {
+) -> PyResult<MeshWrapper> {
     // Initialize logger if requested
-    if verbose {
-        logging::init_logger().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize logger: {}",
-                e
-            ))
-        })?;
-    }
-    log::info!("Entering Rust generate_cube_projections backend");
-    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
+    logging::atomic_init_logger(verbose)?;
+    log::info!("Entering Rust read_mesh backend");
     let mesh = match mesh_io::load_mesh_auto(
         obj_path,
         texture_path,
@@ -64,6 +57,27 @@ fn project_to_image_on_bounding_cube<'py>(
             )));
         }
     };
+    log::info!("Mesh loaded successfully");
+    Ok(MeshWrapper { mesh, precision })
+}
+
+#[pyfunction]
+fn project_to_image_on_bounding_cube<'py>(
+    py: Python<'py>,
+    mesh_wrapper: &MeshWrapper,
+    filtering_radius: u64,
+    verbose: bool,
+) -> PyResult<(
+    Py<PyArray4<u8>>,
+    Py<PyArray3<u8>>,
+    Py<PyArray4<u8>>,
+    Py<PyArray3<u8>>,
+)> {
+    // Initialize logger if requested
+    logging::atomic_init_logger(verbose)?;
+    log::info!("Entering Rust project_to_image_on_bounding_cube backend");
+    let mesh = &mesh_wrapper.mesh;
+    let precision = mesh_wrapper.precision;
     // Set up rotation config for cube projection (will be handled internally)
     let rotation_config = RotationConfig {
         angle_deltas: Orientation::from([0.0, 0.0, 0.0]),
@@ -97,13 +111,12 @@ fn project_to_image_on_bounding_cube<'py>(
 #[pyfunction]
 fn project_to_image_by_rotation<'py>(
     py: Python<'py>,
-    obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
-    precision: u64,
+    mesh_wrapper: &MeshWrapper,
+    rotation_steps: u32,
+    angle_delta_x: f32,
+    angle_delta_y: f32,
+    angle_delta_z: f32,
     filtering_radius: u64,
-    flip_uv: bool,
-    ignore_opacity: bool,
     verbose: bool,
 ) -> PyResult<(
     Py<PyArray4<u8>>,
@@ -112,37 +125,10 @@ fn project_to_image_by_rotation<'py>(
     Py<PyArray3<u8>>,
 )> {
     // Initialize logger if requested
-    if verbose {
-        logging::init_logger().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize logger: {}",
-                e
-            ))
-        })?;
-    }
-    log::info!("Entering Rust generate_projections backend");
-    // Set up projection settings for rotation-based projection
-    let rotation_steps: u32 = 64;
-    let angle_delta_x: f32 = 0.0;
-    let angle_delta_y: f32 = std::f32::consts::PI / 32.0;
-    let angle_delta_z: f32 = 0.0;
-    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match mesh_io::load_mesh_auto(
-        obj_path,
-        texture_path,
-        mtl_path,
-        precision as u32,
-        flip_uv,
-        ignore_opacity,
-    ) {
-        Ok(mesh) => mesh,
-        Err(e) => {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to load mesh: {}",
-                e
-            )));
-        }
-    };
+    logging::atomic_init_logger(verbose)?;
+    log::info!("Entering Rust project_to_image_by_rotation backend");
+    let mesh = &mesh_wrapper.mesh;
+    let precision = mesh_wrapper.precision;
     // Set up projection settings with rotation config if provided
     log::info!(
         "Using rotation-based projection with {} steps",
@@ -187,48 +173,19 @@ fn project_to_image_by_rotation<'py>(
 #[pyfunction]
 fn project_to_image_by_rotation_to_file<'py>(
     py: Python<'py>,
-    obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
-    precision: u64,
+    mesh_wrapper: &MeshWrapper,
+    rotation_steps: u32,
+    angle_delta_x: f32,
+    angle_delta_y: f32,
+    angle_delta_z: f32,
     filtering_radius: u64,
-    flip_uv: bool,
-    ignore_opacity: bool,
     verbose: bool,
 ) -> PyResult<()> {
     // Initialize logger if requested
-    if verbose {
-        logging::init_logger().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize logger: {}",
-                e
-            ))
-        })?;
-    }
-    log::info!("Entering Rust generate_projections backend");
-    // Set up projection settings for rotation-based projection
-    let rotation_steps: u32 = 32;
-    let angle_delta_x: f32 = 0.0;
-    let angle_delta_y: f32 = std::f32::consts::PI / 4.0;
-    let angle_delta_z: f32 = 0.0;
-    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match mesh_io::load_mesh_auto(
-        obj_path,
-        texture_path,
-        mtl_path,
-        precision as u32,
-        flip_uv,
-        ignore_opacity,
-    ) {
-        Ok(mesh) => mesh,
-        Err(e) => {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to load mesh: {}",
-                e
-            )));
-        }
-    };
-    // Set up projection settings for rotation-based projection
+    logging::atomic_init_logger(verbose)?;
+    log::info!("Entering Rust project_to_image_by_rotation_to_file backend");
+    let mesh = &mesh_wrapper.mesh;
+    let precision = mesh_wrapper.precision;
     log::info!(
         "Using rotation-based projection with {} steps",
         rotation_steps
@@ -261,42 +218,15 @@ fn project_to_image_by_rotation_to_file<'py>(
 #[pyfunction]
 fn project_to_point_cloud_by_sampling<'py>(
     py: Python<'py>,
-    obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
-    precision: u64,
-    flip_uv: bool,
+    mesh_wrapper: &MeshWrapper,
     point_cloud_density_factor: f32,
-    ignore_opacity: bool,
     verbose: bool,
 ) -> PyResult<(Py<PyArray2<f32>>, Py<PyArray2<u8>>)> {
     // Initialize logger if requested
-    if verbose {
-        logging::init_logger().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to initialize logger: {}",
-                e
-            ))
-        })?;
-    }
-    log::info!("Entering Rust generate_point_cloud backend");
-    // Load and preprocess the mesh using io.rs (mode is automatically inferred)
-    let mesh = match mesh_io::load_mesh_auto(
-        obj_path,
-        texture_path,
-        mtl_path,
-        precision as u32,
-        flip_uv,
-        ignore_opacity,
-    ) {
-        Ok(mesh) => mesh,
-        Err(e) => {
-            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                "Failed to load mesh: {}",
-                e
-            )));
-        }
-    };
+    logging::atomic_init_logger(verbose)?;
+    log::info!("Entering Rust project_to_point_cloud_by_sampling backend");
+    let mesh = &mesh_wrapper.mesh;
+    let precision = mesh_wrapper.precision;
     // Set up point cloud settings
     let settings = PointCloudConfig {
         precision,
@@ -318,6 +248,8 @@ fn project_to_point_cloud_by_sampling<'py>(
 
 #[pymodule]
 fn mesh_projector(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<MeshWrapper>()?;
+    m.add_function(wrap_pyfunction!(read_mesh, m)?)?;
     m.add_function(wrap_pyfunction!(project_to_image_on_bounding_cube, m)?)?;
     m.add_function(wrap_pyfunction!(project_to_image_by_rotation, m)?)?;
     m.add_function(wrap_pyfunction!(project_to_image_by_rotation_to_file, m)?)?;

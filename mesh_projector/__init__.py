@@ -1,123 +1,119 @@
+from typing import Optional, Tuple
+
+import numpy as np
+
+from .mesh_projector import MeshWrapper
 from .mesh_projector import (
-    project_to_image_by_rotation as _internal_generate_projections,
+    project_to_image_by_rotation as _internal_project_to_image_by_rotation,
 )
 from .mesh_projector import (
-    project_to_point_cloud_by_sampling as _internal_generate_point_cloud,
+    project_to_image_by_rotation_to_file as _internal_project_to_image_by_rotation_to_file,
 )
 from .mesh_projector import (
-    project_to_image_on_bounding_cube as _internal_generate_cube_projections,
+    project_to_image_on_bounding_cube as _internal_project_to_image_on_bounding_cube,
+)
+from .mesh_projector import (
+    project_to_point_cloud_by_sampling as _internal_project_to_point_cloud_by_sampling,
+)
+from .mesh_projector import (
+    read_mesh as _internal_read_mesh,
 )
 
 
-def generate_point_cloud(
-    obj_path,
-    texture_path=None,
-    mtl_path=None,
-    precision=12,
-    flip_uv=True,
-    point_cloud_density_factor=1.0,
-    ignore_opacity=False,
-    verbose=False,
-):
-    return _internal_generate_point_cloud(
-        obj_path,
-        texture_path,
-        mtl_path,
-        precision,
-        flip_uv,
-        point_cloud_density_factor,
-        ignore_opacity,
-        verbose,
-    )
-
-
-def project_mesh(
-    obj_location,
-    texture_file=None,
-    mtl_location=None,
-    precision=12,
-    filtering=0,
-    flip_uv=True,
-    ignore_opacity=False,
-    verbose=False,
-    rotation_steps=None,
-    angle_delta_x=None,
-    angle_delta_y=None,
-    angle_delta_z=None,
-):
-    """
-    High-level function to load and generate projections and occlusion maps for a mesh.
-
-    Args:
-        obj_location (str): Path to the OBJ mesh file.
-        precision (int): Output image resolution exponent (2^precision).
-        texture_file (str, optional): Path to the texture image file. Defaults to None.
-        mtl_location (str, optional): Path to the MTL material file. Defaults to None.
-        filtering (int, optional): Radius for outlier filtering. If > 0, occlusion maps are generated.
-                                 Defaults to 0 (disabled).
-        flip_uv (bool): Whether to flip the V coordinate (1.0 - v) during preprocessing.
-                      Defaults to True.
-        verbose (bool): Enables detailed logging. Defaults to False.
-        ignore_opacity (bool): If True, forces opacity to 1.0, ignoring the MTL value. Defaults to False.
-        rotation_steps (int, optional): Number of rotation steps for rotation-based projection.
-                                     If provided along with angle deltas, enables rotation-based projection.
-                                     Defaults to None (uses standard 6-view orthographic projection).
-        angle_delta_x (float, optional): Angle delta for rotation around X axis in radians.
-                                      Required for rotation-based projection.
-        angle_delta_y (float, optional): Angle delta for rotation around Y axis in radians.
-                                      Required for rotation-based projection.
-        angle_delta_z (float, optional): Angle delta for rotation around Z axis in radians.
-                                      Required for rotation-based projection.
-
-    Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-            - Projection images (N, H, W, 3) where N is either 6 (orthographic) or rotation_steps (rotation-based)
-            - Depth maps (N, H, W, 3)
-            - Normal maps (N, H, W, 3)
-            - Occupancy maps (N, H, W) where value is 255 for occupied pixels, 0 otherwise
-
-    Raises:
-        FileNotFoundError: If required files (OBJ, or Texture/MTL based on mode) are not found.
-        ValueError: If the mesh data is invalid or required components are missing.
-        RuntimeError: If the Rust backend fails during projection generation.
-    """
+def read_mesh(
+    obj_path: str,
+    texture_path: Optional[str] = None,
+    mtl_path: Optional[str] = None,
+    precision: int = 12,
+    flip_uv: bool = True,
+    ignore_opacity: bool = False,
+    verbose: bool = False,
+) -> MeshWrapper:
     try:
-        # The mode is automatically inferred in the Rust backend based on provided files
-        _internal_generate_projections(
-            obj_location,
-            texture_file,
-            mtl_location,
+        return _internal_read_mesh(
+            obj_path,
+            texture_path,
+            mtl_path,
             precision,
-            filtering,
             flip_uv,
             ignore_opacity,
+            verbose,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Rust backend failed during mesh reading: {e}")
+
+
+def project_to_image_on_bounding_cube(
+    mesh: MeshWrapper,
+    filtering: int = 0,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    try:
+        return _internal_project_to_image_on_bounding_cube(
+            mesh,
+            filtering,
             verbose,
         )
     except Exception as e:
         raise RuntimeError(f"Rust backend failed during projection generation: {e}")
 
 
-def project_mesh_cube(
-    obj_location,
-    texture_file=None,
-    mtl_location=None,
-    precision=12,
-    filtering=0,
-    flip_uv=True,
-    ignore_opacity=False,
-    verbose=False,
-):
+def project_to_image_by_rotation(
+    mesh: MeshWrapper,
+    rotation_steps: int,
+    angle_delta_x: float,
+    angle_delta_y: float,
+    angle_delta_z: float,
+    filtering: int = 0,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     try:
-        # The mode is automatically inferred in the Rust backend based on provided files
-        return _internal_generate_cube_projections(
-            obj_location,
-            texture_file,
-            mtl_location,
-            precision,
+        return _internal_project_to_image_by_rotation(
+            mesh,
+            rotation_steps,
+            angle_delta_x,
+            angle_delta_y,
+            angle_delta_z,
             filtering,
-            flip_uv,
-            ignore_opacity,
             verbose,
         )
     except Exception as e:
         raise RuntimeError(f"Rust backend failed during projection generation: {e}")
+
+
+def project_to_image_by_rotation_to_file(
+    mesh: MeshWrapper,
+    rotation_steps: int,
+    angle_delta_x: float,
+    angle_delta_y: float,
+    angle_delta_z: float,
+    filtering: int = 0,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    try:
+        return _internal_project_to_image_by_rotation_to_file(
+            mesh,
+            rotation_steps,
+            angle_delta_x,
+            angle_delta_y,
+            angle_delta_z,
+            filtering,
+            verbose,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Rust backend failed during projection generation: {e}")
+
+
+def project_to_point_cloud_by_sampling(
+    mesh: MeshWrapper,
+    point_cloud_density_factor: float = 1.0,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    try:
+        return _internal_project_to_point_cloud_by_sampling(
+            mesh,
+            point_cloud_density_factor,
+            verbose,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Rust backend failed during point cloud generation: {e}")
