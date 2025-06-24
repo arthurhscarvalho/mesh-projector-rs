@@ -11,7 +11,7 @@ use crate::mesh_io::{
         load_texture, process_uv_coordinates, validate_file_exists,
     },
 };
-use crate::projector::geometry::precompute_triangle_normals;
+use crate::renderer::geometry::precompute_triangle_normals;
 use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, SubMesh};
 use log::{info, warn};
 use tobj;

@@ -2,14 +2,16 @@
 //! It handles triangle visibility, barycentric interpolation, texture sampling, and
 //! per-pixel lighting calculations, supporting various mesh modes for flexible rendering.
 
-use crate::projector::buffers::Buffers;
-use crate::projector::config::ViewConfig;
-use crate::projector::constants::DEFAULT_MISSING_TEXTURE_COLOR;
-use crate::projector::geometry::{
-    barycentric, calculate_bounding_box, is_inside_triangle, is_triangle_visible,
+use crate::projector::config::PointCloudConfig;
+use crate::renderer::buffers::{ImageBuffers, PointCloudBuffers};
+use crate::renderer::config::ViewConfig;
+use crate::renderer::constants::DEFAULT_MISSING_TEXTURE_COLOR;
+use crate::renderer::geometry::{
+    barycentric, calculate_bounding_box, calculate_triangle_area, is_inside_triangle,
+    is_triangle_visible,
 };
-use crate::projector::lighting::calculate_lighting;
-use crate::projector::sampling::sample_texture_color_bilinear;
+use crate::renderer::lighting::calculate_lighting;
+use crate::renderer::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{Mesh, MeshMode, SubMesh};
@@ -236,10 +238,10 @@ pub fn interpolate_triangle_surface(
 }
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
-pub fn rasterize_triangle(
+pub fn rasterize_triangle_to_images(
     mesh: &Mesh,
     view_config: &ViewConfig,
-    buffers: &mut Buffers,
+    buffers: &mut ImageBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
 ) {
@@ -346,6 +348,52 @@ pub fn rasterize_triangle(
             normal_map[[row, col, 0]] = nx as u8;
             normal_map[[row, col, 1]] = ny as u8;
             normal_map[[row, col, 2]] = nz as u8;
+        }
+    }
+}
+
+pub fn rasterize_triangle_to_point_cloud(
+    mesh: &Mesh,
+    settings: &PointCloudConfig,
+    view_config: &ViewConfig,
+    buffers: &mut PointCloudBuffers,
+    submesh_index: usize,
+    triangle_index: usize, // Local triangle index for geometry
+) {
+    // Get submesh
+    let submesh = &mesh.submeshes[submesh_index];
+    // Extract triangle data
+    let triangle_surface = extract_triangle_surface(&mesh, submesh_index, triangle_index);
+    // Calculate triangle area
+    let triangle_area = calculate_triangle_area(&triangle_surface.vertices_ws);
+    // Calculate number of subdivisions based on triangle area and density
+    // We ensure that the number of subdivisions is at least 2 (common practice)
+    let n_subdiv = (triangle_area.sqrt() * settings.point_cloud_density_factor)
+        .round()
+        .max(1.0) as usize;
+    // Sample points across the triangle surface
+    for i in 0..=n_subdiv {
+        for j in 0..=(n_subdiv - i) {
+            // Calculate barycentric coordinates
+            let u = i as f32 / n_subdiv as f32;
+            let v = j as f32 / n_subdiv as f32;
+            let w = 1.0 - u - v;
+            if u < 0.0 || v < 0.0 || w < 0.0 {
+                continue;
+            }
+            // Use the shared interpolation function
+            let interpolated_point =
+                interpolate_triangle_surface(&triangle_surface, (u, v, w), &mesh);
+            // Calculate final color using the shared lighting function
+            let final_color = calculate_lighting(
+                &interpolated_point,
+                &view_config,
+                &submesh.material,
+                &mesh.mode,
+            )
+            .to_srgb_denormalized();
+            // Add point and color to the flatten arrays
+            buffers.add_point(interpolated_point.position_ws, final_color);
         }
     }
 }

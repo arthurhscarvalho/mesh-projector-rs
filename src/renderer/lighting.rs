@@ -4,9 +4,9 @@
 //! in 3D scenes, taking into account ambient, diffuse, and specular lighting
 //! components, as well as transformations between world and view space.
 
-use crate::projector::config::{LightSource, ViewConfig};
-use crate::projector::constants::GLOBAL_AMBIENT;
-use crate::projector::rasterization::TrianglePoint;
+use crate::renderer::config::{LightSource, ViewConfig};
+use crate::renderer::constants::GLOBAL_AMBIENT;
+use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
 use crate::types::mesh::{MeshMaterial, MeshMode};
 

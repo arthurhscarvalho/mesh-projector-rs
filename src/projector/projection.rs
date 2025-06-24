@@ -3,11 +3,12 @@
 //! triangles, manages per-pixel buffers (color, depth, normals, occupancy), and applies
 //! post-processing such as outlier filtering.
 
-use crate::projector::buffers::Buffers;
-use crate::projector::config::{ProjectionConfig, ViewConfig};
+use crate::projector::config::ProjectionConfig;
 use crate::projector::constants::NUM_CHANNELS;
-use crate::projector::filtering::filter_outliers;
-use crate::projector::rasterization::rasterize_triangle;
+use crate::renderer::buffers::ImageBuffers;
+use crate::renderer::config::ViewConfig;
+use crate::renderer::filtering::filter_outliers;
+use crate::renderer::rasterization::rasterize_triangle_to_images;
 use crate::types::mesh::Mesh;
 use ndarray::{Array2, Array3};
 
@@ -21,13 +22,13 @@ pub fn compute_projection(
     let rows = max_bound as usize;
     let cols = max_bound as usize;
     // Initialize buffers for a single view
-    let mut buffers = Buffers::new(rows, cols, NUM_CHANNELS);
+    let mut buffers = ImageBuffers::new(rows, cols, NUM_CHANNELS);
     let num_submeshes = mesh.submeshes.len();
     // Rasterize all triangles from all submeshes
     for submesh_index in 0..num_submeshes {
         let num_faces = mesh.submeshes[submesh_index].geometry.triangles.nrows();
         for triangle_index in 0..num_faces {
-            rasterize_triangle(
+            rasterize_triangle_to_images(
                 &mesh,
                 view_config,
                 &mut buffers,

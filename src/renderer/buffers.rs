@@ -6,12 +6,14 @@
 //! initialized, updated, and accessed throughout the projection pipeline to accumulate
 //! per-pixel results and support post-processing operations.
 
-use crate::projector::constants::BACKGROUND_BRIGHTNESS;
+use crate::renderer::constants::BACKGROUND_BRIGHTNESS;
+use crate::types::color::Color;
+use crate::types::coordinate::Coordinate;
 use ndarray::{Array2, Array3, Axis};
 use std::f32;
 
 /// Holds buffers generated during the projection process.
-pub struct Buffers {
+pub struct ImageBuffers {
     /// The rendered color image (H, W, C).
     pub image: Array3<u8>,
     /// The rendered depth map (H, W, C).
@@ -26,11 +28,11 @@ pub struct Buffers {
     pub outlier_count: u64,
 }
 
-impl Buffers {
+impl ImageBuffers {
     /// Creates new buffers sized according to the specified dimensions.
     /// Initializes the buffers appropriately for the projection process.
     pub fn new(rows: usize, cols: usize, channels: usize) -> Self {
-        Buffers {
+        ImageBuffers {
             image: Array3::from_elem((rows, cols, channels), BACKGROUND_BRIGHTNESS),
             depth_map: Array2::zeros((rows, cols)),
             normal_map: Array3::zeros((rows, cols, channels)),
@@ -47,5 +49,35 @@ impl Buffers {
         self.normal_map.invert_axis(Axis(0));
         self.occupancy_map.invert_axis(Axis(0));
         self.z_buffer.invert_axis(Axis(0));
+    }
+}
+
+pub struct PointCloudBuffers {
+    pub points: Vec<f32>,
+    pub colors: Vec<u8>,
+}
+
+impl PointCloudBuffers {
+    pub fn new() -> Self {
+        PointCloudBuffers {
+            points: Vec::new(),
+            colors: Vec::new(),
+        }
+    }
+
+    pub fn add_point(&mut self, xyz: Coordinate, color: Color) {
+        self.points.push(xyz.x());
+        self.points.push(xyz.y());
+        self.points.push(xyz.z());
+        self.colors.push(color.r() as u8);
+        self.colors.push(color.g() as u8);
+        self.colors.push(color.b() as u8);
+    }
+
+    pub fn to_array(self) -> (Array2<f32>, Array2<u8>) {
+        let num_points = self.points.len() / 3;
+        let points_array = Array2::from_shape_vec((num_points, 3), self.points).unwrap();
+        let colors_array = Array2::from_shape_vec((num_points, 3), self.colors).unwrap();
+        (points_array, colors_array)
     }
 }

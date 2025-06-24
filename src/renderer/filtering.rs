@@ -2,11 +2,10 @@
 //! specifically targeting pixels whose depth values significantly deviate from
 //! their local neighborhood.
 
-use crate::projector::buffers::Buffers;
 use crate::projector::config::ProjectionConfig;
-use crate::projector::constants::{
-    BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR, NUM_CHANNELS,
-};
+use crate::projector::constants::NUM_CHANNELS;
+use crate::renderer::buffers::ImageBuffers;
+use crate::renderer::constants::{BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR};
 use nd::Array2;
 use rayon::prelude::*;
 use std::f32;
@@ -101,7 +100,7 @@ fn find_outliers(
 }
 
 /// Filters outlier pixels for all image layers and applies the filtering to the images.
-pub fn filter_outliers(buffers: &mut Buffers, settings: &ProjectionConfig, max_bound: f32) {
+pub fn filter_outliers(buffers: &mut ImageBuffers, settings: &ProjectionConfig, max_bound: f32) {
     let filtering_window_radius = settings.filtering_window_radius;
     // Return outlier counts array
     let rows = buffers.z_buffer.shape()[0];

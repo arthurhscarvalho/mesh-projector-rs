@@ -17,6 +17,7 @@ use std::path::Path;
 mod logging;
 mod mesh_io;
 mod projector;
+mod renderer;
 mod types;
 
 #[pyfunction]

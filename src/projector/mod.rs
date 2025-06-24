@@ -1,24 +1,19 @@
 //! High-level module for 3D mesh projection and rendering.
 
-mod buffers;
 pub mod config;
-mod constants;
-mod filtering;
-pub mod geometry;
-mod lighting;
+pub mod constants;
 mod point_cloud;
 mod projection;
-mod rasterization;
-mod sampling;
 
 use crate::mesh_io::save_image_data;
-use crate::projector::config::{PointCloudConfig, ProjectionConfig, ViewConfig};
-use crate::projector::constants::NUM_CHANNELS;
-use crate::projector::geometry::create_view_matrix;
+use crate::projector::config::{PointCloudConfig, ProjectionConfig};
+use crate::renderer::config::{LightSource, ViewConfig};
+use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
 use crate::types::mesh::Mesh;
 use crate::types::orientation::Orientation;
+use constants::NUM_CHANNELS;
 use ndarray::Array2;
 use rayon::prelude::*;
 use std::path::Path;
@@ -77,7 +72,7 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: config::LightSource::Camera,
+            light_source: LightSource::Camera,
         });
     }
     // Compute projections for each view in parallel
@@ -154,7 +149,7 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: config::LightSource::Camera,
+            light_source: LightSource::Camera,
         });
     }
     // Compute projections for each view in parallel
@@ -228,7 +223,7 @@ pub fn compute_and_save_rotation_projections(
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: config::LightSource::Camera,
+            light_source: LightSource::Camera,
         });
     }
     // Compute projections for each view in parallel

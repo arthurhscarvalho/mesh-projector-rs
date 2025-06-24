@@ -3,7 +3,7 @@
 //! essential operations required for rasterization, visibility testing, and surface analysis
 //! during the projection pipeline.
 
-use crate::projector::constants::{BARYCENTRIC_COORD_EPSILON, BARYCENTRIC_EPSILON};
+use crate::renderer::constants::{BARYCENTRIC_COORD_EPSILON, BARYCENTRIC_EPSILON};
 use crate::types::coordinate::Coordinate;
 use nd::{array, Array2, ArrayView2};
 use std::f32;
