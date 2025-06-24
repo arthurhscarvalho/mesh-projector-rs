@@ -24,7 +24,7 @@ use std::path::Path;
 ///
 /// Returns:
 /// An ImageBatch containing all projection data.
-pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image_on_bounding_cube(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -106,7 +106,7 @@ pub fn compute_cube_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
 /// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
 /// Returns an ImageBatch containing all projection data.
-pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image_by_rotation(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -182,7 +182,7 @@ pub fn compute_mesh_projections(mesh: &Mesh, settings: &ProjectionConfig) -> Ima
 
 /// Computes rotation-based projections and saves them on-the-fly in parallel.
 /// This function does not return any projection data.
-pub fn compute_and_save_rotation_projections(
+pub fn project_to_image_by_rotation_to_file(
     mesh: &Mesh,
     settings: &ProjectionConfig,
     output_dir: &Path,
@@ -257,6 +257,9 @@ pub fn compute_and_save_rotation_projections(
 ///
 /// Returns:
 /// A tuple containing the points and their colors.
-pub fn mesh_to_point_cloud(mesh: &Mesh, settings: &PointCloudConfig) -> (Array2<f32>, Array2<u8>) {
+pub fn project_to_point_cloud_by_sampling(
+    mesh: &Mesh,
+    settings: &PointCloudConfig,
+) -> (Array2<f32>, Array2<u8>) {
     point_cloud::discretize_mesh_to_point_cloud(mesh, settings)
 }

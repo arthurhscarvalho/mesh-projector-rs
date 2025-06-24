@@ -21,7 +21,7 @@ mod renderer;
 mod types;
 
 #[pyfunction]
-fn generate_cube_projections<'py>(
+fn project_to_image_on_bounding_cube<'py>(
     py: Python<'py>,
     obj_path: &str,
     texture_path: Option<&str>,
@@ -76,7 +76,8 @@ fn generate_cube_projections<'py>(
         rotation_config,
     };
     // Call the backend to compute projections
-    let image_batch = py.allow_threads(|| projector::compute_cube_projections(&mesh, &settings));
+    let image_batch =
+        py.allow_threads(|| projector::project_to_image_on_bounding_cube(&mesh, &settings));
     let (projections, depth_maps, normal_maps, occlusion_maps) = (
         image_batch.images,
         image_batch.depth_maps,
@@ -94,7 +95,7 @@ fn generate_cube_projections<'py>(
 }
 
 #[pyfunction]
-fn generate_projections<'py>(
+fn project_to_image_by_rotation<'py>(
     py: Python<'py>,
     obj_path: &str,
     texture_path: Option<&str>,
@@ -165,7 +166,8 @@ fn generate_projections<'py>(
         rotation_config,
     };
     // Call the backend to compute projections
-    let image_batch = py.allow_threads(|| projector::compute_mesh_projections(&mesh, &settings));
+    let image_batch =
+        py.allow_threads(|| projector::project_to_image_by_rotation(&mesh, &settings));
     let (images, depth_maps, normal_maps, occlusion_maps) = (
         image_batch.images,
         image_batch.depth_maps,
@@ -183,7 +185,7 @@ fn generate_projections<'py>(
 }
 
 #[pyfunction]
-fn generate_projections_rotation<'py>(
+fn project_to_image_by_rotation_to_file<'py>(
     py: Python<'py>,
     obj_path: &str,
     texture_path: Option<&str>,
@@ -250,14 +252,14 @@ fn generate_projections_rotation<'py>(
     // Call the backend to compute projections
     let output_dir = Path::new("projections");
     py.allow_threads(|| {
-        projector::compute_and_save_rotation_projections(&mesh, &settings, &output_dir)
+        projector::project_to_image_by_rotation_to_file(&mesh, &settings, &output_dir)
     });
     log::info!("Back-end projections generation complete!");
     Ok(())
 }
 
 #[pyfunction]
-fn generate_point_cloud<'py>(
+fn project_to_point_cloud_by_sampling<'py>(
     py: Python<'py>,
     obj_path: &str,
     texture_path: Option<&str>,
@@ -301,7 +303,8 @@ fn generate_point_cloud<'py>(
         point_cloud_density_factor,
     };
     // Call the backend to generate the point cloud
-    let (points, colors) = py.allow_threads(|| projector::mesh_to_point_cloud(&mesh, &settings));
+    let (points, colors) =
+        py.allow_threads(|| projector::project_to_point_cloud_by_sampling(&mesh, &settings));
     log::info!(
         "Back-end point cloud generation complete! Generated {} points",
         points.shape()[0]
@@ -315,9 +318,9 @@ fn generate_point_cloud<'py>(
 
 #[pymodule]
 fn mesh_projector(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(generate_cube_projections, m)?)?;
-    m.add_function(wrap_pyfunction!(generate_projections, m)?)?;
-    m.add_function(wrap_pyfunction!(generate_projections_rotation, m)?)?;
-    m.add_function(wrap_pyfunction!(generate_point_cloud, m)?)?;
+    m.add_function(wrap_pyfunction!(project_to_image_on_bounding_cube, m)?)?;
+    m.add_function(wrap_pyfunction!(project_to_image_by_rotation, m)?)?;
+    m.add_function(wrap_pyfunction!(project_to_image_by_rotation_to_file, m)?)?;
+    m.add_function(wrap_pyfunction!(project_to_point_cloud_by_sampling, m)?)?;
     Ok(())
 }

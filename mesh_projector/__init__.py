@@ -1,9 +1,11 @@
 from .mesh_projector import (
-    generate_projections_rotation as _internal_generate_projections,
+    project_to_image_by_rotation as _internal_generate_projections,
 )
-from .mesh_projector import generate_point_cloud as _internal_generate_point_cloud
 from .mesh_projector import (
-    generate_cube_projections as _internal_generate_cube_projections,
+    project_to_point_cloud_by_sampling as _internal_generate_point_cloud,
+)
+from .mesh_projector import (
+    project_to_image_on_bounding_cube as _internal_generate_cube_projections,
 )
 
 
