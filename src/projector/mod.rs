@@ -15,7 +15,9 @@ use crate::types::mesh::Mesh;
 use crate::types::orientation::Orientation;
 use constants::NUM_CHANNELS;
 use ndarray::Array2;
-use rayon::prelude::*;
+use rayon::iter::IndexedParallelIterator;
+use rayon::iter::IntoParallelRefIterator;
+use rayon::iter::ParallelIterator;
 use std::path::Path;
 
 /// Computes cube projections for the given mesh and settings.

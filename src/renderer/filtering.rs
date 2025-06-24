@@ -7,7 +7,8 @@ use crate::projector::constants::NUM_CHANNELS;
 use crate::renderer::buffers::ImageBuffers;
 use crate::renderer::constants::{BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR};
 use nd::Array2;
-use rayon::prelude::*;
+use rayon::iter::IntoParallelIterator;
+use rayon::iter::ParallelIterator;
 use std::f32;
 
 /// Finds outlier pixels by comparing depth to neighbors.
