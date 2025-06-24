@@ -4,7 +4,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.12.9-blue.svg)](https://www.python.org/)
 [![Rust Version](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org/)
 
-A Python library for generating 2D projections and point clouds from 3D mesh files.
+A Rust-based Python library for generating 2D projections and point clouds from 3D mesh files.
 
 ## Core Features
 
