@@ -80,7 +80,6 @@ pub fn extract_triangle_surface(
     let submesh = &mesh.submeshes[submesh_index];
     // Calculate global triangle offset for UV lookup
     let global_triangle_offset: usize = (0..submesh_index)
-        .into_iter()
         .map(|i| mesh.submeshes[i].geometry.triangles.nrows())
         .sum();
     let uv_triangle_id: usize = global_triangle_offset + triangle_index;
