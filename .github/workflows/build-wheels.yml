@@ -1,0 +1,92 @@
+# .github/workflows/build_wheels.yml
+
+name: Build and Publish Python Wheels
+
+on:
+  # Run on pushes to the main branch for build testing
+  push:
+    branches:
+      - main
+    # Trigger publishing ONLY when a tag starting with 'v' is pushed
+    tags:
+      - 'v*'
+
+  # Run on Pull Requests targeting the main branch for build testing
+  pull_request:
+    branches:
+      - main
+
+  # Allow manual runs via the GitHub Actions UI
+  workflow_dispatch:
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Install Rust toolchain on the runner host (for macOS/Windows)
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install cibuildwheel
+        run: pip install cibuildwheel
+
+      - name: Build wheels using cibuildwheel
+        env:
+          # === cibuildwheel configuration ===
+          CIBW_BUILD: cp310-* cp311-* cp312-*
+          CIBW_SKIP: "*-musllinux_* *_i686"
+
+          # 1. Install Rust inside the Linux container before building
+          # (We removed the '&& . "$HOME/.cargo/env"' part as it wasn't effective)
+          CIBW_BEFORE_BUILD_LINUX: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
+
+          # 2. Set the PATH for the build environment on Linux
+          CIBW_ENVIRONMENT_LINUX: 'PATH=$HOME/.cargo/bin:$PATH'
+
+        # Run cibuildwheel
+        run: cibuildwheel --output-dir wheelhouse
+
+      - name: Upload wheels artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: ./wheelhouse/*.whl
+
+  publish_wheels:
+    name: Publish wheels to PyPI
+    needs: build_wheels
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all wheels artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Install Twine
+        run: pip install --upgrade twine packaging>=24.2
+
+      - name: Publish distribution to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+        run: python -m twine upload --skip-existing dist/*.whl
