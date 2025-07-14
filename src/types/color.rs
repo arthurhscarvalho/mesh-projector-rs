@@ -41,6 +41,20 @@ pub fn srgb_byte_to_linear(b: u8) -> f32 {
     LINEAR_LUT[b as usize]
 }
 
+/// Fast conversion from sRGB float [0,1] to linear [0,1] using the LUT.
+#[inline]
+fn srgb_to_linear(srgb: f32) -> f32 {
+    let idx = (srgb * 255.0).round().clamp(0.0, 255.0) as usize;
+    LINEAR_LUT[idx]
+}
+
+/// Fast conversion from linear float [0,1] to sRGB float [0,1] using the LUT.
+#[inline]
+fn linear_to_srgb(linear: f32) -> f32 {
+    let idx = (linear * 255.0).round().clamp(0.0, 255.0) as usize;
+    SRGB_LUT[idx] as f32 / 255.0
+}
+
 /// Represents a color with three components (e.g., R, G, B).
 ///
 /// The color values are stored as `f32` and are typically expected to be in a normalized range
@@ -59,7 +73,7 @@ impl Color {
     /// Creates a new `Color` from three f32 components, in sRGB color space.
     /// The saved color is in linear color space.
     pub fn from_srgb(r: f32, g: f32, b: f32) -> Self {
-        Color([r.powf(GAMMA), g.powf(GAMMA), b.powf(GAMMA)])
+        Color([srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b)])
     }
 
     /// Creates a black color (0, 0, 0).
@@ -102,36 +116,21 @@ impl Color {
         self.0[2]
     }
 
-    /// Sets the red component.
-    pub fn set_r(&mut self, r: f32) {
-        self.0[0] = r;
-    }
-
-    /// Sets the green component.
-    pub fn set_g(&mut self, g: f32) {
-        self.0[1] = g;
-    }
-
-    /// Sets the blue component.
-    pub fn set_b(&mut self, b: f32) {
-        self.0[2] = b;
-    }
-
     /// Converts the color from sRGB to linear color space.
     pub fn to_linear(&self) -> Color {
         Color([
-            self.r().powf(GAMMA),
-            self.g().powf(GAMMA),
-            self.b().powf(GAMMA),
+            srgb_to_linear(self.r()),
+            srgb_to_linear(self.g()),
+            srgb_to_linear(self.b()),
         ])
     }
 
     /// Converts the color from linear to sRGB color space.
     pub fn to_srgb(&self) -> Color {
         Color([
-            self.r().powf(INVERSE_GAMMA),
-            self.g().powf(INVERSE_GAMMA),
-            self.b().powf(INVERSE_GAMMA),
+            linear_to_srgb(self.r()),
+            linear_to_srgb(self.g()),
+            linear_to_srgb(self.b()),
         ])
     }
 
@@ -151,14 +150,6 @@ impl Color {
             self.g().clamp(min, max),
             self.b().clamp(min, max),
         ])
-    }
-
-    /// Legacy helper: Converts the color from linear to sRGB space and returns a Color whose
-    /// components are in the 0–255 *floating-point* range (to match previous API). Internally
-    /// this uses the same fast LUT, so it is inexpensive.
-    pub fn to_srgb_denormalized(&self) -> Color {
-        let [r, g, b] = self.to_srgb8();
-        Color([r as f32, g as f32, b as f32])
     }
 }
 
