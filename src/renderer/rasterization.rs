@@ -395,8 +395,8 @@ pub fn rasterize_triangle_to_point_cloud(
         n as usize
     };
     // Sample points across the triangle surface
-    for i in 0..n_subdiv {
-        for j in 0..(n_subdiv - i) {
+    for i in 0..=n_subdiv {
+        for j in 0..=(n_subdiv - i) {
             // Calculate barycentric coordinates
             let u = i as f32 / n_subdiv as f32;
             let v = j as f32 / n_subdiv as f32;
