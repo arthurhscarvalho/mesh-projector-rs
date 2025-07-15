@@ -371,14 +371,32 @@ pub fn rasterize_triangle_to_point_cloud(
     let triangle_surface = extract_triangle_surface(&mesh, submesh_index, triangle_index);
     // Calculate triangle area
     let triangle_area = calculate_triangle_area(&triangle_surface.vertices_ws);
-    // Calculate number of subdivisions based on triangle area and density
-    // We ensure that the number of subdivisions is at least 2 (common practice)
-    let n_subdiv = (triangle_area.sqrt() * settings.point_cloud_density_factor)
-        .round()
-        .max(1.0) as usize;
+    // Triangular number formula: T(n) = n * (n + 1) / 2
+    // We want at least s points, such that T(n) ≥ s,
+    // where s is the target number of points.
+    // Consequentially, n * (n + 1) / 2 ≥ s
+    // Solving for n, we get:
+    // n^2 + n - 2s ≥ 0,
+    // We want at least s points, so we need the smallest integer n that
+    // satisfies this inequality. So we solve the quadratic equation:
+    // n^2 + n - 2s = 0
+    // n = (-1 ± sqrt(1 + 8s)) / 2
+    // Since we want at least s points, we take the positive root
+    // and take the ceiling of the result.
+    // n = ceil((-1 + sqrt(1 + 8s)) / 2)
+    let n_subdiv = {
+        let s = (triangle_area * settings.point_cloud_density_factor)
+            .ceil()
+            .max(1.0);
+        let mut n = ((-1.0 + (1.0 + 8.0 * s).sqrt()) * 0.5).ceil();
+        while n * (n + 1.0) / 2.0 < s {
+            n += 1.0;
+        }
+        n as usize
+    };
     // Sample points across the triangle surface
-    for i in 0..=n_subdiv {
-        for j in 0..=(n_subdiv - i) {
+    for i in 0..n_subdiv {
+        for j in 0..(n_subdiv - i) {
             // Calculate barycentric coordinates
             let u = i as f32 / n_subdiv as f32;
             let v = j as f32 / n_subdiv as f32;
