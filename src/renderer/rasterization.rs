@@ -386,7 +386,7 @@ pub fn rasterize_triangle_to_point_cloud(
     // n = ceil((-1 + sqrt(1 + 8s)) / 2)
     let n_subdiv = {
         let s = (triangle_area * settings.point_cloud_density_factor)
-            .ceil()
+            .round()
             .max(1.0);
         let mut n = ((-1.0 + (1.0 + 8.0 * s).sqrt()) * 0.5).ceil();
         while n * (n + 1.0) / 2.0 < s {
@@ -395,13 +395,13 @@ pub fn rasterize_triangle_to_point_cloud(
         n as usize
     };
     // Sample points across the triangle surface
-    for i in 0..=n_subdiv {
-        for j in 0..=(n_subdiv - i) {
+    for i in 0..n_subdiv {
+        for j in 0..(n_subdiv - i) {
             // Calculate barycentric coordinates
             let u = i as f32 / n_subdiv as f32;
             let v = j as f32 / n_subdiv as f32;
             let w = 1.0 - u - v;
-            if u < 0.0 || v < 0.0 || w < 0.0 {
+            if !is_inside_triangle(u, v, w) {
                 continue;
             }
             // Use the shared interpolation function
