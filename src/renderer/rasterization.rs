@@ -414,7 +414,7 @@ pub fn rasterize_triangle_to_point_cloud(
     let n_subdiv = {
         let s = (triangle_area * settings.point_cloud_density_factor)
             .round()
-            .max(3.0);
+            .max(1.0);
         let n = ((-3.0 + (9.0 + 8.0 * s).sqrt()) * 0.5).ceil();
         n as usize
     };
