@@ -5,7 +5,9 @@
 use crate::projector::config::PointCloudConfig;
 use crate::renderer::buffers::{ImageBuffers, PointCloudBuffers};
 use crate::renderer::config::ViewConfig;
-use crate::renderer::constants::DEFAULT_MISSING_TEXTURE_COLOR;
+use crate::renderer::constants::{
+    DEFAULT_MISSING_TEXTURE_COLOR, TRIANGLE_AREA_DEGENERACY_THRESHOLD,
+};
 use crate::renderer::geometry::{
     barycentric, calculate_bounding_box, calculate_triangle_area, is_inside_triangle,
     is_triangle_visible,
@@ -71,11 +73,12 @@ pub fn extract_triangle_vertices_ws(submesh: &SubMesh, triangle_index: usize) ->
 }
 
 /// Extracts triangle data from mesh for processing
+/// Returns an error if the triangle is degenerate (has zero or near-zero area)
 pub fn extract_triangle_surface(
     mesh: &Mesh,
     submesh_index: usize,
     triangle_index: usize,
-) -> TriangleSurface {
+) -> Result<TriangleSurface, ()> {
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
     // Calculate global triangle offset for UV lookup
@@ -98,6 +101,16 @@ pub fn extract_triangle_surface(
     let i2 = &tri_indices[2];
     // Get world-space positions
     let vertices_ws = extract_triangle_vertices_ws(submesh, triangle_index);
+    // Check for degenerate triangle (zero or near-zero area)
+    let triangle_area = calculate_triangle_area(&vertices_ws);
+    if triangle_area < TRIANGLE_AREA_DEGENERACY_THRESHOLD {
+        log::warn!(
+            "Degenerate triangle found at submesh {}, triangle {}, skipping",
+            submesh_index,
+            triangle_index
+        );
+        return Err(());
+    }
     // Get normals (use vertex normals if available, otherwise face normal)
     let mut normals_ws = [face_normal_ws; 3];
     if let Some(v_normals_ws) = &submesh.geometry.vertex_normals {
@@ -146,13 +159,13 @@ pub fn extract_triangle_surface(
         }
     }
     // Return triangle data
-    TriangleSurface {
+    Ok(TriangleSurface {
         vertices_ws,
         normals_ws,
         uvs,
         colors,
         face_normal_ws,
-    }
+    })
 }
 
 #[inline]
@@ -247,7 +260,10 @@ pub fn rasterize_triangle_to_images(
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
     // Extract triangle data
-    let triangle_surface = extract_triangle_surface(mesh, submesh_index, triangle_index);
+    let triangle_surface = match extract_triangle_surface(mesh, submesh_index, triangle_index) {
+        Ok(surface) => surface,
+        Err(()) => return, // Skip degenerate triangles
+    };
     // Back-face Culling (using world-space face normal and world-space view direction)
     if !is_triangle_visible(triangle_surface.face_normal_ws, view_config.view_direction) {
         return;
@@ -368,35 +384,43 @@ pub fn rasterize_triangle_to_point_cloud(
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
     // Extract triangle data
-    let triangle_surface = extract_triangle_surface(&mesh, submesh_index, triangle_index);
+    let triangle_surface = match extract_triangle_surface(&mesh, submesh_index, triangle_index) {
+        Ok(surface) => surface,
+        Err(()) => return, // Skip degenerate triangles
+    };
     // Calculate triangle area
     let triangle_area = calculate_triangle_area(&triangle_surface.vertices_ws);
-    // Triangular number formula: T(n) = n * (n + 1) / 2
+    // Triangular number formula (inclusive): T(n) = (n + 1) * (n + 2) / 2
     // We want at least s points, such that T(n) ≥ s,
     // where s is the target number of points.
-    // Consequentially, n * (n + 1) / 2 ≥ s
-    // Solving for n, we get:
-    // n^2 + n - 2s ≥ 0,
-    // We want at least s points, so we need the smallest integer n that
-    // satisfies this inequality. So we solve the quadratic equation:
-    // n^2 + n - 2s = 0
-    // n = (-1 ± sqrt(1 + 8s)) / 2
-    // Since we want at least s points, we take the positive root
-    // and take the ceiling of the result.
-    // n = ceil((-1 + sqrt(1 + 8s)) / 2)
+    //
+    // So:
+    //      (n + 1)(n + 2) / 2 ≥ s
+    //
+    // Multiply both sides by 2:
+    //      (n + 1)(n + 2) ≥ 2s
+    //
+    // Expand:
+    //      n^2 + 3n + 2 ≥ 2s
+    //
+    // Solve the quadratic inequality:
+    //      n^2 + 3n + (2 - 2s) ≥ 0
+    //
+    // Solve n from the quadratic equation:
+    //      n = (-3 ± sqrt(9 + 8s)) / 2
+    //
+    // We take the positive root and round up:
+    //      n = ceil((-3 + sqrt(9 + 8s)) / 2)
     let n_subdiv = {
         let s = (triangle_area * settings.point_cloud_density_factor)
             .round()
-            .max(1.0);
-        let mut n = ((-1.0 + (1.0 + 8.0 * s).sqrt()) * 0.5).ceil();
-        while n * (n + 1.0) / 2.0 < s {
-            n += 1.0;
-        }
+            .max(3.0);
+        let n = ((-3.0 + (9.0 + 8.0 * s).sqrt()) * 0.5).ceil();
         n as usize
     };
-    // Sample points across the triangle surface
-    for i in 0..n_subdiv {
-        for j in 0..(n_subdiv - i) {
+    // Sample points across the triangle surface using inclusive barycentric grid
+    for i in 0..=n_subdiv {
+        for j in 0..=(n_subdiv - i) {
             // Calculate barycentric coordinates
             let u = i as f32 / n_subdiv as f32;
             let v = j as f32 / n_subdiv as f32;
