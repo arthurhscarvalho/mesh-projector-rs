@@ -396,7 +396,7 @@ pub fn rasterize_triangle_to_point_cloud(
                 &submesh.material,
                 &mesh.mode,
             )
-            .to_srgb_denormalized();
+            .to_srgb();
             // Add point and color to the flatten arrays
             buffers.add_point(interpolated_point.position_ws, final_color);
         }

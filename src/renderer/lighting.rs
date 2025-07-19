@@ -5,7 +5,6 @@
 //! components, as well as transformations between world and view space.
 
 use crate::renderer::config::{LightSource, ViewConfig};
-use crate::renderer::constants::GLOBAL_AMBIENT;
 use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
 use crate::types::mesh::{MeshMaterial, MeshMode};
@@ -17,6 +16,9 @@ pub fn calculate_lighting(
     material: &MeshMaterial, // Material properties of the surface
     mesh_mode: &MeshMode,    // Current rendering mode
 ) -> Color {
+    let global_ambient: Color = Color::from_srgb(0.3, 0.3, 0.3);
+    let global_diffuse: Color = Color::from_srgb(0.7, 0.7, 0.7);
+    let global_specular: Color = Color::from_srgb(0.0, 0.0, 0.0);
     // Extract data from interpolated attributes
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;
@@ -84,7 +86,9 @@ pub fn calculate_lighting(
         }
         1 => {
             // Ambient component using global ambient and material ambient
-            let ambient_comp = GLOBAL_AMBIENT * linear_ka;
+            // Ambient term now takes the surface base colour (texel) into account so that
+            // ambient light is tinted appropriately.
+            let ambient_comp = base_color_linear * linear_ka * global_ambient;
             // Diffuse component
             let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
             let diffuse_comp = base_color_linear * linear_kd * light_color * dot_nl;
@@ -92,11 +96,13 @@ pub fn calculate_lighting(
             ambient_comp + diffuse_comp
         }
         _ => {
-            // Ambient component using global ambient and material ambient
-            let ambient_comp = GLOBAL_AMBIENT * linear_ka;
+            // Ambient term includes the base colour (texel) so that fully lit areas retain
+            // their texture hue even when only ambient illumination is present.
+            let ambient_comp = base_color_linear * linear_ka * global_ambient;
             // Diffuse component
             let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
-            let diffuse_comp = base_color_linear * linear_kd * light_color * dot_nl;
+            let diffuse_comp =
+                base_color_linear * linear_kd * light_color * dot_nl * global_diffuse;
             // Specular component (Blinn-Phong)
             let mut halfway_dir = light_dir_vs + view_dir_vs;
             halfway_dir.normalize();
@@ -106,7 +112,7 @@ pub fn calculate_lighting(
             } else {
                 0.0
             };
-            let specular_comp = linear_ks * light_color * specular_intensity;
+            let specular_comp = linear_ks * light_color * specular_intensity * global_specular;
             // Full model: Ambient + Diffuse + Specular (illum >= 2)
             ambient_comp + diffuse_comp + specular_comp
         }
