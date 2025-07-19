@@ -373,6 +373,37 @@ pub fn rasterize_triangle_to_images(
     }
 }
 
+#[inline]
+fn process_point(
+    barycentric_coords: (f32, f32, f32),
+    triangle_surface: &TriangleSurface,
+    mesh: &Mesh,
+    view_config: &ViewConfig,
+    submesh: &SubMesh,
+    buffers: &mut PointCloudBuffers,
+) {
+    if !is_inside_triangle(
+        barycentric_coords.0,
+        barycentric_coords.1,
+        barycentric_coords.2,
+    ) {
+        return;
+    }
+    // Use the shared interpolation function
+    let interpolated_point =
+        interpolate_triangle_surface(&triangle_surface, barycentric_coords, &mesh);
+    // Calculate final color using the shared lighting function
+    let final_color = calculate_lighting(
+        &interpolated_point,
+        &view_config,
+        &submesh.material,
+        &mesh.mode,
+    )
+    .to_srgb();
+    // Add point and color to the flatten arrays
+    buffers.add_point(interpolated_point.position_ws, final_color);
+}
+
 pub fn rasterize_triangle_to_point_cloud(
     mesh: &Mesh,
     settings: &PointCloudConfig,
@@ -412,12 +443,26 @@ pub fn rasterize_triangle_to_point_cloud(
     // We take the positive root and round up:
     //      n = ceil((-3 + sqrt(9 + 8s)) / 2)
     let n_subdiv = {
-        let s = (triangle_area * settings.point_cloud_density_factor)
-            .round()
-            .max(1.0);
+        let s = (triangle_area * settings.point_cloud_density_factor).round();
         let n = ((-3.0 + (9.0 + 8.0 * s).sqrt()) * 0.5).ceil();
-        n as usize
+        if n < 1.0 {
+            0
+        } else {
+            n as usize
+        }
     };
+    if n_subdiv == 0 {
+        // If the triangle is too small, sample a single point at the center
+        process_point(
+            (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
+            &triangle_surface,
+            &mesh,
+            &view_config,
+            &submesh,
+            buffers,
+        );
+        return;
+    }
     // Sample points across the triangle surface using inclusive barycentric grid
     for i in 0..=n_subdiv {
         for j in 0..=(n_subdiv - i) {
@@ -425,22 +470,14 @@ pub fn rasterize_triangle_to_point_cloud(
             let u = i as f32 / n_subdiv as f32;
             let v = j as f32 / n_subdiv as f32;
             let w = 1.0 - u - v;
-            if !is_inside_triangle(u, v, w) {
-                continue;
-            }
-            // Use the shared interpolation function
-            let interpolated_point =
-                interpolate_triangle_surface(&triangle_surface, (u, v, w), &mesh);
-            // Calculate final color using the shared lighting function
-            let final_color = calculate_lighting(
-                &interpolated_point,
+            process_point(
+                (u, v, w),
+                &triangle_surface,
+                &mesh,
                 &view_config,
-                &submesh.material,
-                &mesh.mode,
-            )
-            .to_srgb();
-            // Add point and color to the flatten arrays
-            buffers.add_point(interpolated_point.position_ws, final_color);
+                &submesh,
+                buffers,
+            );
         }
     }
 }
