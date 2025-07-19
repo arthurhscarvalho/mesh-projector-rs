@@ -16,9 +16,9 @@ pub fn calculate_lighting(
     material: &MeshMaterial, // Material properties of the surface
     mesh_mode: &MeshMode,    // Current rendering mode
 ) -> Color {
-    let global_ambient: Color = Color::from_srgb(0.3, 0.3, 0.3);
-    let global_diffuse: Color = Color::from_srgb(0.7, 0.7, 0.7);
-    let global_specular: Color = Color::from_srgb(0.0, 0.0, 0.0);
+    let global_ambient: Color = Color::from_srgb(0.5, 0.5, 0.5);
+    let global_diffuse: Color = Color::from_srgb(0.5, 0.5, 0.5);
+    let global_specular: Color = Color::from_srgb(0.5, 0.5, 0.5);
     // Extract data from interpolated attributes
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;

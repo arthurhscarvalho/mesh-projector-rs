@@ -69,9 +69,9 @@ impl PointCloudBuffers {
         self.points.push(xyz.x());
         self.points.push(xyz.y());
         self.points.push(xyz.z());
-        self.colors.push(color.r() as u8);
-        self.colors.push(color.g() as u8);
-        self.colors.push(color.b() as u8);
+        self.colors.push((color.r() * 255.0) as u8);
+        self.colors.push((color.g() * 255.0) as u8);
+        self.colors.push((color.b() * 255.0) as u8);
     }
 
     pub fn to_array(self) -> (Array2<f32>, Array2<u8>) {
