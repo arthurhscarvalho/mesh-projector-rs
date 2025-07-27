@@ -421,30 +421,34 @@ pub fn rasterize_triangle_to_point_cloud(
     };
     // Calculate triangle area
     let triangle_area = calculate_triangle_area(&triangle_surface.vertices_ws);
-    // Compute subdivision level n as before
-    let n_subdiv = {
+    // Triangular number formula (inclusive): T(n) = (n + 1) * (n + 2) / 2
+    // We want at least s points, such that T(n) ≥ s,
+    // where s is the target number of points.
+    //
+    // So:
+    //      (n + 1)(n + 2) / 2 ≥ s
+    //
+    // Multiply both sides by 2:
+    //      (n + 1)(n + 2) ≥ 2s
+    //
+    // Expand:
+    //      n^2 + 3n + 2 ≥ 2s
+    //
+    // Solve the quadratic inequality:
+    //      n^2 + 3n + (2 - 2s) ≥ 0
+    //
+    // Solve n from the quadratic equation:
+    //      n = (-3 ± sqrt(9 + 8s)) / 2
+    //
+    // We take the positive root and round up:
+    //      n = ceil((-3 + sqrt(9 + 8s)) / 2)
+    // Compute subdivision level where n is a triangular number
+    let n = {
         let s = (triangle_area * settings.point_cloud_density_factor).round();
         let n = ((-3.0 + (9.0 + 8.0 * s).sqrt()) * 0.5).ceil();
-        if n < 1.0 {
-            0
-        } else {
-            n as usize
-        }
+        n as usize
     };
-    if n_subdiv == 0 {
-        // If the triangle is too small, sample a single point at the centroid
-        process_point(
-            (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
-            &triangle_surface,
-            &mesh,
-            &view_config,
-            &submesh,
-            buffers,
-        );
-        return;
-    }
     // Deterministic centroid sampling of subtriangles
-    let n = n_subdiv;
     for i in 0..=n {
         for j in 0..=(n - i) {
             let k = n - i - j;
