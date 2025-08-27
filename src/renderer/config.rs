@@ -1,15 +1,17 @@
 use crate::types::coordinate::Coordinate;
 use nd::Array2;
 
-#[allow(dead_code)] // Temporary while we don't parametrize the light source
+#[allow(dead_code)]
 /// Defines the source of the light.
 pub enum LightSource {
-    /// Directional light, the light is fixed in world coordinates.
-    Directional(Coordinate),
-    /// Ambient light, the mesh is always lit by ambient light.
+    /// Ambient light, constant across the mesh.
     Ambient,
-    /// Headlight camera, the light originates from the camera.
-    Camera,
+    /// Directional light fixed in view coordinates.
+    Directional(Coordinate),
+    /// Headlight attached to the camera.
+    Headlight,
+    /// Point light (omnidirectional) fixed in world coordinates.
+    Point(Coordinate),
 }
 
 /// Encapsulates parameters for a single orthographic projection view (camera settings).

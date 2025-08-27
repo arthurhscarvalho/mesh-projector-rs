@@ -7,7 +7,51 @@
 use crate::renderer::config::{LightSource, ViewConfig};
 use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
+use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{MeshMaterial, MeshMode};
+
+fn calculate_light_direction(view_config: &ViewConfig, normal_n_vs: Coordinate) -> Coordinate {
+    let light_source = &view_config.light_source;
+    let view_dir_ws = view_config.view_direction;
+    let transformation_matrix = &view_config.transformation_matrix;
+    let light_dir_vs = match light_source {
+        LightSource::Ambient => {
+            // Ambient lighting: no specific light direction. We emulate uniform illumination
+            // by treating the light as coming from all directions equally. To achieve this,
+            // we set the light direction equal to the surface normal (so the diffuse term
+            // evaluates to 1) and use white light. This effectively disables directional
+            // shading while still preserving material interactions (Ka/Kd/Ks).
+            normal_n_vs
+        }
+        LightSource::Directional(view_light_dir) => {
+            let mut dir_vs = *view_light_dir;
+            dir_vs.normalize();
+            dir_vs
+        }
+        LightSource::Headlight => {
+            // For orthographic projection with camera lighting, the light direction should
+            // match the view direction in world space (transformed to view space)
+            // This ensures light comes from the projection plane for any view angle
+            let mut dir_ws = view_dir_ws;
+            dir_ws.normalize();
+            // Transform the world-space view direction to view space
+            let mut dir_vs = dir_ws.to_view_space_as_vector(transformation_matrix);
+            dir_vs.normalize();
+            // Negate to make light point toward surface from camera
+            dir_vs = -dir_vs;
+            // Light direction in view space, and white light
+            dir_vs
+        }
+        LightSource::Point(world_light_pos) => {
+            // Treat world_light_pos as a direction vector in world space and transform it
+            let mut dir_vs = world_light_pos.to_view_space_as_vector(transformation_matrix);
+            dir_vs.normalize();
+            // Light direction in view space, and white light
+            dir_vs
+        }
+    };
+    light_dir_vs
+}
 
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
 pub fn calculate_lighting(
@@ -23,10 +67,6 @@ pub fn calculate_lighting(
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;
     let vertex_position_ws = interpolated_point.position_ws;
-    // Extract data from view config
-    let transformation_matrix = &view_config.transformation_matrix;
-    let light_source = &view_config.light_source;
-    let view_dir_ws = view_config.view_direction;
     // For illum model 0, return base color modulated by ambient only
     if material.illum == 0
         && (*mesh_mode == MeshMode::ObjOnly || *mesh_mode == MeshMode::ObjTexture)
@@ -38,43 +78,15 @@ pub fn calculate_lighting(
     let linear_kd = Color::from(material.kd);
     let linear_ks = Color::from(material.ks);
     // Transform normal and vertex position to view space
+    let transformation_matrix = &view_config.transformation_matrix;
     let normal_vs = normal_ws.to_view_space_as_vector(transformation_matrix);
     let vertex_position_vs = vertex_position_ws.to_view_space_as_point(transformation_matrix);
     // Normalize the normal in view space
     let mut normal_n_vs = normal_vs;
     normal_n_vs.normalize();
     // Determine light direction and light color in view-space
-    let (light_dir_vs, light_color) = match light_source {
-        LightSource::Directional(world_light_pos) => {
-            // Treat world_light_pos as a direction vector in world space and transform it
-            let mut dir_vs = world_light_pos.to_view_space_as_vector(transformation_matrix);
-            dir_vs.normalize();
-            // Light direction in view space, and white light
-            (dir_vs, Color::white())
-        }
-        LightSource::Camera => {
-            // For orthographic projection with camera lighting, the light direction should
-            // match the view direction in world space (transformed to view space)
-            // This ensures light comes from the projection plane for any view angle
-            let mut dir_ws = view_dir_ws; // Use the passed view direction
-            dir_ws.normalize();
-            // Transform the world-space view direction to view space
-            let mut dir_vs = dir_ws.to_view_space_as_vector(transformation_matrix);
-            dir_vs.normalize();
-            // Negate to make light point toward surface from camera
-            dir_vs = -dir_vs;
-            // Light direction in view space, and white light
-            (dir_vs, Color::white())
-        }
-        LightSource::Ambient => {
-            // Ambient lighting: no specific light direction. We emulate uniform illumination
-            // by treating the light as coming from all directions equally. To achieve this,
-            // we set the light direction equal to the surface normal (so the diffuse term
-            // evaluates to 1) and use white light. This effectively disables directional
-            // shading while still preserving material interactions (Ka/Kd/Ks).
-            (normal_n_vs, Color::white())
-        }
-    };
+    let light_color = Color::white();
+    let light_dir_vs = calculate_light_direction(view_config, normal_n_vs);
     // View direction in view space is from surface point to camera (origin in VS)
     let mut view_dir_vs = -vertex_position_vs;
     view_dir_vs.normalize();

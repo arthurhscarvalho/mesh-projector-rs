@@ -74,7 +74,7 @@ pub fn project_to_image_on_bounding_cube(mesh: &Mesh, settings: &ProjectionConfi
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: LightSource::Camera,
+            light_source: LightSource::Ambient,
         });
     }
     // Compute projections for each view in parallel
@@ -151,7 +151,7 @@ pub fn project_to_image_by_rotation(mesh: &Mesh, settings: &ProjectionConfig) ->
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: LightSource::Camera,
+            light_source: LightSource::Headlight,
         });
     }
     // Compute projections for each view in parallel
@@ -225,7 +225,7 @@ pub fn project_to_image_by_rotation_to_file(
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: LightSource::Camera,
+            light_source: LightSource::Headlight,
         });
     }
     // Compute projections for each view in parallel

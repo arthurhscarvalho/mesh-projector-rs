@@ -41,7 +41,7 @@ pub fn discretize_mesh_to_point_cloud(
         rotation_matrix[[2, 2]],
     );
     // Define the light source
-    let light_source = LightSource::Ambient;
+    let light_source = LightSource::Directional(Coordinate::new(0.0, -1.0, 0.0));
     // Create a view config for lighting calculations
     let view_config = ViewConfig {
         view_direction,
