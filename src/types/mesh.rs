@@ -53,18 +53,20 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
-pub struct SubMesh {
+pub struct SubMesh<'a> {
     /// Geometry of the submesh.
     pub geometry: MeshGeometry,
     /// Material of the submesh.
     pub material: MeshMaterial,
+    /// Texture of the submesh.
+    pub texture: Option<&'a MeshTexture>,
 }
 
-pub struct Mesh {
-    // Submeshes: each submesh has its own geometry, texture, material, and mode
-    pub submeshes: Vec<SubMesh>,
-    // Texture: shared texture for all submeshes
-    pub texture: MeshTexture,
+pub struct Mesh<'a> {
+    // Submeshes: each submesh has its own geometry, texture, and material
+    pub submeshes: Vec<SubMesh<'a>>,
+    // Textures: shared textures for all submeshes
+    pub textures: Option<Vec<&'a MeshTexture>>,
     // Rendering mode
     pub mode: MeshMode,
 }

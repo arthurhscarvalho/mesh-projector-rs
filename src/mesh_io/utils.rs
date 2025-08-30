@@ -264,107 +264,6 @@ fn validate_texture_path(texture_path: &str) -> MeshResult<()> {
     })
 }
 
-/// Aggregate vertex data from multiple models for shared texture processing
-pub fn aggregate_model_data(models: &[tobj::Model]) -> (Vec<f32>, Vec<f32>, usize) {
-    // First pass: compute total lengths so we can reserve exact capacity.
-    let total_positions_len: usize = models.iter().map(|m| m.mesh.positions.len()).sum();
-    let total_vertex_count: usize = models.iter().map(|m| m.mesh.positions.len() / 3).sum();
-
-    let mut all_positions = Vec::with_capacity(total_positions_len);
-    // Each vertex can contribute up to 2 texcoords (u,v)
-    let mut all_texcoords = Vec::with_capacity(total_vertex_count * 2);
-
-    let mut processed_vertex_count = 0; // we will re-compute below for return value
-
-    for (i, model) in models.iter().enumerate() {
-        log::info!(
-            "Model {}: '{}' - positions: {}, texcoords: {}, texcoord_indices: {}, indices: {}",
-            i,
-            model.name,
-            model.mesh.positions.len(),
-            model.mesh.texcoords.len(),
-            model.mesh.texcoord_indices.len(),
-            model.mesh.indices.len()
-        );
-
-        all_positions.extend_from_slice(&model.mesh.positions);
-
-        // Handle texture coordinates based on whether we have separate indices or not
-        if !model.mesh.texcoord_indices.is_empty() {
-            // With separate texture coordinate indices, we need to create a per-vertex texture coordinate array
-            // that matches the vertex order, using the texcoord_indices to map to the actual texcoords
-            let vertex_count = model.mesh.positions.len() / 3;
-
-            // Create a mapping from vertex indices to texture coordinates
-            let mut vertex_texcoords = vec![0.0f32; vertex_count * 2];
-
-            // Check if we have enough texcoord_indices (should match the number of triangle corners)
-            if model.mesh.texcoord_indices.len() == model.mesh.indices.len() {
-                // Map texture coordinates to vertices using both position indices and texcoord indices
-                for (corner_idx, &pos_idx) in model.mesh.indices.iter().enumerate() {
-                    let vertex_idx = pos_idx as usize;
-                    let texcoord_idx = model.mesh.texcoord_indices[corner_idx] as usize;
-
-                    if vertex_idx < vertex_count
-                        && texcoord_idx * 2 + 1 < model.mesh.texcoords.len()
-                    {
-                        // Assign texture coordinates to this vertex (taking the first occurrence)
-                        if vertex_texcoords[vertex_idx * 2] == 0.0
-                            && vertex_texcoords[vertex_idx * 2 + 1] == 0.0
-                        {
-                            vertex_texcoords[vertex_idx * 2] =
-                                model.mesh.texcoords[texcoord_idx * 2];
-                            vertex_texcoords[vertex_idx * 2 + 1] =
-                                model.mesh.texcoords[texcoord_idx * 2 + 1];
-                        }
-                    }
-                }
-                all_texcoords.extend_from_slice(&vertex_texcoords);
-            } else {
-                log::warn!(
-                    "Texcoord indices count ({}) doesn't match triangle indices count ({}) for model '{}', using fallback",
-                    model.mesh.texcoord_indices.len(),
-                    model.mesh.indices.len(),
-                    model.name
-                );
-                // Fallback: use original texcoords or create default ones
-                if model.mesh.texcoords.len() >= vertex_count * 2 {
-                    all_texcoords.extend_from_slice(&model.mesh.texcoords[..vertex_count * 2]);
-                } else {
-                    // Create default UV coordinates for all vertices
-                    for _ in 0..vertex_count {
-                        all_texcoords.push(0.0);
-                        all_texcoords.push(0.0);
-                    }
-                }
-            }
-        } else {
-            // No separate indices, use texture coordinates directly (legacy single-index behavior)
-            let vertex_count = model.mesh.positions.len() / 3;
-            if model.mesh.texcoords.len() >= vertex_count * 2 {
-                all_texcoords.extend_from_slice(&model.mesh.texcoords[..vertex_count * 2]);
-            } else {
-                // Pad with default coordinates if not enough texture coordinates
-                all_texcoords.extend_from_slice(&model.mesh.texcoords);
-                let missing_coords = vertex_count * 2 - model.mesh.texcoords.len();
-                for _ in 0..missing_coords {
-                    all_texcoords.push(0.0);
-                }
-            }
-        }
-
-        processed_vertex_count += model.mesh.positions.len() / 3;
-    }
-
-    log::info!(
-        "Aggregated data - total_vertex_count: {}, all_texcoords.len(): {}",
-        processed_vertex_count,
-        all_texcoords.len()
-    );
-
-    (all_positions, all_texcoords, processed_vertex_count)
-}
-
 /// Create global triangle indices for UV mapping
 pub fn create_global_triangle_indices(models: &[tobj::Model]) -> Vec<usize> {
     let mut global_indices = Vec::new();
@@ -378,11 +277,4 @@ pub fn create_global_triangle_indices(models: &[tobj::Model]) -> Vec<usize> {
     }
 
     global_indices
-}
-
-/// Check if models have separate texture coordinate indices (single_index: false case)
-pub fn has_separate_texcoord_indices(models: &[tobj::Model]) -> bool {
-    models
-        .iter()
-        .any(|model| !model.mesh.texcoord_indices.is_empty())
 }

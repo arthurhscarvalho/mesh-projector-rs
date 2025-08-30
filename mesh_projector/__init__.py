@@ -74,8 +74,7 @@ def read_mesh(
     try:
         internal_mesh = _internal_read_mesh(
             obj_path,
-            texture_path,
-            mtl_path,
+            None,
             precision,
             flip_uv,
             ignore_opacity,

@@ -8,7 +8,7 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::{PointCloudConfig, ProjectionConfig, RotationConfig};
-use crate::types::mesh::Mesh;
+use crate::types::mesh::MeshMode;
 use crate::types::orientation::Orientation;
 use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
@@ -23,7 +23,7 @@ mod types;
 
 #[pyclass]
 pub struct MeshWrapper {
-    pub mesh: Mesh,
+    pub mesh: crate::types::mesh::Mesh<'static>,
     pub precision: u64,
 }
 
@@ -31,8 +31,7 @@ pub struct MeshWrapper {
 fn read_mesh<'py>(
     _py: Python<'py>,
     obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
+    mesh_mode: Option<&str>,
     precision: u64,
     flip_uv: bool,
     ignore_opacity: bool,
@@ -41,10 +40,17 @@ fn read_mesh<'py>(
     // Initialize logger if requested
     logging::atomic_init_logger(verbose)?;
     log::info!("Entering Rust read_mesh backend");
-    let mesh = match mesh_io::load_mesh_auto(
+    // Map optional string to MeshMode if provided
+    let mode_opt: Option<MeshMode> = mesh_mode.and_then(|s| match s.to_lowercase().as_str() {
+        "obj_only" | "obj-only" | "obj" => Some(MeshMode::ObjOnly),
+        "obj_texture" | "obj-texture" | "texture" | "tex" => Some(MeshMode::ObjTexture),
+        "full" => Some(MeshMode::Full),
+        _ => None,
+    });
+
+    let mesh = match mesh_io::read_mesh(
         obj_path,
-        texture_path,
-        mtl_path,
+        mode_opt,
         precision as u32,
         flip_uv,
         ignore_opacity,

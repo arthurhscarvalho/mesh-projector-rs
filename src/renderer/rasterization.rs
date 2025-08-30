@@ -81,11 +81,8 @@ pub fn extract_triangle_surface(
 ) -> Result<TriangleSurface, ()> {
     // Get submesh
     let submesh = &mesh.submeshes[submesh_index];
-    // Calculate global triangle offset for UV lookup
-    let global_triangle_offset: usize = (0..submesh_index)
-        .map(|i| mesh.submeshes[i].geometry.triangles.nrows())
-        .sum();
-    let uv_triangle_id: usize = global_triangle_offset + triangle_index;
+    // Local triangle index for UV lookup within submesh
+    let uv_triangle_id: usize = triangle_index;
     // Get face normal
     let current_face_normal_ws = submesh.geometry.face_normals.row(triangle_index);
     let face_normal_ws = Coordinate::new(
@@ -127,17 +124,19 @@ pub fn extract_triangle_surface(
     // Get UVs
     let mut uvs = [(0.0, 0.0); 3];
     if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
-        if let Some(texture_uvs) = &mesh.texture.triangle_uvs {
-            let uv_idx_base = uv_triangle_id * 3;
-            if uv_idx_base + 2 < texture_uvs.shape()[0] {
-                let uv0_data = texture_uvs.row(uv_idx_base);
-                let uv1_data = texture_uvs.row(uv_idx_base + 1);
-                let uv2_data = texture_uvs.row(uv_idx_base + 2);
-                uvs = [
-                    (uv0_data[0], uv0_data[1]),
-                    (uv1_data[0], uv1_data[1]),
-                    (uv2_data[0], uv2_data[1]),
-                ];
+        if let Some(submesh_texture) = &submesh.texture {
+            if let Some(texture_uvs) = &submesh_texture.triangle_uvs {
+                let uv_idx_base = uv_triangle_id * 3;
+                if uv_idx_base + 2 < texture_uvs.shape()[0] {
+                    let uv0_data = texture_uvs.row(uv_idx_base);
+                    let uv1_data = texture_uvs.row(uv_idx_base + 1);
+                    let uv2_data = texture_uvs.row(uv_idx_base + 2);
+                    uvs = [
+                        (uv0_data[0], uv0_data[1]),
+                        (uv1_data[0], uv1_data[1]),
+                        (uv2_data[0], uv2_data[1]),
+                    ];
+                }
             }
         }
     }
@@ -206,6 +205,7 @@ pub fn interpolate_triangle_surface(
     triangle_surface: &TriangleSurface,
     barycentric_coords: (f32, f32, f32), // (w0, w1, w2)
     mesh: &Mesh,
+    submesh: &SubMesh,
 ) -> TrianglePoint {
     // Interpolate position
     let position_ws = interpolate_coordinates(&barycentric_coords, &triangle_surface.vertices_ws);
@@ -227,15 +227,19 @@ pub fn interpolate_triangle_surface(
             )
         }
         MeshMode::ObjTexture | MeshMode::Full => {
-            if let Some(tex_image) = &mesh.texture.texture {
-                sample_texture_color_bilinear(
-                    uv.0,
-                    uv.1,
-                    tex_image.view(),
-                    mesh.texture.channels,
-                    mesh.texture.height_f32,
-                    mesh.texture.width_f32,
-                )
+            if let Some(submesh_texture) = &submesh.texture {
+                if let Some(tex_image) = &submesh_texture.texture {
+                    sample_texture_color_bilinear(
+                        uv.0,
+                        uv.1,
+                        tex_image.view(),
+                        submesh_texture.channels,
+                        submesh_texture.height_f32,
+                        submesh_texture.width_f32,
+                    )
+                } else {
+                    DEFAULT_MISSING_TEXTURE_COLOR
+                }
             } else {
                 DEFAULT_MISSING_TEXTURE_COLOR
             }
@@ -317,7 +321,7 @@ pub fn rasterize_triangle_to_images(
             }
             // Interpolate triangle
             let interpolated_point =
-                interpolate_triangle_surface(&triangle_surface, (w0, w1, w2), &mesh);
+                interpolate_triangle_surface(&triangle_surface, (w0, w1, w2), &mesh, &submesh);
             // Calculate final color with lighting (linear space)
             let final_color_linear = calculate_lighting(
                 &interpolated_point,
@@ -391,7 +395,7 @@ fn process_point(
     }
     // Use the shared interpolation function
     let interpolated_point =
-        interpolate_triangle_surface(&triangle_surface, barycentric_coords, &mesh);
+        interpolate_triangle_surface(&triangle_surface, barycentric_coords, &mesh, &submesh);
     // Calculate final color using the shared lighting function
     let final_color = calculate_lighting(
         &interpolated_point,

@@ -3,6 +3,17 @@
 use log::{info, warn};
 use ndarray::Array2;
 
+/// Describes a deterministic preprocessing transform applied uniformly
+/// across all submeshes of a model: translate to global center, scale
+/// to target precision cube, then shift to the cube center.
+#[derive(Clone, Copy, Debug)]
+pub struct PreprocessTransform {
+    pub center: [f32; 3],
+    pub scale: f32,
+    pub shift: [f32; 3],
+    pub target_max_val: f32,
+}
+
 /// Compute vertex normals for a mesh by averaging face normals
 pub fn compute_vertex_normals(
     vertices: &Array2<f32>,
@@ -87,6 +98,81 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<
     );
 
     vertices
+}
+
+/// Build a global preprocessing transform from a known bounding box and precision.
+/// This lets us preprocess all submeshes consistently using a single transform.
+pub fn build_transform_from_bounds(
+    min_bound: [f32; 3],
+    max_bound: [f32; 3],
+    precision: u32,
+) -> PreprocessTransform {
+    let bounds = BoundingBox {
+        min: min_bound,
+        max: max_bound,
+    };
+
+    let size = bounds.size();
+
+    // Avoid division by zero per component
+    let mut safe_size = size;
+    for component in 0..3 {
+        if safe_size[component] == 0.0 {
+            safe_size[component] = 1e-9;
+        }
+    }
+
+    let max_dimension = safe_size[0].max(safe_size[1]).max(safe_size[2]);
+    let target_max_val = (1 << precision) as f32 - 1.0;
+    // Safety margin currently 1.0 (no margin)
+    let safety_margin = 1.0;
+    let scale_factor = (target_max_val * safety_margin) / max_dimension;
+
+    let center = bounds.center();
+    let cube_center = target_max_val / 2.0;
+    let shift = [cube_center, cube_center, cube_center];
+
+    info!(
+        "Global transform — center: {:?}, scale: {}, cube_center: {}",
+        center, scale_factor, cube_center
+    );
+
+    PreprocessTransform {
+        center,
+        scale: scale_factor,
+        shift,
+        target_max_val,
+    }
+}
+
+/// Apply a previously built preprocessing transform to a vertex array.
+/// Order: translate by -center, scale uniformly, then shift to cube center.
+pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTransform) {
+    let vertex_count = vertices.shape()[0];
+
+    // Translate by global center
+    for vertex_idx in 0..vertex_count {
+        for component in 0..3 {
+            vertices[[vertex_idx, component]] -= t.center[component];
+        }
+    }
+
+    // Uniform scale
+    for vertex_idx in 0..vertex_count {
+        for component in 0..3 {
+            vertices[[vertex_idx, component]] *= t.scale;
+        }
+    }
+
+    // Shift to cube center
+    for vertex_idx in 0..vertex_count {
+        for component in 0..3 {
+            vertices[[vertex_idx, component]] += t.shift[component];
+        }
+    }
+
+    // Clamp to valid range if needed
+    clamp_vertices_if_needed(vertices, t.target_max_val);
 }
 
 /// Bounding box structure for cleaner code

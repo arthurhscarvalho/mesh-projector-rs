@@ -6,9 +6,7 @@ import mesh_projector as mp
 
 if __name__ == "__main__":
     # Configuration
-    OBJ_PATH = "assets/just_a_girl_C0-L5_deq_tri.obj"
-    TEXTURE_PATH = "assets/just_a_girl_C0-L5_deq_tri_0.png"
-    MTL_PATH = "assets/just_a_girl_C0-L5_deq_tri.mtl"
+    OBJ_PATH = "assets/nier/Untitled.obj"
     PRECISION = 12  # This results in 4096x4096 images
     FLIP_UV = True
     IGNORE_OPACITY = True
@@ -19,8 +17,7 @@ if __name__ == "__main__":
     # and apply the shading based on the mtl file
     mesh = mp.read_mesh(
         obj_path=OBJ_PATH,
-        texture_path=TEXTURE_PATH,
-        mtl_path=MTL_PATH,
+        # mesh_mode="full",
         precision=PRECISION,
         flip_uv=FLIP_UV,
         ignore_opacity=IGNORE_OPACITY,
