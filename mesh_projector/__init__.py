@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Literal
 
 import numpy as np
 
@@ -36,8 +36,7 @@ class Mesh:
 
 def read_mesh(
     obj_path: str,
-    texture_path: Optional[str] = None,
-    mtl_path: Optional[str] = None,
+    mesh_mode: Optional[Literal["obj_only", "obj_texture", "full"]] = None,
     precision: int = 12,
     flip_uv: bool = True,
     ignore_opacity: bool = False,
@@ -49,14 +48,13 @@ def read_mesh(
     This function supports three loading modes, selected automatically:
         - OBJ Only: Loads mesh geometry and vertex colors (if present) from the OBJ file.
         - OBJ + Texture: Loads mesh geometry and UVs from the OBJ file, and applies the provided texture image.
-        - OBJ + Texture + MTL: Loads mesh geometry, UVs, and material properties from the OBJ and MTL files, and applies the texture image.
+        - Full: Loads mesh geometry, UVs, and material properties from the OBJ and MTL files, and applies the texture image.
 
     The mesh is loaded into a format compatible with the Rust backend for efficient processing.
 
     Args:
         obj_path (str): Path to the OBJ file containing mesh geometry.
-        texture_path (Optional[str], optional): Path to the texture image file (if available).
-        mtl_path (Optional[str], optional): Path to the MTL material file (if available).
+        mesh_mode (Optional[Literal["obj_only", "obj_texture", "full"]], optional): Mesh mode to use for loading the mesh (default: None).
         precision (int, optional): Precision for mesh normalization and rasterization (default: 12).
             Higher precision results in higher resolution.
             The mesh will be scaled to 2^precision.
@@ -74,7 +72,7 @@ def read_mesh(
     try:
         internal_mesh = _internal_read_mesh(
             obj_path,
-            None,
+            mesh_mode,
             precision,
             flip_uv,
             ignore_opacity,
