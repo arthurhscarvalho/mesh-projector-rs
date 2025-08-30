@@ -21,18 +21,14 @@ pub fn compute_vertex_normals(
 ) -> Option<Array2<f32>> {
     let vertex_count = vertices.shape()[0];
     let triangle_count = triangles.shape()[0];
-
     if vertex_count == 0 || triangle_count == 0 {
         return None;
     }
-
     let mut normals = Array2::zeros((vertex_count, 3));
-
     // Accumulate face normals for each vertex
     for triangle_idx in 0..triangle_count {
         if let Some(face_normal) = compute_triangle_normal(vertices, triangles, triangle_idx) {
             let indices = get_triangle_indices(triangles, triangle_idx);
-
             // Add face normal to each vertex of the triangle
             for &vertex_idx in &indices {
                 if vertex_idx < vertex_count {
@@ -43,7 +39,6 @@ pub fn compute_vertex_normals(
             }
         }
     }
-
     // Normalize all vertex normals
     normalize_normals(&mut normals);
     Some(normals)
@@ -52,10 +47,8 @@ pub fn compute_vertex_normals(
 /// Normalize an array of normal vectors
 pub fn normalize_normals(normals: &mut Array2<f32>) {
     let vertex_count = normals.shape()[0];
-
     for vertex_idx in 0..vertex_count {
         let norm = calculate_vector_magnitude(normals, vertex_idx);
-
         if norm > 1e-9 {
             // Normalize the vector
             for component in 0..3 {
@@ -75,28 +68,22 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<
         "Original BBox Min: {:?}, Max: {:?}",
         original_bounds.min, original_bounds.max
     );
-
     // Center the mesh
     center_vertices(&mut vertices, &original_bounds);
-
     let centered_bounds = calculate_bounding_box(&vertices);
     info!(
         "Centered BBox Min: {:?}, Max: {:?}",
         centered_bounds.min, centered_bounds.max
     );
-
     // Scale vertices to fit precision
     scale_vertices_to_precision(&mut vertices, precision);
-
     // Center in the precision cube
     center_in_precision_cube(&mut vertices, precision);
-
     let final_bounds = calculate_bounding_box(&vertices);
     info!(
         "Final BBox Min: {:?}, Max: {:?}",
         final_bounds.min, final_bounds.max
     );
-
     vertices
 }
 
@@ -111,9 +98,7 @@ pub fn build_transform_from_bounds(
         min: min_bound,
         max: max_bound,
     };
-
     let size = bounds.size();
-
     // Avoid division by zero per component
     let mut safe_size = size;
     for component in 0..3 {
@@ -121,22 +106,18 @@ pub fn build_transform_from_bounds(
             safe_size[component] = 1e-9;
         }
     }
-
     let max_dimension = safe_size[0].max(safe_size[1]).max(safe_size[2]);
     let target_max_val = (1 << precision) as f32 - 1.0;
     // Safety margin currently 1.0 (no margin)
     let safety_margin = 1.0;
     let scale_factor = (target_max_val * safety_margin) / max_dimension;
-
     let center = bounds.center();
     let cube_center = target_max_val / 2.0;
     let shift = [cube_center, cube_center, cube_center];
-
     info!(
         "Global transform — center: {:?}, scale: {}, cube_center: {}",
         center, scale_factor, cube_center
     );
-
     PreprocessTransform {
         center,
         scale: scale_factor,
@@ -149,28 +130,24 @@ pub fn build_transform_from_bounds(
 /// Order: translate by -center, scale uniformly, then shift to cube center.
 pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTransform) {
     let vertex_count = vertices.shape()[0];
-
     // Translate by global center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] -= t.center[component];
         }
     }
-
     // Uniform scale
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] *= t.scale;
         }
     }
-
     // Shift to cube center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] += t.shift[component];
         }
     }
-
     // Clamp to valid range if needed
     clamp_vertices_if_needed(vertices, t.target_max_val);
 }
@@ -205,7 +182,6 @@ fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
     let vertex_count = vertices.shape()[0];
     let mut min_bound = [f32::MAX; 3];
     let mut max_bound = [f32::MIN; 3];
-
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             let value = vertices[[vertex_idx, component]];
@@ -213,7 +189,6 @@ fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
             max_bound[component] = max_bound[component].max(value);
         }
     }
-
     BoundingBox {
         min: min_bound,
         max: max_bound,
@@ -224,9 +199,7 @@ fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
 fn center_vertices(vertices: &mut Array2<f32>, bounds: &BoundingBox) {
     let center = bounds.center();
     let vertex_count = vertices.shape()[0];
-
     info!("Center of mass: {:?}", center);
-
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] -= center[component];
@@ -238,27 +211,23 @@ fn center_vertices(vertices: &mut Array2<f32>, bounds: &BoundingBox) {
 fn scale_vertices_to_precision(vertices: &mut Array2<f32>, precision: u32) {
     let bounds = calculate_bounding_box(vertices);
     let mut bbox_size = bounds.size();
-
     // Avoid division by zero
     for component in 0..3 {
         if bbox_size[component] == 0.0 {
             bbox_size[component] = 1e-9;
         }
     }
-
     let max_dimension = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
     let target_max_val = (1 << precision) as f32 - 1.0;
     // The safety margin is the amount of space to leave at the edges of the cube.
     let safety_margin = 1.0;
     let scale_factor = (target_max_val * safety_margin) / max_dimension;
-
     info!(
         "Scaling vertices. Max dimension: {}, Scale factor: {} (with {}% safety margin)",
         max_dimension,
         scale_factor,
         100.0 - safety_margin * 100.0
     );
-
     apply_scale_factor(vertices, scale_factor);
 }
 
@@ -266,25 +235,20 @@ fn scale_vertices_to_precision(vertices: &mut Array2<f32>, precision: u32) {
 fn center_in_precision_cube(vertices: &mut Array2<f32>, precision: u32) {
     let target_max_val = (1 << precision) as f32 - 1.0;
     let cube_center = target_max_val / 2.0;
-
     let bounds = calculate_bounding_box(vertices);
     let current_center = bounds.center();
-
     let shift = [
         cube_center - current_center[0],
         cube_center - current_center[1],
         cube_center - current_center[2],
     ];
-
     info!("Shifting vertices to center in cube by: {:?}", shift);
-
     let vertex_count = vertices.shape()[0];
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] += shift[component];
         }
     }
-
     // Clamp to valid range if needed
     clamp_vertices_if_needed(vertices, target_max_val);
 }
@@ -292,7 +256,6 @@ fn center_in_precision_cube(vertices: &mut Array2<f32>, precision: u32) {
 /// Apply a uniform scale factor to all vertices
 fn apply_scale_factor(vertices: &mut Array2<f32>, scale_factor: f32) {
     let vertex_count = vertices.shape()[0];
-
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] *= scale_factor;
@@ -304,17 +267,14 @@ fn apply_scale_factor(vertices: &mut Array2<f32>, scale_factor: f32) {
 fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
     let bounds = calculate_bounding_box(vertices);
     let mut needs_clamping = false;
-
     for component in 0..3 {
         if bounds.min[component] < 0.0 || bounds.max[component] > max_val {
             needs_clamping = true;
             break;
         }
     }
-
     if needs_clamping {
         warn!("Scene vertices out of bounds after centering. Clamping to valid range.");
-
         let vertex_count = vertices.shape()[0];
         for vertex_idx in 0..vertex_count {
             for component in 0..3 {
@@ -322,7 +282,6 @@ fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
                     vertices[[vertex_idx, component]].clamp(0.0, max_val);
             }
         }
-
         info!("Note: Scene was clamped to stay within bounds");
     }
 }
@@ -335,15 +294,12 @@ fn compute_triangle_normal(
 ) -> Option<[f32; 3]> {
     let indices = get_triangle_indices(triangles, triangle_idx);
     let triangle_vertices = get_triangle_vertices(vertices, &indices)?;
-
     // Compute edges
     let edge1 = subtract_vertices(&triangle_vertices[1], &triangle_vertices[0]);
     let edge2 = subtract_vertices(&triangle_vertices[2], &triangle_vertices[0]);
-
     // Compute cross product (normal)
     let normal = cross_product(&edge1, &edge2);
     let length = vector_magnitude(&normal);
-
     if length > 1e-9 {
         Some([normal[0] / length, normal[1] / length, normal[2] / length])
     } else {
@@ -363,13 +319,11 @@ fn get_triangle_indices(triangles: &Array2<usize>, triangle_idx: usize) -> [usiz
 /// Get vertex positions for a triangle
 fn get_triangle_vertices(vertices: &Array2<f32>, indices: &[usize; 3]) -> Option<[[f32; 3]; 3]> {
     let vertex_count = vertices.shape()[0];
-
     for &idx in indices {
         if idx >= vertex_count {
             return None;
         }
     }
-
     Some([
         [
             vertices[[indices[0], 0]],

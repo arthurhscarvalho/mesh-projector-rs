@@ -35,16 +35,13 @@ pub fn read_mesh_internal(
             precision
         )));
     }
-
     // Validate input files
     validate_file_exists(obj_path)?;
-
     // Load OBJ file
     let (models, materials_result) = load_obj_file(obj_path)?;
     if models.is_empty() {
         return Err(MeshError::NoModelsFound);
     }
-
     // Decide mode if not provided
     let mut inferred_mode = MeshMode::ObjOnly;
     if let Some(mode) = mesh_mode {
@@ -55,14 +52,11 @@ pub fn read_mesh_internal(
         }
     }
     info!("Reading mesh: {} in mode: {:?}", obj_path, inferred_mode);
-
     // Clone raw tobj materials (if available) for texture filename lookup without borrowing conflict
     let materials_raw_vec_opt: Option<Vec<tobj::Material>> =
         materials_result.as_ref().ok().cloned();
-
     // Process materials (for Full/ObjOnly/ObjTexture unified path)
     let materials = process_materials_from_obj(materials_result, inferred_mode, ignore_opacity)?;
-
     // Load textures per-submesh when needed and build meshes
     let (meshes, leaked_textures) = process_submeshes_with_textures(
         &models,
@@ -73,17 +67,14 @@ pub fn read_mesh_internal(
         obj_path,
         materials_raw_vec_opt.as_deref(),
     )?;
-
     if meshes.is_empty() {
         return Err(MeshError::NoProcessableSubmeshes);
     }
-
     let textures_vec = if leaked_textures.is_empty() {
         None
     } else {
         Some(leaked_textures)
     };
-
     Ok(Scene {
         meshes,
         textures: textures_vec,
@@ -103,8 +94,21 @@ fn load_obj_file(
         single_index: false,
         ..Default::default()
     };
-
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
+}
+
+fn bounding_box(models: &[tobj::Model]) -> ([f32; 3], [f32; 3]) {
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    for model in models {
+        for vertex in model.mesh.positions.chunks_exact(3) {
+            for i in 0..3 {
+                min[i] = min[i].min(vertex[i]);
+                max[i] = max[i].max(vertex[i]);
+            }
+        }
+    }
+    (min, max)
 }
 
 /// Process all meshes from the loaded models
@@ -120,41 +124,11 @@ fn process_submeshes_with_textures(
     let mut meshes: Vec<Mesh<'static>> = Vec::new();
     let mut leaked_textures: Vec<&'static MeshTexture> = Vec::new();
     let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
-
     // First pass: compute global bounds across all models
-    let mut global_min = [f32::MAX; 3];
-    let mut global_max = [f32::MIN; 3];
-    for model in models {
-        let pos = &model.mesh.positions;
-        for i in (0..pos.len()).step_by(3) {
-            let x = pos[i];
-            let y = pos[i + 1];
-            let z = pos[i + 2];
-            if x < global_min[0] {
-                global_min[0] = x;
-            }
-            if y < global_min[1] {
-                global_min[1] = y;
-            }
-            if z < global_min[2] {
-                global_min[2] = z;
-            }
-            if x > global_max[0] {
-                global_max[0] = x;
-            }
-            if y > global_max[1] {
-                global_max[1] = y;
-            }
-            if z > global_max[2] {
-                global_max[2] = z;
-            }
-        }
-    }
-
+    let (global_min, global_max) = bounding_box(&models);
     // Build a single transform to be applied to every submesh
     let global_transform: PreprocessTransform =
         build_transform_from_bounds(global_min, global_max, precision);
-
     // Second pass: process each model using the global transform
     for model in models {
         if let Some((submesh, maybe_tex_ref)) = process_single_submesh_with_texture(
@@ -173,7 +147,6 @@ fn process_submeshes_with_textures(
             meshes.push(submesh);
         }
     }
-
     Ok((meshes, leaked_textures))
 }
 
@@ -189,7 +162,6 @@ fn process_single_submesh_with_texture(
     global_transform_opt: Option<&PreprocessTransform>,
 ) -> MeshResult<Option<(Mesh<'static>, Option<&'static MeshTexture>)>> {
     let mesh = &model.mesh;
-
     if mesh.positions.is_empty() {
         warn!(
             "Skipping model '{}' as it has no vertex positions.",
@@ -197,20 +169,11 @@ fn process_single_submesh_with_texture(
         );
         return Ok(None);
     }
-
     let num_vertices = mesh.positions.len() / 3;
-
-    // Convert geometry data
     let vertices = convert_vertex_positions(&mesh.positions)?;
     let triangles = convert_triangle_indices(&mesh.indices)?;
-
-    // Process normals
     let vertex_normals = process_vertex_normals(mesh, num_vertices, &vertices, &triangles)?;
-
-    // Process vertex colors if available
     let vertex_colors = process_vertex_colors(mesh, num_vertices, &model.name);
-
-    // Preprocess vertices — if a global transform is provided, use it instead of per-submesh scaling
     let processed_vertices = if let Some(t) = global_transform_opt {
         let mut v = vertices;
         apply_transform_to_vertices(&mut v, t);
@@ -218,11 +181,7 @@ fn process_single_submesh_with_texture(
     } else {
         preprocess_vertices(vertices, precision)
     };
-
-    // Compute face normals
     let face_normals = precompute_triangle_normals(processed_vertices.view(), triangles.view());
-
-    // Create geometry
     let geometry = MeshGeometry {
         vertices: processed_vertices,
         triangles,
@@ -230,11 +189,7 @@ fn process_single_submesh_with_texture(
         face_normals,
         vertex_colors,
     };
-
-    // Get material for this submesh
     let material = get_submesh_material(mesh.material_id, materials, mode, &model.name);
-
-    // Determine texture for this submesh (if applicable)
     let mut texture_ref_opt: Option<&'static MeshTexture> = None;
     if matches!(mode, MeshMode::Full | MeshMode::ObjTexture) {
         if let Some(tex) =
@@ -244,13 +199,11 @@ fn process_single_submesh_with_texture(
             texture_ref_opt = Some(leaked);
         }
     }
-
     let mesh = Mesh {
         geometry,
         material,
         texture: texture_ref_opt,
     };
-
     Ok(Some((mesh, texture_ref_opt)))
 }
 
@@ -263,7 +216,6 @@ fn process_vertex_normals(
 ) -> MeshResult<Option<ndarray::Array2<f32>>> {
     if !mesh.normals.is_empty() && mesh.normals.len() == num_vertices * 3 {
         info!("Using vertex normals from OBJ data.");
-
         match convert_vertex_normals(&mesh.normals, num_vertices) {
             Ok(mut normals_arr) => {
                 normalize_normals(&mut normals_arr);
@@ -308,7 +260,6 @@ fn process_vertex_colors(
             "Using vertex colors from OBJ data for model '{}'.",
             model_name
         );
-
         match convert_vertex_colors(&mesh.vertex_color, num_vertices) {
             Ok(colors_arr) => Some(colors_arr),
             Err(e) => {
@@ -349,12 +300,10 @@ fn load_texture_for_model(
             })
         })
     });
-
     let tex_path_str = match tex_path_opt {
         Some(p) if !p.is_empty() => p,
         _ => return Ok(None),
     };
-
     // Resolve texture path relative to OBJ directory if needed
     let resolved_path = if Path::new(&tex_path_str).is_absolute() {
         PathBuf::from(&tex_path_str)
@@ -363,7 +312,6 @@ fn load_texture_for_model(
     } else {
         PathBuf::from(&tex_path_str)
     };
-
     // Load texture pixels
     let texture_data = match load_texture(resolved_path.to_string_lossy().as_ref()) {
         Ok(img) => img,
@@ -375,7 +323,6 @@ fn load_texture_for_model(
             return Ok(None);
         }
     };
-
     let (tex_height, tex_width, tex_channels) = (
         texture_data.shape()[0],
         texture_data.shape()[1],
@@ -389,7 +336,6 @@ fn load_texture_for_model(
         tex_width,
         tex_channels
     );
-
     // Compute triangle UVs for this model only
     let triangle_uvs = if !model.mesh.texcoord_indices.is_empty() {
         create_triangle_uvs_from_indices(std::slice::from_ref(model), flip_v_coordinate)?
@@ -414,7 +360,6 @@ fn load_texture_for_model(
             create_triangle_uvs(&vertex_uvs, &triangle_indices)?
         }
     };
-
     Ok(Some(MeshTexture {
         texture: Some(texture_data),
         triangle_uvs: Some(triangle_uvs),

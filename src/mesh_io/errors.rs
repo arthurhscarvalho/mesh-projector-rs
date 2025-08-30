@@ -9,22 +9,18 @@ pub enum MeshError {
     FileNotFound(String),
     FileReadError(String),
     DirectoryCreateError(String),
-
     /// Parsing and format errors
     ObjParseError(String),
     TextureLoadError(String),
     ImageBufferError(String),
-
     /// Data validation errors
     NoModelsFound,
     NoProcessableSubmeshes,
     InvalidVertexData(String),
     InvalidTriangleData(String),
     InvalidUvData(String),
-
     /// Configuration errors
     PrecisionError(String),
-
     /// Internal processing errors
     GeometryProcessingError(String),
     MaterialProcessingError(String),
@@ -39,9 +35,7 @@ impl fmt::Display for MeshError {
             MeshError::DirectoryCreateError(details) => {
                 write!(f, "Failed to create directory: {}", details)
             }
-
             MeshError::ObjParseError(details) => write!(f, "Failed to parse OBJ file: {}", details),
-            // MeshError::MtlParseError(details) => write!(f, "Failed to parse MTL file: {}", details),
             MeshError::TextureLoadError(details) => {
                 write!(f, "Failed to load texture: {}", details)
             }
@@ -54,10 +48,6 @@ impl fmt::Display for MeshError {
                 write!(f, "Invalid triangle data: {}", details)
             }
             MeshError::InvalidUvData(details) => write!(f, "Invalid UV data: {}", details),
-            // MeshError::MissingRequiredData(details) => {
-            //     write!(f, "Missing required data: {}", details)
-            // }
-            // MeshError::UnsupportedMode(details) => write!(f, "Unsupported mode: {}", details),
             MeshError::PrecisionError(details) => write!(f, "Precision error: {}", details),
 
             MeshError::GeometryProcessingError(details) => {

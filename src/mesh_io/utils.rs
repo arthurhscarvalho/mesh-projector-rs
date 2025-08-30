@@ -7,28 +7,22 @@ use std::path::Path;
 /// Load a texture image and convert it to an RGB ndarray
 pub fn load_texture(texture_path: &str) -> MeshResult<Array3<u8>> {
     validate_texture_path(texture_path)?;
-
     let img = image::open(texture_path).map_err(|e| {
         MeshError::TextureProcessingError(format!(
             "Failed to open texture file '{}': {}",
             texture_path, e
         ))
     })?;
-
     // Convert to RGB8 and obtain raw vec without an explicit per-pixel loop
     let rgb_img = img.into_rgb8();
     let (width, height) = rgb_img.dimensions();
-
     if width == 0 || height == 0 {
         return Err(MeshError::TextureProcessingError(format!(
             "Invalid texture dimensions: {}x{} for file '{}'",
             width, height, texture_path
         )));
     }
-
-    let raw_pixels = rgb_img.into_raw(); // Vec<u8> in RGBRGB... layout
-
-    // SAFETY: width * height * 3 is guaranteed by the image crate
+    let raw_pixels = rgb_img.into_raw();
     Array3::from_shape_vec((height as usize, width as usize, 3), raw_pixels).map_err(|e| {
         MeshError::TextureProcessingError(format!(
             "Failed to convert texture buffer into ndarray: {}",
@@ -50,24 +44,18 @@ pub fn process_uv_coordinates(
             vertex_count
         )));
     }
-
     // Allocate the full buffer up-front and fill it using a single pass iterator
     let mut uvs_vec: Vec<f32> = Vec::with_capacity(vertex_texcoords.len());
-
     for chunk in vertex_texcoords.chunks_exact(2) {
         // Safe because chunks_exact(2) guarantees size == 2
         let u = chunk[0].clamp(0.0, 1.0) as f32;
         let mut v = chunk[1].clamp(0.0, 1.0) as f32;
-
         if flip_v_coordinate {
             v = 1.0 - v;
         }
-
         uvs_vec.push(u);
         uvs_vec.push(v);
     }
-
-    // SAFETY: we validated the length above and preallocated exactly len == vertex_count * 2
     Array2::from_shape_vec((vertex_count, 2), uvs_vec)
         .map_err(|e| MeshError::InvalidUvData(format!("Failed to convert UV coordinates: {}", e)))
 }
@@ -79,12 +67,9 @@ pub fn convert_vertex_positions(positions: &[f32]) -> MeshResult<Array2<f32>> {
             "Position array length must be divisible by 3".to_string(),
         ));
     }
-
     let vertex_count = positions.len() / 3;
-
     // Convert and collect f32 -> f32 in a single pass
     let vertices_vec: Vec<f32> = positions.iter().map(|&v| v as f32).collect();
-
     Array2::from_shape_vec((vertex_count, 3), vertices_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex positions: {}", e))
     })
@@ -97,11 +82,8 @@ pub fn convert_triangle_indices(indices: &[u32]) -> MeshResult<Array2<usize>> {
             "Index array length must be divisible by 3".to_string(),
         ));
     }
-
     let triangle_count = indices.len() / 3;
-
     let triangles_vec: Vec<usize> = indices.iter().map(|&v| v as usize).collect();
-
     Array2::from_shape_vec((triangle_count, 3), triangles_vec).map_err(|e| {
         MeshError::InvalidTriangleData(format!("Failed to convert triangle indices: {}", e))
     })
@@ -116,9 +98,7 @@ pub fn convert_vertex_normals(normals: &[f32], vertex_count: usize) -> MeshResul
             vertex_count
         )));
     }
-
     let normals_vec: Vec<f32> = normals.iter().map(|&v| v as f32).collect();
-
     Array2::from_shape_vec((vertex_count, 3), normals_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex normals: {}", e))
     })
@@ -133,9 +113,7 @@ pub fn convert_vertex_colors(colors: &[f32], vertex_count: usize) -> MeshResult<
             vertex_count
         )));
     }
-
     let colors_vec: Vec<f32> = colors.iter().map(|&v| v as f32).collect();
-
     Array2::from_shape_vec((vertex_count, 3), colors_vec).map_err(|e| {
         MeshError::InvalidVertexData(format!("Failed to convert vertex colors: {}", e))
     })
@@ -151,10 +129,8 @@ pub fn create_triangle_uvs_from_indices(
     // exactly 2 floating-point values (U and V).
     let estimated_corners: usize = models.iter().map(|m| m.mesh.indices.len()).sum();
     let mut all_triangle_uvs = Vec::with_capacity(estimated_corners * 2);
-
     for model in models {
         let mesh = &model.mesh;
-
         if mesh.texcoord_indices.is_empty() || mesh.texcoords.is_empty() {
             // Fallback for models without proper texture coordinate indices
             let triangle_count = mesh.indices.len() / 3;
@@ -166,7 +142,6 @@ pub fn create_triangle_uvs_from_indices(
             }
             continue;
         }
-
         if mesh.texcoord_indices.len() != mesh.indices.len() {
             return Err(MeshError::InvalidUvData(format!(
                 "Texcoord indices length ({}) doesn't match position indices length ({}) for model '{}'",
@@ -175,22 +150,18 @@ pub fn create_triangle_uvs_from_indices(
                 model.name
             )));
         }
-
         // Process each triangle corner
         for &texcoord_idx in &mesh.texcoord_indices {
             let idx = texcoord_idx as usize;
             if idx * 2 + 1 < mesh.texcoords.len() {
                 let mut u = mesh.texcoords[idx * 2] as f32;
                 let mut v = mesh.texcoords[idx * 2 + 1] as f32;
-
                 // Clamp UV coordinates to valid range
                 u = u.clamp(0.0, 1.0);
                 v = v.clamp(0.0, 1.0);
-
                 if flip_v_coordinate {
                     v = 1.0 - v;
                 }
-
                 all_triangle_uvs.push(u);
                 all_triangle_uvs.push(v);
             } else {
@@ -200,15 +171,12 @@ pub fn create_triangle_uvs_from_indices(
             }
         }
     }
-
     let num_corners = all_triangle_uvs.len() / 2;
     let mut triangle_uvs = Array2::zeros((num_corners, 2));
-
     for i in 0..num_corners {
         triangle_uvs[[i, 0]] = all_triangle_uvs[i * 2];
         triangle_uvs[[i, 1]] = all_triangle_uvs[i * 2 + 1];
     }
-
     Ok(triangle_uvs)
 }
 
@@ -223,15 +191,12 @@ pub fn create_triangle_uvs(
             "Triangle indices must be divisible by 3".to_string(),
         ));
     }
-
     let num_triangles = num_corners / 3;
     let mut triangle_uvs = Array2::zeros((num_corners, 2));
-
     for i in 0..num_triangles {
         for k in 0..3 {
             let corner_idx = i * 3 + k;
             let vertex_idx = all_triangle_indices[corner_idx];
-
             if vertex_idx < vertex_uvs.shape()[0] {
                 triangle_uvs[[corner_idx, 0]] = vertex_uvs[[vertex_idx, 0]];
                 triangle_uvs[[corner_idx, 1]] = vertex_uvs[[vertex_idx, 1]];
@@ -244,7 +209,6 @@ pub fn create_triangle_uvs(
             }
         }
     }
-
     Ok(triangle_uvs)
 }
 
@@ -268,13 +232,11 @@ fn validate_texture_path(texture_path: &str) -> MeshResult<()> {
 pub fn create_global_triangle_indices(models: &[tobj::Model]) -> Vec<usize> {
     let mut global_indices = Vec::new();
     let mut vertex_offset = 0;
-
     for model in models {
         for &index in &model.mesh.indices {
             global_indices.push(index as usize + vertex_offset);
         }
         vertex_offset += model.mesh.positions.len() / 3;
     }
-
     global_indices
 }

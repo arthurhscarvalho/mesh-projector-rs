@@ -102,7 +102,6 @@ fn convert_tobj_material(mtl: tobj::Material, ignore_opacity: bool) -> MeshMater
         opacity: mtl.dissolve.unwrap_or(1.0) as f32,
         illum: mtl.illumination_model.unwrap_or(2) as i64,
     };
-
     if ignore_opacity {
         material.opacity = 1.0;
     }
