@@ -16,7 +16,7 @@ use crate::renderer::lighting::calculate_lighting;
 use crate::renderer::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{Mesh, MeshMode, SubMesh};
+use crate::types::mesh::{Mesh, MeshMode, Scene};
 
 /// Stores the interpolated attributes at a point on a triangle surface.
 ///
@@ -52,7 +52,7 @@ pub struct TriangleSurface {
 }
 
 #[inline]
-pub fn extract_triangle_vertices_ws(submesh: &SubMesh, triangle_index: usize) -> [Coordinate; 3] {
+pub fn extract_triangle_vertices_ws(submesh: &Mesh, triangle_index: usize) -> [Coordinate; 3] {
     let world_vertices = submesh.geometry.vertices.view();
     let triangles = submesh.geometry.triangles.view();
     // Get vertex indices
@@ -75,12 +75,12 @@ pub fn extract_triangle_vertices_ws(submesh: &SubMesh, triangle_index: usize) ->
 /// Extracts triangle data from mesh for processing
 /// Returns an error if the triangle is degenerate (has zero or near-zero area)
 pub fn extract_triangle_surface(
-    mesh: &Mesh,
+    mesh: &Scene,
     submesh_index: usize,
     triangle_index: usize,
 ) -> Result<TriangleSurface, ()> {
     // Get submesh
-    let submesh = &mesh.submeshes[submesh_index];
+    let submesh = &mesh.meshes[submesh_index];
     // Local triangle index for UV lookup within submesh
     let uv_triangle_id: usize = triangle_index;
     // Get face normal
@@ -204,8 +204,8 @@ pub fn interpolate_colors(barycentric_coords: &(f32, f32, f32), colors: &[Color;
 pub fn interpolate_triangle_surface(
     triangle_surface: &TriangleSurface,
     barycentric_coords: (f32, f32, f32), // (w0, w1, w2)
-    mesh: &Mesh,
-    submesh: &SubMesh,
+    mesh: &Scene,
+    submesh: &Mesh,
 ) -> TrianglePoint {
     // Interpolate position
     let position_ws = interpolate_coordinates(&barycentric_coords, &triangle_surface.vertices_ws);
@@ -255,14 +255,14 @@ pub fn interpolate_triangle_surface(
 
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle_to_images(
-    mesh: &Mesh,
+    mesh: &Scene,
     view_config: &ViewConfig,
     buffers: &mut ImageBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
 ) {
     // Get submesh
-    let submesh = &mesh.submeshes[submesh_index];
+    let submesh = &mesh.meshes[submesh_index];
     // Extract triangle data
     let triangle_surface = match extract_triangle_surface(mesh, submesh_index, triangle_index) {
         Ok(surface) => surface,
@@ -381,9 +381,9 @@ pub fn rasterize_triangle_to_images(
 fn process_point(
     barycentric_coords: (f32, f32, f32),
     triangle_surface: &TriangleSurface,
-    mesh: &Mesh,
+    mesh: &Scene,
     view_config: &ViewConfig,
-    submesh: &SubMesh,
+    submesh: &Mesh,
     buffers: &mut PointCloudBuffers,
 ) {
     if !is_inside_triangle(
@@ -409,7 +409,7 @@ fn process_point(
 }
 
 pub fn rasterize_triangle_to_point_cloud(
-    mesh: &Mesh,
+    mesh: &Scene,
     settings: &PointCloudConfig,
     view_config: &ViewConfig,
     buffers: &mut PointCloudBuffers,
@@ -417,7 +417,7 @@ pub fn rasterize_triangle_to_point_cloud(
     triangle_index: usize, // Local triangle index for geometry
 ) {
     // Get submesh
-    let submesh = &mesh.submeshes[submesh_index];
+    let submesh = &mesh.meshes[submesh_index];
     // Extract triangle data
     let triangle_surface = match extract_triangle_surface(&mesh, submesh_index, triangle_index) {
         Ok(surface) => surface,

@@ -9,12 +9,12 @@ use crate::renderer::buffers::ImageBuffers;
 use crate::renderer::config::ViewConfig;
 use crate::renderer::filtering::filter_outliers;
 use crate::renderer::rasterization::rasterize_triangle_to_images;
-use crate::types::mesh::Mesh;
+use crate::types::mesh::Scene;
 use ndarray::{Array2, Array3};
 
 /// Computes a single orthographic projection for the given view configuration.
 pub fn compute_projection(
-    mesh: &Mesh,
+    mesh: &Scene,
     settings: &ProjectionConfig,
     view_config: &ViewConfig,
 ) -> (Array3<u8>, Array2<u8>, Array3<u8>, Array2<u8>, u64) {
@@ -23,10 +23,10 @@ pub fn compute_projection(
     let cols = max_bound as usize;
     // Initialize buffers for a single view
     let mut buffers = ImageBuffers::new(rows, cols, NUM_CHANNELS);
-    let num_submeshes = mesh.submeshes.len();
-    // Rasterize all triangles from all submeshes
+    let num_submeshes = mesh.meshes.len();
+    // Rasterize all triangles from all meshes
     for submesh_index in 0..num_submeshes {
-        let num_faces = mesh.submeshes[submesh_index].geometry.triangles.nrows();
+        let num_faces = mesh.meshes[submesh_index].geometry.triangles.nrows();
         for triangle_index in 0..num_faces {
             rasterize_triangle_to_images(
                 &mesh,

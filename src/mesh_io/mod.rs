@@ -14,7 +14,7 @@ pub mod material;
 pub mod preprocessing;
 pub mod utils;
 
-use crate::types::mesh::Mesh;
+use crate::types::mesh::Scene;
 pub use errors::MeshError;
 pub use image::save_image_data;
 
@@ -26,7 +26,7 @@ pub fn read_mesh(
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> Result<Mesh<'static>, MeshError> {
+) -> Result<Scene<'static>, MeshError> {
     loaders::read_mesh_internal(
         obj_path,
         mesh_mode,

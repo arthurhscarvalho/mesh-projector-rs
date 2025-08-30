@@ -23,7 +23,7 @@ mod types;
 
 #[pyclass]
 pub struct MeshWrapper {
-    pub mesh: crate::types::mesh::Mesh<'static>,
+    pub mesh: crate::types::mesh::Scene<'static>,
     pub precision: u64,
 }
 
@@ -63,7 +63,7 @@ fn read_mesh<'py>(
             )));
         }
     };
-    log::info!("Mesh loaded successfully");
+    log::info!("Scene loaded successfully");
     Ok(MeshWrapper { mesh, precision })
 }
 

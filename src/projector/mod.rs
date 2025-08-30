@@ -11,7 +11,7 @@ use crate::renderer::config::{LightSource, ViewConfig};
 use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
-use crate::types::mesh::Mesh;
+use crate::types::mesh::Scene;
 use crate::types::orientation::Orientation;
 use constants::NUM_CHANNELS;
 use ndarray::Array2;
@@ -24,7 +24,7 @@ use std::path::Path;
 ///
 /// Returns:
 /// An ImageBatch containing all projection data.
-pub fn project_to_image_on_bounding_cube(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image_on_bounding_cube(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -43,8 +43,8 @@ pub fn project_to_image_on_bounding_cube(mesh: &Mesh, settings: &ProjectionConfi
     // Initialize image batch
     let mut image_batch = ImageBatch::new(NUM_VIEWS, rows, cols, NUM_CHANNELS);
     // Handle empty meshes
-    if mesh.submeshes.is_empty() {
-        log::warn!("Empty mesh (no submeshes). Returning empty image batch.");
+    if mesh.meshes.is_empty() {
+        log::warn!("Empty mesh (no meshes). Returning empty image batch.");
         return image_batch;
     }
     // Set view configs for cube projection
@@ -106,7 +106,7 @@ pub fn project_to_image_on_bounding_cube(mesh: &Mesh, settings: &ProjectionConfi
 /// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
 ///
 /// Returns an ImageBatch containing all projection data.
-pub fn project_to_image_by_rotation(mesh: &Mesh, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image_by_rotation(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
         mesh.mode,
@@ -126,8 +126,8 @@ pub fn project_to_image_by_rotation(mesh: &Mesh, settings: &ProjectionConfig) ->
     // Initialize image batch
     let mut image_batch = ImageBatch::new(num_views, rows, cols, NUM_CHANNELS);
     // Handle empty meshes
-    if mesh.submeshes.is_empty() {
-        log::warn!("Empty mesh (no submeshes). Returning empty image batch.");
+    if mesh.meshes.is_empty() {
+        log::warn!("Empty mesh (no meshes). Returning empty image batch.");
         return image_batch;
     }
     // Create view configs for rotation-based projection
@@ -183,7 +183,7 @@ pub fn project_to_image_by_rotation(mesh: &Mesh, settings: &ProjectionConfig) ->
 /// Computes rotation-based projections and saves them on-the-fly in parallel.
 /// This function does not return any projection data.
 pub fn project_to_image_by_rotation_to_file(
-    mesh: &Mesh,
+    mesh: &Scene,
     settings: &ProjectionConfig,
     output_dir: &Path,
 ) {
@@ -200,8 +200,8 @@ pub fn project_to_image_by_rotation_to_file(
     let num_steps = rotation_config.num_steps;
     let mut view_configs = Vec::with_capacity(num_steps);
     // Handle empty meshes
-    if mesh.submeshes.is_empty() {
-        log::warn!("Empty mesh (no submeshes). Skipping projection.");
+    if mesh.meshes.is_empty() {
+        log::warn!("Empty mesh (no meshes). Skipping projection.");
         return;
     }
     // Create view configs for rotation-based projection
@@ -258,7 +258,7 @@ pub fn project_to_image_by_rotation_to_file(
 /// Returns:
 /// A tuple containing the points and their colors.
 pub fn project_to_point_cloud_by_sampling(
-    mesh: &Mesh,
+    mesh: &Scene,
     settings: &PointCloudConfig,
 ) -> (Array2<f32>, Array2<u8>) {
     point_cloud::discretize_mesh_to_point_cloud(mesh, settings)

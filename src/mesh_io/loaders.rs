@@ -15,7 +15,7 @@ use crate::mesh_io::{
     },
 };
 use crate::renderer::geometry::precompute_triangle_normals;
-use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, SubMesh};
+use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, Scene};
 use log::{info, warn};
 use std::path::{Path, PathBuf};
 use tobj;
@@ -27,7 +27,7 @@ pub fn read_mesh_internal(
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> MeshResult<Mesh<'static>> {
+) -> MeshResult<Scene<'static>> {
     // Validate precision bounds
     if precision < 8 || precision > 16 {
         return Err(MeshError::PrecisionError(format!(
@@ -63,8 +63,8 @@ pub fn read_mesh_internal(
     // Process materials (for Full/ObjOnly/ObjTexture unified path)
     let materials = process_materials_from_obj(materials_result, inferred_mode, ignore_opacity)?;
 
-    // Load textures per-submesh when needed and build submeshes
-    let (submeshes, leaked_textures) = process_submeshes_with_textures(
+    // Load textures per-submesh when needed and build meshes
+    let (meshes, leaked_textures) = process_submeshes_with_textures(
         &models,
         &materials,
         inferred_mode,
@@ -74,7 +74,7 @@ pub fn read_mesh_internal(
         materials_raw_vec_opt.as_deref(),
     )?;
 
-    if submeshes.is_empty() {
+    if meshes.is_empty() {
         return Err(MeshError::NoProcessableSubmeshes);
     }
 
@@ -84,8 +84,8 @@ pub fn read_mesh_internal(
         Some(leaked_textures)
     };
 
-    Ok(Mesh {
-        submeshes,
+    Ok(Scene {
+        meshes,
         textures: textures_vec,
         mode: inferred_mode,
     })
@@ -107,7 +107,7 @@ fn load_obj_file(
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
 }
 
-/// Process all submeshes from the loaded models
+/// Process all meshes from the loaded models
 fn process_submeshes_with_textures(
     models: &[tobj::Model],
     materials: &[MeshMaterial],
@@ -116,8 +116,8 @@ fn process_submeshes_with_textures(
     flip_v_coordinate: bool,
     obj_path: &str,
     materials_raw_opt: Option<&[tobj::Material]>,
-) -> MeshResult<(Vec<SubMesh<'static>>, Vec<&'static MeshTexture>)> {
-    let mut submeshes: Vec<SubMesh<'static>> = Vec::new();
+) -> MeshResult<(Vec<Mesh<'static>>, Vec<&'static MeshTexture>)> {
+    let mut meshes: Vec<Mesh<'static>> = Vec::new();
     let mut leaked_textures: Vec<&'static MeshTexture> = Vec::new();
     let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
 
@@ -170,11 +170,11 @@ fn process_submeshes_with_textures(
             if let Some(tex_ref) = maybe_tex_ref {
                 leaked_textures.push(tex_ref);
             }
-            submeshes.push(submesh);
+            meshes.push(submesh);
         }
     }
 
-    Ok((submeshes, leaked_textures))
+    Ok((meshes, leaked_textures))
 }
 
 /// Process a single model into a submesh
@@ -187,7 +187,7 @@ fn process_single_submesh_with_texture(
     obj_dir: Option<&PathBuf>,
     materials_raw_opt: Option<&[tobj::Material]>,
     global_transform_opt: Option<&PreprocessTransform>,
-) -> MeshResult<Option<(SubMesh<'static>, Option<&'static MeshTexture>)>> {
+) -> MeshResult<Option<(Mesh<'static>, Option<&'static MeshTexture>)>> {
     let mesh = &model.mesh;
 
     if mesh.positions.is_empty() {
@@ -245,13 +245,13 @@ fn process_single_submesh_with_texture(
         }
     }
 
-    let submesh = SubMesh {
+    let mesh = Mesh {
         geometry,
         material,
         texture: texture_ref_opt,
     };
 
-    Ok(Some((submesh, texture_ref_opt)))
+    Ok(Some((mesh, texture_ref_opt)))
 }
 
 /// Process vertex normals for a model

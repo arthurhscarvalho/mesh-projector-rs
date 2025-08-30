@@ -8,7 +8,7 @@ use crate::renderer::config::{LightSource, ViewConfig};
 use crate::renderer::geometry::create_view_matrix;
 use crate::renderer::rasterization::rasterize_triangle_to_point_cloud;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::Mesh;
+use crate::types::mesh::Scene;
 use crate::types::orientation::Orientation;
 use ndarray::Array2;
 
@@ -20,7 +20,7 @@ use ndarray::Array2;
 /// - points: Array2<f32> - 3D points in the range [0, max_bound]
 /// - colors: Array2<u8> - RGB colors for each point (0-255 range)
 pub fn discretize_mesh_to_point_cloud(
-    mesh: &Mesh,
+    mesh: &Scene,
     settings: &PointCloudConfig,
 ) -> (Array2<f32>, Array2<u8>) {
     log::info!(
@@ -52,8 +52,8 @@ pub fn discretize_mesh_to_point_cloud(
     // Initialize point cloud buffers
     let mut buffers = PointCloudBuffers::new();
     // Process each submesh
-    for submesh_index in 0..mesh.submeshes.len() {
-        let submesh = &mesh.submeshes[submesh_index];
+    for submesh_index in 0..mesh.meshes.len() {
+        let submesh = &mesh.meshes[submesh_index];
         let num_faces = submesh.geometry.triangles.nrows();
         for triangle_index in 0..num_faces {
             rasterize_triangle_to_point_cloud(

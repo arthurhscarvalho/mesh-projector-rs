@@ -48,7 +48,7 @@ impl fmt::Display for MeshError {
             MeshError::ImageBufferError(details) => write!(f, "Image buffer error: {}", details),
 
             MeshError::NoModelsFound => write!(f, "No models found in the OBJ file"),
-            MeshError::NoProcessableSubmeshes => write!(f, "No processable submeshes found"),
+            MeshError::NoProcessableSubmeshes => write!(f, "No processable meshes found"),
             MeshError::InvalidVertexData(details) => write!(f, "Invalid vertex data: {}", details),
             MeshError::InvalidTriangleData(details) => {
                 write!(f, "Invalid triangle data: {}", details)

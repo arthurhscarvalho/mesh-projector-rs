@@ -1,10 +1,10 @@
-//! Mesh preprocessing operations for vertex and normal data.
+//! Scene preprocessing operations for vertex and normal data.
 
 use log::{info, warn};
 use ndarray::Array2;
 
 /// Describes a deterministic preprocessing transform applied uniformly
-/// across all submeshes of a model: translate to global center, scale
+/// across all meshes of a model: translate to global center, scale
 /// to target precision cube, then shift to the cube center.
 #[derive(Clone, Copy, Debug)]
 pub struct PreprocessTransform {
@@ -101,7 +101,7 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<
 }
 
 /// Build a global preprocessing transform from a known bounding box and precision.
-/// This lets us preprocess all submeshes consistently using a single transform.
+/// This lets us preprocess all meshes consistently using a single transform.
 pub fn build_transform_from_bounds(
     min_bound: [f32; 3],
     max_bound: [f32; 3],
@@ -313,7 +313,7 @@ fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
     }
 
     if needs_clamping {
-        warn!("Mesh vertices out of bounds after centering. Clamping to valid range.");
+        warn!("Scene vertices out of bounds after centering. Clamping to valid range.");
 
         let vertex_count = vertices.shape()[0];
         for vertex_idx in 0..vertex_count {
@@ -323,7 +323,7 @@ fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
             }
         }
 
-        info!("Note: Mesh was clamped to stay within bounds");
+        info!("Note: Scene was clamped to stay within bounds");
     }
 }
 
