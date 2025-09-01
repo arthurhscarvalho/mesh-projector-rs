@@ -6,6 +6,7 @@
 //! throughout the projection and rasterization pipeline.
 
 use ndarray::{Array2, Array3};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShadingMode {
@@ -32,7 +33,7 @@ pub struct MeshGeometry {
 
 pub struct MeshTexture {
     /// Texture image data (optional).
-    pub texture: Option<Array3<u8>>,
+    pub texture: Option<Arc<Array3<u8>>>,
     /// Triangle UV coordinates (optional).
     pub triangle_uvs: Option<Array2<f32>>,
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).
@@ -53,20 +54,34 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
-pub struct Mesh<'a> {
+pub struct Mesh {
     /// Geometry of the mesh.
     pub geometry: MeshGeometry,
     /// Material of the mesh.
     pub material: MeshMaterial,
     /// Texture of the mesh.
-    pub texture: Option<&'a MeshTexture>,
+    pub texture: Option<MeshTexture>,
 }
 
-pub struct Scene<'a> {
+pub struct Scene {
     // Meshes: each mesh has its own geometry, texture, and material
-    pub meshes: Vec<Mesh<'a>>,
-    // Textures: shared textures for all meshes
-    pub textures: Option<Vec<&'a MeshTexture>>,
+    pub meshes: Vec<Mesh>,
     // Rendering mode
     pub mode: ShadingMode,
+    // Textures: shared textures for all meshes
+    pub texture_images: Option<Vec<Arc<Array3<u8>>>>,
+}
+
+impl Scene {
+    pub fn new(
+        meshes: Vec<Mesh>,
+        mode: ShadingMode,
+        texture_images: Option<Vec<Arc<Array3<u8>>>>,
+    ) -> Self {
+        Self {
+            meshes,
+            mode,
+            texture_images,
+        }
+    }
 }

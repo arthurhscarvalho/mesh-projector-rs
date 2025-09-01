@@ -16,7 +16,7 @@ use crate::renderer::lighting::calculate_lighting;
 use crate::renderer::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{Mesh, ShadingMode, Scene};
+use crate::types::mesh::{Mesh, Scene, ShadingMode};
 
 /// Stores the interpolated attributes at a point on a triangle surface.
 ///

@@ -17,7 +17,10 @@ use crate::mesh_io::{
 use crate::renderer::geometry::precompute_triangle_normals;
 use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture, Scene, ShadingMode};
 use log::{info, warn};
+use ndarray::Array3;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tobj;
 
 /// Read a mesh from an OBJ, inferring materials/textures from the OBJ/MTL unless a mode is supplied
@@ -27,7 +30,7 @@ pub fn read_mesh_internal(
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> MeshResult<Scene<'static>> {
+) -> MeshResult<Scene> {
     // Validate precision bounds
     if precision < 8 || precision > 16 {
         return Err(MeshError::PrecisionError(format!(
@@ -57,8 +60,11 @@ pub fn read_mesh_internal(
         materials_result.as_ref().ok().cloned();
     // Process materials (for BlinnPhong/VertexColor/TextureMapped unified path)
     let materials = process_materials_from_obj(materials_result, inferred_mode, ignore_opacity)?;
+    // Texture cache for deduplication and storage in Scene
+    let mut texture_cache: HashMap<String, Arc<Array3<u8>>> = HashMap::new();
+    let mut texture_images: Vec<Arc<Array3<u8>>> = Vec::new();
     // Load textures per-submesh when needed and build meshes
-    let (meshes, leaked_textures) = process_submeshes_with_textures(
+    let meshes = process_submeshes_with_textures(
         &models,
         &materials,
         inferred_mode,
@@ -66,20 +72,18 @@ pub fn read_mesh_internal(
         flip_v_coordinate,
         obj_path,
         materials_raw_vec_opt.as_deref(),
+        &mut texture_cache,
+        &mut texture_images,
     )?;
     if meshes.is_empty() {
         return Err(MeshError::NoProcessableSubmeshes);
     }
-    let textures_vec = if leaked_textures.is_empty() {
+    let textures_vec = if texture_images.is_empty() {
         None
     } else {
-        Some(leaked_textures)
+        Some(texture_images)
     };
-    Ok(Scene {
-        meshes,
-        textures: textures_vec,
-        mode: inferred_mode,
-    })
+    Ok(Scene::new(meshes, inferred_mode, textures_vec))
 }
 
 /// Load OBJ file using tobj
@@ -120,9 +124,10 @@ fn process_submeshes_with_textures(
     flip_v_coordinate: bool,
     obj_path: &str,
     materials_raw_opt: Option<&[tobj::Material]>,
-) -> MeshResult<(Vec<Mesh<'static>>, Vec<&'static MeshTexture>)> {
-    let mut meshes: Vec<Mesh<'static>> = Vec::new();
-    let mut leaked_textures: Vec<&'static MeshTexture> = Vec::new();
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<Vec<Mesh>> {
+    let mut meshes: Vec<Mesh> = Vec::new();
     let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
     // First pass: compute global bounds across all models
     let (global_min, global_max) = bounding_box(&models);
@@ -131,7 +136,7 @@ fn process_submeshes_with_textures(
         build_transform_from_bounds(global_min, global_max, precision);
     // Second pass: process each model using the global transform
     for model in models {
-        if let Some((submesh, maybe_tex_ref)) = process_single_submesh_with_texture(
+        if let Some(submesh) = process_single_submesh_with_texture(
             model,
             materials,
             mode,
@@ -140,14 +145,13 @@ fn process_submeshes_with_textures(
             obj_dir.as_ref(),
             materials_raw_opt,
             Some(&global_transform),
+            texture_cache,
+            texture_images,
         )? {
-            if let Some(tex_ref) = maybe_tex_ref {
-                leaked_textures.push(tex_ref);
-            }
             meshes.push(submesh);
         }
     }
-    Ok((meshes, leaked_textures))
+    Ok(meshes)
 }
 
 /// Process a single model into a submesh
@@ -160,7 +164,9 @@ fn process_single_submesh_with_texture(
     obj_dir: Option<&PathBuf>,
     materials_raw_opt: Option<&[tobj::Material]>,
     global_transform_opt: Option<&PreprocessTransform>,
-) -> MeshResult<Option<(Mesh<'static>, Option<&'static MeshTexture>)>> {
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<Option<Mesh>> {
     let mesh = &model.mesh;
     if mesh.positions.is_empty() {
         warn!(
@@ -190,21 +196,25 @@ fn process_single_submesh_with_texture(
         vertex_colors,
     };
     let material = get_submesh_material(mesh.material_id, materials, mode, &model.name);
-    let mut texture_ref_opt: Option<&'static MeshTexture> = None;
+    let mut mesh_texture_opt: Option<MeshTexture> = None;
     if matches!(mode, ShadingMode::BlinnPhong | ShadingMode::TextureMapped) {
-        if let Some(tex) =
-            load_texture_for_model(model, flip_v_coordinate, obj_dir, materials_raw_opt)?
-        {
-            let leaked: &'static MeshTexture = Box::leak(Box::new(tex));
-            texture_ref_opt = Some(leaked);
+        if let Some(tex) = load_texture_for_model(
+            model,
+            flip_v_coordinate,
+            obj_dir,
+            materials_raw_opt,
+            texture_cache,
+            texture_images,
+        )? {
+            mesh_texture_opt = Some(tex);
         }
     }
     let mesh = Mesh {
         geometry,
         material,
-        texture: texture_ref_opt,
+        texture: mesh_texture_opt,
     };
-    Ok(Some((mesh, texture_ref_opt)))
+    Ok(Some(mesh))
 }
 
 /// Process vertex normals for a model
@@ -288,6 +298,8 @@ fn load_texture_for_model(
     flip_v_coordinate: bool,
     obj_dir: Option<&PathBuf>,
     materials_raw_opt: Option<&[tobj::Material]>,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
 ) -> MeshResult<Option<MeshTexture>> {
     // Fetch the texture path from the linked tobj material if available via material_id
     let tex_path_opt: Option<String> = model.mesh.material_id.and_then(|idx| {
@@ -312,22 +324,18 @@ fn load_texture_for_model(
     } else {
         PathBuf::from(&tex_path_str)
     };
-    // Load texture pixels
-    let texture_data = match load_texture(resolved_path.to_string_lossy().as_ref()) {
-        Ok(img) => img,
-        Err(e) => {
-            warn!(
-                "Failed to load texture for model '{}': {}. Proceeding without texture.",
-                model.name, e
-            );
-            return Ok(None);
-        }
-    };
-    let (tex_height, tex_width, tex_channels) = (
-        texture_data.shape()[0],
-        texture_data.shape()[1],
-        texture_data.shape()[2],
-    );
+    // Load or fetch shared texture reference (per-scene cache)
+    let (texture_ref, tex_height, tex_width, tex_channels) =
+        match get_or_load_shared_texture_with_cache(&resolved_path, texture_cache, texture_images) {
+            Ok((tex_ref, h, w, c)) => (tex_ref, h, w, c),
+            Err(e) => {
+                warn!(
+                    "Failed to load texture for model '{}': {}. Proceeding without texture.",
+                    model.name, e
+                );
+                return Ok(None);
+            }
+        };
     info!(
         "Loaded texture for model '{}': {} ({}x{}x{})",
         model.name,
@@ -361,10 +369,28 @@ fn load_texture_for_model(
         }
     };
     Ok(Some(MeshTexture {
-        texture: Some(texture_data),
+        texture: Some(texture_ref),
         triangle_uvs: Some(triangle_uvs),
         channels: tex_channels,
         height_f32: tex_height as f32,
         width_f32: tex_width as f32,
     }))
+}
+
+fn get_or_load_shared_texture_with_cache(
+    path: &PathBuf,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<(Arc<Array3<u8>>, usize, usize, usize)> {
+    let key = path.to_string_lossy().to_string();
+    if let Some(tex_ref) = texture_cache.get(&key) {
+        let (h, w, c) = (tex_ref.shape()[0], tex_ref.shape()[1], tex_ref.shape()[2]);
+        return Ok((tex_ref.clone(), h, w, c));
+    }
+    let img = load_texture(&key)?;
+    let (h, w, c) = (img.shape()[0], img.shape()[1], img.shape()[2]);
+    let arc_img = Arc::new(img);
+    texture_cache.insert(key, arc_img.clone());
+    texture_images.push(arc_img.clone());
+    Ok((arc_img, h, w, c))
 }

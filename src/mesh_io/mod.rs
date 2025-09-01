@@ -26,7 +26,7 @@ pub fn read_mesh(
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> Result<Scene<'static>, MeshError> {
+) -> Result<Scene, MeshError> {
     loaders::read_mesh_internal(
         obj_path,
         mesh_mode,

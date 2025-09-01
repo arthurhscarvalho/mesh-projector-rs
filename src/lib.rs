@@ -23,7 +23,7 @@ mod types;
 
 #[pyclass]
 pub struct MeshWrapper {
-    pub mesh: crate::types::mesh::Scene<'static>,
+    pub mesh: crate::types::mesh::Scene,
     pub precision: u64,
 }
 
