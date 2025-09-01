@@ -12,12 +12,12 @@ if __name__ == "__main__":
     IGNORE_OPACITY = True
     VERBOSE = True
     FILTERING = 0
-    # Read the mesh (obj + texture + mtl mode)
+    # Read the mesh (blinn_phong mode)
     # The renderer will use the texture and mtl file,
     # and apply the shading based on the mtl file
     mesh = mp.read_mesh(
         obj_path=OBJ_PATH,
-        # mesh_mode="full",
+        # shading_mode="full",
         precision=PRECISION,
         flip_uv=FLIP_UV,
         ignore_opacity=IGNORE_OPACITY,

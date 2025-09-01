@@ -36,7 +36,9 @@ class Mesh:
 
 def read_mesh(
     obj_path: str,
-    mesh_mode: Optional[Literal["obj_only", "obj_texture", "full"]] = None,
+    shading_mode: Optional[
+        Literal["vertex_color", "texture_mapped", "blinn_phong"]
+    ] = None,
     precision: int = 12,
     flip_uv: bool = True,
     ignore_opacity: bool = False,
@@ -46,15 +48,15 @@ def read_mesh(
     Load a 3D mesh from disk, automatically inferring the optimal loading mode based on the provided files.
 
     This function supports three loading modes, selected automatically:
-        - OBJ Only: Loads mesh geometry and vertex colors (if present) from the OBJ file.
-        - OBJ + Texture: Loads mesh geometry and UVs from the OBJ file, and applies the provided texture image.
-        - Full: Loads mesh geometry, UVs, and material properties from the OBJ and MTL files, and applies the texture image.
+        - VertexColor: Loads mesh geometry and vertex colors (if present) from the OBJ file.
+        - TextureMapped: Loads mesh geometry and UVs from the OBJ file, and applies the provided texture image.
+        - BlinnPhong: Loads mesh geometry, UVs, and material properties from the OBJ and MTL files, and applies the texture image.
 
     The mesh is loaded into a format compatible with the Rust backend for efficient processing.
 
     Args:
         obj_path (str): Path to the OBJ file containing mesh geometry.
-        mesh_mode (Optional[Literal["obj_only", "obj_texture", "full"]], optional): Mesh mode to use for loading the mesh (default: None).
+        shading_mode (Optional[Literal["vertex_color", "texture_mapped", "blinn_phong"]], optional): Mesh mode to use for loading the mesh (default: None).
         precision (int, optional): Precision for mesh normalization and rasterization (default: 12).
             Higher precision results in higher resolution.
             The mesh will be scaled to 2^precision.
@@ -72,7 +74,7 @@ def read_mesh(
     try:
         internal_mesh = _internal_read_mesh(
             obj_path,
-            mesh_mode,
+            shading_mode,
             precision,
             flip_uv,
             ignore_opacity,

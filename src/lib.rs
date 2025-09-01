@@ -8,7 +8,7 @@ extern crate pyo3;
 extern crate rayon;
 
 use crate::projector::config::{PointCloudConfig, ProjectionConfig, RotationConfig};
-use crate::types::mesh::MeshMode;
+use crate::types::mesh::ShadingMode;
 use crate::types::orientation::Orientation;
 use numpy::{IntoPyArray, PyArray2, PyArray3, PyArray4};
 use pyo3::prelude::*;
@@ -40,14 +40,13 @@ fn read_mesh<'py>(
     // Initialize logger if requested
     logging::atomic_init_logger(verbose)?;
     log::info!("Entering Rust read_mesh backend");
-    // Map optional string to MeshMode if provided
-    let mode_opt: Option<MeshMode> = mesh_mode.and_then(|s| match s.to_lowercase().as_str() {
-        "obj_only" | "obj-only" | "obj" => Some(MeshMode::ObjOnly),
-        "obj_texture" | "obj-texture" | "texture" | "tex" => Some(MeshMode::ObjTexture),
-        "full" => Some(MeshMode::Full),
+    // Map optional string to ShadingMode if provided
+    let mode_opt: Option<ShadingMode> = mesh_mode.and_then(|s| match s {
+        "vertex_color" => Some(ShadingMode::VertexColor),
+        "texture_mapped" => Some(ShadingMode::TextureMapped),
+        "blinn_phong" => Some(ShadingMode::BlinnPhong),
         _ => None,
     });
-
     let mesh = match mesh_io::read_mesh(
         obj_path,
         mode_opt,

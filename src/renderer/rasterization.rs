@@ -16,7 +16,7 @@ use crate::renderer::lighting::calculate_lighting;
 use crate::renderer::sampling::sample_texture_color_bilinear;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{Mesh, MeshMode, Scene};
+use crate::types::mesh::{Mesh, ShadingMode, Scene};
 
 /// Stores the interpolated attributes at a point on a triangle surface.
 ///
@@ -45,7 +45,7 @@ pub struct TriangleSurface {
     pub normals_ws: [Coordinate; 3],
     /// The UV texture coordinates for each vertex, as (u, v) pairs.
     pub uvs: [(f32, f32); 3],
-    /// The linear-space color at each vertex, used in ObjOnly mode.
+    /// The linear-space color at each vertex, used in VertexColor mode.
     pub colors: [Color; 3],
     /// The face normal of the triangle in world space.
     pub face_normal_ws: Coordinate,
@@ -123,7 +123,7 @@ pub fn extract_triangle_surface(
     }
     // Get UVs
     let mut uvs = [(0.0, 0.0); 3];
-    if mesh.mode == MeshMode::Full || mesh.mode == MeshMode::ObjTexture {
+    if mesh.mode == ShadingMode::BlinnPhong || mesh.mode == ShadingMode::TextureMapped {
         if let Some(submesh_texture) = &submesh.texture {
             if let Some(texture_uvs) = &submesh_texture.triangle_uvs {
                 let uv_idx_base = uv_triangle_id * 3;
@@ -142,7 +142,7 @@ pub fn extract_triangle_surface(
     }
     // Get vertex colors
     let mut colors = [Color::white(); 3];
-    if mesh.mode == MeshMode::ObjOnly {
+    if mesh.mode == ShadingMode::VertexColor {
         if let Some(v_colors) = &submesh.geometry.vertex_colors {
             if *i0 < v_colors.nrows() && *i1 < v_colors.nrows() && *i2 < v_colors.nrows() {
                 let v_colors_view = v_colors.view();
@@ -216,7 +216,7 @@ pub fn interpolate_triangle_surface(
     let uv = interpolate_uvs(&barycentric_coords, &triangle_surface.uvs);
     // Calculate base color based on mesh mode
     let base_color = match mesh.mode {
-        MeshMode::ObjOnly => {
+        ShadingMode::VertexColor => {
             // Interpolate vertex colors
             let interpolated_color =
                 interpolate_colors(&barycentric_coords, &triangle_surface.colors);
@@ -226,7 +226,7 @@ pub fn interpolate_triangle_surface(
                 interpolated_color.b().max(0.0),
             )
         }
-        MeshMode::ObjTexture | MeshMode::Full => {
+        ShadingMode::TextureMapped | ShadingMode::BlinnPhong => {
             if let Some(submesh_texture) = &submesh.texture {
                 if let Some(tex_image) = &submesh_texture.texture {
                     sample_texture_color_bilinear(

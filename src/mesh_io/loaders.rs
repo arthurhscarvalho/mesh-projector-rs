@@ -15,7 +15,7 @@ use crate::mesh_io::{
     },
 };
 use crate::renderer::geometry::precompute_triangle_normals;
-use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, Scene};
+use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture, Scene, ShadingMode};
 use log::{info, warn};
 use std::path::{Path, PathBuf};
 use tobj;
@@ -23,7 +23,7 @@ use tobj;
 /// Read a mesh from an OBJ, inferring materials/textures from the OBJ/MTL unless a mode is supplied
 pub fn read_mesh_internal(
     obj_path: &str,
-    mesh_mode: Option<MeshMode>,
+    mesh_mode: Option<ShadingMode>,
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
@@ -43,19 +43,19 @@ pub fn read_mesh_internal(
         return Err(MeshError::NoModelsFound);
     }
     // Decide mode if not provided
-    let mut inferred_mode = MeshMode::ObjOnly;
+    let mut inferred_mode = ShadingMode::VertexColor;
     if let Some(mode) = mesh_mode {
         inferred_mode = mode;
     } else if let Ok(materials) = &materials_result {
         if !materials.is_empty() {
-            inferred_mode = MeshMode::Full;
+            inferred_mode = ShadingMode::BlinnPhong;
         }
     }
     info!("Reading mesh: {} in mode: {:?}", obj_path, inferred_mode);
     // Clone raw tobj materials (if available) for texture filename lookup without borrowing conflict
     let materials_raw_vec_opt: Option<Vec<tobj::Material>> =
         materials_result.as_ref().ok().cloned();
-    // Process materials (for Full/ObjOnly/ObjTexture unified path)
+    // Process materials (for BlinnPhong/VertexColor/TextureMapped unified path)
     let materials = process_materials_from_obj(materials_result, inferred_mode, ignore_opacity)?;
     // Load textures per-submesh when needed and build meshes
     let (meshes, leaked_textures) = process_submeshes_with_textures(
@@ -115,7 +115,7 @@ fn bounding_box(models: &[tobj::Model]) -> ([f32; 3], [f32; 3]) {
 fn process_submeshes_with_textures(
     models: &[tobj::Model],
     materials: &[MeshMaterial],
-    mode: MeshMode,
+    mode: ShadingMode,
     precision: u32,
     flip_v_coordinate: bool,
     obj_path: &str,
@@ -154,7 +154,7 @@ fn process_submeshes_with_textures(
 fn process_single_submesh_with_texture(
     model: &tobj::Model,
     materials: &[MeshMaterial],
-    mode: MeshMode,
+    mode: ShadingMode,
     precision: u32,
     flip_v_coordinate: bool,
     obj_dir: Option<&PathBuf>,
@@ -191,7 +191,7 @@ fn process_single_submesh_with_texture(
     };
     let material = get_submesh_material(mesh.material_id, materials, mode, &model.name);
     let mut texture_ref_opt: Option<&'static MeshTexture> = None;
-    if matches!(mode, MeshMode::Full | MeshMode::ObjTexture) {
+    if matches!(mode, ShadingMode::BlinnPhong | ShadingMode::TextureMapped) {
         if let Some(tex) =
             load_texture_for_model(model, flip_v_coordinate, obj_dir, materials_raw_opt)?
         {

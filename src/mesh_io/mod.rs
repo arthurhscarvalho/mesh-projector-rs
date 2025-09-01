@@ -22,7 +22,7 @@ pub use image::save_image_data;
 /// from the OBJ/MTL contents (textures/materials discovered while reading the OBJ).
 pub fn read_mesh(
     obj_path: &str,
-    mesh_mode: Option<crate::types::mesh::MeshMode>,
+    mesh_mode: Option<crate::types::mesh::ShadingMode>,
     precision: u32,
     flip_v_coordinate: bool,
     ignore_opacity: bool,

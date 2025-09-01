@@ -1,7 +1,7 @@
 //! Material handling for mesh I/O operations.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use crate::types::mesh::{MeshMaterial, MeshMode};
+use crate::types::mesh::{MeshMaterial, ShadingMode};
 use log::{info, warn};
 use tobj;
 
@@ -18,13 +18,13 @@ pub const DEFAULT_MATERIAL: MeshMaterial = MeshMaterial {
 /// Load and process materials from tobj result
 pub fn process_materials_from_obj(
     obj_materials_result: Result<Vec<tobj::Material>, tobj::LoadError>,
-    mode: MeshMode,
+    mode: ShadingMode,
     ignore_opacity: bool,
 ) -> MeshResult<Vec<MeshMaterial>> {
     match mode {
-        MeshMode::ObjOnly => {
-            // Always use hardcoded material for ObjOnly mode
-            info!("Using hardcoded material for ObjOnly mode");
+        ShadingMode::VertexColor => {
+            // Always use hardcoded material for VertexColor mode
+            info!("Using hardcoded material for VertexColor mode");
             Ok(vec![MeshMaterial {
                 ka: [0.0, 0.0, 0.0], // No Ambient term from material
                 kd: [1.0, 1.0, 1.0], // Base color modulation (vertex color is base)
@@ -34,9 +34,9 @@ pub fn process_materials_from_obj(
                 illum: 0, // Color = ShadingColor (no lighting calculation)
             }])
         }
-        MeshMode::ObjTexture => {
-            // Always use hardcoded material for ObjTexture mode
-            info!("Using hardcoded material for ObjTexture mode");
+        ShadingMode::TextureMapped => {
+            // Always use hardcoded material for TextureMapped mode
+            info!("Using hardcoded material for TextureMapped mode");
             Ok(vec![MeshMaterial {
                 ka: [0.0, 0.0, 0.0], // No Ambient
                 kd: [1.0, 1.0, 1.0], // Base color modulation (texture is base)
@@ -46,7 +46,9 @@ pub fn process_materials_from_obj(
                 illum: 0,            // Color = ShadingColor (no lighting calc)
             }])
         }
-        MeshMode::Full => process_materials_for_full_mode(obj_materials_result, ignore_opacity),
+        ShadingMode::BlinnPhong => {
+            process_materials_for_full_mode(obj_materials_result, ignore_opacity)
+        }
     }
 }
 
@@ -54,7 +56,7 @@ pub fn process_materials_from_obj(
 pub fn get_submesh_material(
     material_idx_opt: Option<usize>,
     materials: &[MeshMaterial],
-    mode: MeshMode,
+    mode: ShadingMode,
     model_name: &str,
 ) -> MeshMaterial {
     match material_idx_opt {
@@ -124,7 +126,7 @@ fn log_material_assignment(material: &MeshMaterial, idx: usize, model_name: &str
     );
 }
 
-/// Process materials for Full mode: load from MTL file and map based on OBJ material references
+/// Process materials for BlinnPhong mode: load from MTL file and map based on OBJ material references
 fn process_materials_for_full_mode(
     obj_materials_result: Result<Vec<tobj::Material>, tobj::LoadError>,
     ignore_opacity: bool,
@@ -132,7 +134,7 @@ fn process_materials_for_full_mode(
     match obj_materials_result {
         Ok(materials) if !materials.is_empty() => {
             info!(
-                "Loaded {} materials from .mtl files linked in OBJ for Full mode.",
+                "Loaded {} materials from .mtl files linked in OBJ for BlinnPhong mode.",
                 materials.len()
             );
             Ok(materials

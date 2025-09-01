@@ -8,13 +8,13 @@
 use ndarray::{Array2, Array3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MeshMode {
-    /// Only the OBJ file is used.
-    ObjOnly,
-    /// The OBJ file and texture are used.
-    ObjTexture,
-    /// The OBJ file, texture, and material are used.
-    Full,
+pub enum ShadingMode {
+    /// Uses per-vertex colors for shading without additional lighting.
+    VertexColor,
+    /// Applies a texture directly to the mesh (unlit).
+    TextureMapped,
+    /// Lit shading using the Blinn-Phong model.
+    BlinnPhong,
 }
 
 pub struct MeshGeometry {
@@ -26,7 +26,7 @@ pub struct MeshGeometry {
     pub vertex_normals: Option<Array2<f32>>,
     /// Precomputed triangle face normals (M, 3), in world space (derived from scaled vertices).
     pub face_normals: Array2<f32>,
-    /// Vertex colors (N, 3) (optional, primarily for ObjOnly mode).
+    /// Vertex colors (N, 3) (optional, primarily for VertexColor mode).
     pub vertex_colors: Option<Array2<f32>>,
 }
 
@@ -68,5 +68,5 @@ pub struct Scene<'a> {
     // Textures: shared textures for all meshes
     pub textures: Option<Vec<&'a MeshTexture>>,
     // Rendering mode
-    pub mode: MeshMode,
+    pub mode: ShadingMode,
 }

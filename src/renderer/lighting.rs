@@ -8,7 +8,7 @@ use crate::renderer::config::{LightSource, ViewConfig};
 use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{MeshMaterial, MeshMode};
+use crate::types::mesh::{MeshMaterial, ShadingMode};
 
 fn calculate_light_direction(view_config: &ViewConfig, normal_n_vs: Coordinate) -> Coordinate {
     let light_source = &view_config.light_source;
@@ -58,7 +58,7 @@ pub fn calculate_lighting(
     interpolated_point: &TrianglePoint,
     view_config: &ViewConfig,
     material: &MeshMaterial, // Material properties of the surface
-    mesh_mode: &MeshMode,    // Current rendering mode
+    mesh_mode: &ShadingMode,    // Current rendering mode
 ) -> Color {
     let global_ambient: Color = Color::from_srgb(0.5, 0.5, 0.5);
     let global_diffuse: Color = Color::from_srgb(1.0, 1.0, 1.0);
@@ -69,7 +69,7 @@ pub fn calculate_lighting(
     let vertex_position_ws = interpolated_point.position_ws;
     // For illum model 0, return base color modulated by ambient only
     if material.illum == 0
-        && (*mesh_mode == MeshMode::ObjOnly || *mesh_mode == MeshMode::ObjTexture)
+        && (*mesh_mode == ShadingMode::VertexColor || *mesh_mode == ShadingMode::TextureMapped)
     {
         return base_color_linear;
     }
@@ -125,7 +125,7 @@ pub fn calculate_lighting(
                 0.0
             };
             let specular_comp = linear_ks * light_color * specular_intensity * global_specular;
-            // Full model: Ambient + Diffuse + Specular (illum >= 2)
+            // BlinnPhong model: Ambient + Diffuse + Specular (illum >= 2)
             ambient_comp + diffuse_comp + specular_comp
         }
     };
