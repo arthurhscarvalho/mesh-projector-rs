@@ -43,9 +43,9 @@ fn main() {
     let lighting_config = LightingConfig {
         source: LightSource::Headlight,
         components: LightComponents {
-            ambient: Color::from_srgb(0.5, 0.5, 0.5),
-            diffuse: Color::from_srgb(1.0, 1.0, 1.0),
-            specular: Color::from_srgb(0.0, 0.0, 0.0),
+            global_ambient: Color::from_srgb(0.5, 0.5, 0.5),
+            global_diffuse: Color::from_srgb(1.0, 1.0, 1.0),
+            global_specular: Color::from_srgb(0.0, 0.0, 0.0),
         },
     };
     // Project to image on bounding cube

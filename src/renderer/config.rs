@@ -15,9 +15,9 @@ pub enum LightSource {
 }
 
 pub struct LightComponents {
-    pub ambient: Color,
-    pub diffuse: Color,
-    pub specular: Color,
+    pub global_ambient: Color,
+    pub global_diffuse: Color,
+    pub global_specular: Color,
 }
 
 pub struct LightingConfig {

@@ -67,9 +67,9 @@ pub fn calculate_lighting(
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;
     let vertex_position_ws = interpolated_point.position_ws;
-    let global_ambient = render_pass_config.lighting.components.ambient;
-    let global_diffuse = render_pass_config.lighting.components.diffuse;
-    let global_specular = render_pass_config.lighting.components.specular;
+    let global_ambient = render_pass_config.lighting.components.global_ambient;
+    let global_diffuse = render_pass_config.lighting.components.global_diffuse;
+    let global_specular = render_pass_config.lighting.components.global_specular;
     // For illum model 0, return base color modulated by ambient only
     if material.illum == 0
         && (*mesh_mode == ShadingMode::VertexColor || *mesh_mode == ShadingMode::TextureMapped)
