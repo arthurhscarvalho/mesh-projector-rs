@@ -5,7 +5,7 @@ use ndarray::Array2;
 
 /// Describes a deterministic preprocessing transform applied uniformly
 /// across all meshes of a model: translate to global center, scale
-/// to target precision cube, then shift to the cube center.
+/// to target resolution cube, then shift to the cube center.
 #[derive(Clone, Copy, Debug)]
 pub struct PreprocessTransform {
     pub center: [f32; 3],
@@ -61,8 +61,8 @@ pub fn normalize_normals(normals: &mut Array2<f32>) {
     }
 }
 
-/// Preprocess vertices by centering and scaling to fit within target precision
-pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<f32> {
+/// Preprocess vertices by centering and scaling to fit within target resolution
+pub fn preprocess_vertices(mut vertices: Array2<f32>, resolution: u16) -> Array2<f32> {
     let original_bounds = calculate_bounding_box(&vertices);
     info!(
         "Original BBox Min: {:?}, Max: {:?}",
@@ -75,10 +75,10 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<
         "Centered BBox Min: {:?}, Max: {:?}",
         centered_bounds.min, centered_bounds.max
     );
-    // Scale vertices to fit precision
-    scale_vertices_to_precision(&mut vertices, precision);
-    // Center in the precision cube
-    center_in_precision_cube(&mut vertices, precision);
+    // Scale vertices to fit resolution
+    scale_vertices_to_resolution(&mut vertices, resolution);
+    // Center in the resolution cube
+    center_in_resolution_cube(&mut vertices, resolution);
     let final_bounds = calculate_bounding_box(&vertices);
     info!(
         "Final BBox Min: {:?}, Max: {:?}",
@@ -87,12 +87,12 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, precision: u32) -> Array2<
     vertices
 }
 
-/// Build a global preprocessing transform from a known bounding box and precision.
+/// Build a global preprocessing transform from a known bounding box and resolution.
 /// This lets us preprocess all meshes consistently using a single transform.
 pub fn build_transform_from_bounds(
     min_bound: [f32; 3],
     max_bound: [f32; 3],
-    precision: u32,
+    resolution: u16,
 ) -> PreprocessTransform {
     let bounds = BoundingBox {
         min: min_bound,
@@ -107,7 +107,7 @@ pub fn build_transform_from_bounds(
         }
     }
     let max_dimension = safe_size[0].max(safe_size[1]).max(safe_size[2]);
-    let target_max_val = (1 << precision) as f32 - 1.0;
+    let target_max_val = resolution as f32 - 1.0;
     // Safety margin currently 1.0 (no margin)
     let safety_margin = 1.0;
     let scale_factor = (target_max_val * safety_margin) / max_dimension;
@@ -207,8 +207,8 @@ fn center_vertices(vertices: &mut Array2<f32>, bounds: &BoundingBox) {
     }
 }
 
-/// Scale vertices to fit within precision bounds
-fn scale_vertices_to_precision(vertices: &mut Array2<f32>, precision: u32) {
+/// Scale vertices to fit within resolution bounds
+fn scale_vertices_to_resolution(vertices: &mut Array2<f32>, resolution: u16) {
     let bounds = calculate_bounding_box(vertices);
     let mut bbox_size = bounds.size();
     // Avoid division by zero
@@ -218,7 +218,7 @@ fn scale_vertices_to_precision(vertices: &mut Array2<f32>, precision: u32) {
         }
     }
     let max_dimension = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
-    let target_max_val = (1 << precision) as f32 - 1.0;
+    let target_max_val = resolution as f32 - 1.0;
     // The safety margin is the amount of space to leave at the edges of the cube.
     let safety_margin = 1.0;
     let scale_factor = (target_max_val * safety_margin) / max_dimension;
@@ -231,9 +231,9 @@ fn scale_vertices_to_precision(vertices: &mut Array2<f32>, precision: u32) {
     apply_scale_factor(vertices, scale_factor);
 }
 
-/// Center vertices in the precision cube
-fn center_in_precision_cube(vertices: &mut Array2<f32>, precision: u32) {
-    let target_max_val = (1 << precision) as f32 - 1.0;
+/// Center vertices in the resolution cube
+fn center_in_resolution_cube(vertices: &mut Array2<f32>, resolution: u16) {
+    let target_max_val = resolution as f32 - 1.0;
     let cube_center = target_max_val / 2.0;
     let bounds = calculate_bounding_box(vertices);
     let current_center = bounds.center();

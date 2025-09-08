@@ -22,12 +22,12 @@ use rayon::iter::ParallelIterator;
 /// An ImageBatch containing all projection data.
 pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
-        "Initializing projector. Mode: {:?}, Precision: {}",
+        "Initializing projector. Mode: {:?}, Resolution: {}",
         mesh.mode,
-        settings.precision
+        settings.resolution
     );
     // Setup & Validation
-    let max_bound: u64 = 1 << settings.precision;
+    let max_bound: u16 = settings.resolution;
     let max_bound_f32: f32 = max_bound as f32;
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;

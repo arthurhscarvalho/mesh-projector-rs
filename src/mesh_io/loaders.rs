@@ -27,17 +27,10 @@ use tobj;
 pub fn read_mesh_internal(
     obj_path: &str,
     mesh_mode: Option<ShadingMode>,
-    precision: u32,
+    resolution: u16,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
 ) -> MeshResult<Scene> {
-    // Validate precision bounds
-    if precision < 8 || precision > 16 {
-        return Err(MeshError::PrecisionError(format!(
-            "Invalid precision value: {}. Must be between 8 and 16.",
-            precision
-        )));
-    }
     // Validate input files
     validate_file_exists(obj_path)?;
     // Load OBJ file
@@ -68,7 +61,7 @@ pub fn read_mesh_internal(
         &models,
         &materials,
         inferred_mode,
-        precision,
+        resolution,
         flip_v_coordinate,
         obj_path,
         materials_raw_vec_opt.as_deref(),
@@ -120,7 +113,7 @@ fn process_submeshes_with_textures(
     models: &[tobj::Model],
     materials: &[MeshMaterial],
     mode: ShadingMode,
-    precision: u32,
+    resolution: u16,
     flip_v_coordinate: bool,
     obj_path: &str,
     materials_raw_opt: Option<&[tobj::Material]>,
@@ -133,14 +126,14 @@ fn process_submeshes_with_textures(
     let (global_min, global_max) = bounding_box(&models);
     // Build a single transform to be applied to every submesh
     let global_transform: PreprocessTransform =
-        build_transform_from_bounds(global_min, global_max, precision);
+        build_transform_from_bounds(global_min, global_max, resolution);
     // Second pass: process each model using the global transform
     for model in models {
         if let Some(submesh) = process_single_submesh_with_texture(
             model,
             materials,
             mode,
-            precision,
+            resolution,
             flip_v_coordinate,
             obj_dir.as_ref(),
             materials_raw_opt,
@@ -159,7 +152,7 @@ fn process_single_submesh_with_texture(
     model: &tobj::Model,
     materials: &[MeshMaterial],
     mode: ShadingMode,
-    precision: u32,
+    resolution: u16,
     flip_v_coordinate: bool,
     obj_dir: Option<&PathBuf>,
     materials_raw_opt: Option<&[tobj::Material]>,
@@ -185,7 +178,7 @@ fn process_single_submesh_with_texture(
         apply_transform_to_vertices(&mut v, t);
         v
     } else {
-        preprocess_vertices(vertices, precision)
+        preprocess_vertices(vertices, resolution)
     };
     let face_normals = precompute_triangle_normals(processed_vertices.view(), triangles.view());
     let geometry = MeshGeometry {

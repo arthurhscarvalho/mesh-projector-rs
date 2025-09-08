@@ -23,14 +23,14 @@ pub use image::save_image_data;
 pub fn read_mesh(
     obj_path: &str,
     mesh_mode: Option<crate::types::mesh::ShadingMode>,
-    precision: u32,
+    resolution: u16,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
 ) -> Result<Scene, MeshError> {
     loaders::read_mesh_internal(
         obj_path,
         mesh_mode,
-        precision,
+        resolution,
         flip_v_coordinate,
         ignore_opacity,
     )

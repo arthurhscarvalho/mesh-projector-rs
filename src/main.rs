@@ -9,9 +9,9 @@ use std::path::Path;
 fn main() {
     // Initialize logger
     atomic_init_logger(true).unwrap();
-    // Set up mesh path, precision, filtering radius, and output directory
+    // Set up mesh path, resolution, filtering radius, and output directory
     const MESH_PATH: &str = "assets/just_a_girl_C0-L5_deq_tri.obj";
-    const PRECISION: u64 = 12;
+    const RESOLUTION: u16 = 4096;
     const FILTERING_RADIUS: u64 = 0;
     let output_dir: &Path = Path::new("projections/");
     // Set up view angles
@@ -29,10 +29,11 @@ fn main() {
         .map(|angle| Orientation::from(*angle))
         .collect();
     // Read mesh from OBJ file
-    let mesh = mesh_projector::mesh_io::read_mesh(MESH_PATH, None, 12, true, false).unwrap();
+    let mesh =
+        mesh_projector::mesh_io::read_mesh(MESH_PATH, None, RESOLUTION, true, false).unwrap();
     // Set up projection settings for cube projection
     let settings = ProjectionConfig {
-        precision: PRECISION,
+        resolution: RESOLUTION,
         filtering_window_radius: FILTERING_RADIUS,
         view_angles,
     };

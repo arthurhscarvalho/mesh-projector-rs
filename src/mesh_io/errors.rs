@@ -20,7 +20,7 @@ pub enum MeshError {
     InvalidTriangleData(String),
     InvalidUvData(String),
     /// Configuration errors
-    PrecisionError(String),
+    ResolutionError(String),
     /// Internal processing errors
     GeometryProcessingError(String),
     MaterialProcessingError(String),
@@ -48,7 +48,7 @@ impl fmt::Display for MeshError {
                 write!(f, "Invalid triangle data: {}", details)
             }
             MeshError::InvalidUvData(details) => write!(f, "Invalid UV data: {}", details),
-            MeshError::PrecisionError(details) => write!(f, "Precision error: {}", details),
+            MeshError::ResolutionError(details) => write!(f, "Resolution error: {}", details),
 
             MeshError::GeometryProcessingError(details) => {
                 write!(f, "Geometry processing error: {}", details)

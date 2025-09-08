@@ -24,11 +24,11 @@ pub fn discretize_mesh_to_point_cloud(
     settings: &PointCloudConfig,
 ) -> (Array2<f32>, Array2<u8>) {
     log::info!(
-        "Initializing 3D mesh discretization. Mode: {:?}, Precision: {}",
+        "Initializing 3D mesh discretization. Mode: {:?}, Resolution: {}",
         mesh.mode,
-        settings.precision
+        settings.resolution
     );
-    let max_bound_f32 = (1 << settings.precision) as f32;
+    let max_bound_f32 = settings.resolution as f32;
     // Define a transformation matrix for the world coordinates
     let angles = Orientation::new(0.0, 0.0, 0.0);
     let rotation_matrix = angles.to_rotation_matrix();
