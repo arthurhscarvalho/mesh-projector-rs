@@ -40,11 +40,16 @@ fn main() {
     // Project to image on bounding cube
     let projections = mesh_projector::projector::project_to_image(&mesh, &settings);
     // Save projections
-    projections
-        .par_iter()
-        .enumerate()
-        .for_each(|(i, (projection, _, _, _))| {
-            mesh_projector::mesh_io::save_image_data(&projection.to_owned(), output_dir, i)
-                .unwrap();
-        });
+    projections.par_iter().enumerate().for_each(
+        |(i, (projection, depth_map, normal_map, occupancy_map))| {
+            let path = output_dir.join(format!("projection_{}.png", i));
+            mesh_projector::mesh_io::save_image_data(projection.into_dyn(), &path).unwrap();
+            let path = output_dir.join(format!("depth_map_{}.png", i));
+            mesh_projector::mesh_io::save_image_data(depth_map.into_dyn(), &path).unwrap();
+            let path = output_dir.join(format!("normal_map_{}.png", i));
+            mesh_projector::mesh_io::save_image_data(normal_map.into_dyn(), &path).unwrap();
+            let path = output_dir.join(format!("occupancy_map_{}.png", i));
+            mesh_projector::mesh_io::save_image_data(occupancy_map.into_dyn(), &path).unwrap();
+        },
+    );
 }
