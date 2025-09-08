@@ -67,6 +67,7 @@ pub fn calculate_lighting(
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;
     let vertex_position_ws = interpolated_point.position_ws;
+    // Extract global lighting components
     let global_ambient = render_pass_config.lighting.components.global_ambient;
     let global_diffuse = render_pass_config.lighting.components.global_diffuse;
     let global_specular = render_pass_config.lighting.components.global_specular;
@@ -88,7 +89,6 @@ pub fn calculate_lighting(
     let mut normal_n_vs = normal_vs;
     normal_n_vs.normalize();
     // Determine light direction and light color in view-space
-    let light_color = Color::white();
     let light_dir_vs = calculate_light_direction(render_pass_config, normal_n_vs);
     // View direction in view space is from surface point to camera (origin in VS)
     let mut view_dir_vs = -vertex_position_vs;
@@ -106,7 +106,7 @@ pub fn calculate_lighting(
             let ambient_comp = base_color_linear * linear_ka * global_ambient;
             // Diffuse component
             let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
-            let diffuse_comp = base_color_linear * linear_kd * light_color * dot_nl;
+            let diffuse_comp = base_color_linear * linear_kd * dot_nl;
             // Ambient + Diffuse
             ambient_comp + diffuse_comp
         }
@@ -116,8 +116,7 @@ pub fn calculate_lighting(
             let ambient_comp = base_color_linear * linear_ka * global_ambient;
             // Diffuse component
             let dot_nl = normal_n_vs.dot(&light_dir_vs).max(0.0);
-            let diffuse_comp =
-                base_color_linear * linear_kd * light_color * dot_nl * global_diffuse;
+            let diffuse_comp = base_color_linear * linear_kd * dot_nl * global_diffuse;
             // Specular component (Blinn-Phong)
             let mut halfway_dir = light_dir_vs + view_dir_vs;
             halfway_dir.normalize();
@@ -127,7 +126,7 @@ pub fn calculate_lighting(
             } else {
                 0.0
             };
-            let specular_comp = linear_ks * light_color * specular_intensity * global_specular;
+            let specular_comp = linear_ks * specular_intensity * global_specular;
             // BlinnPhong model: Ambient + Diffuse + Specular (illum >= 2)
             ambient_comp + diffuse_comp + specular_comp
         }
