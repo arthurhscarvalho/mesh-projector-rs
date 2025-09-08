@@ -1,7 +1,6 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
 use mesh_projector::projector::config::ProjectionConfig;
-use mesh_projector::projector::config::RotationConfig;
 use mesh_projector::types::orientation::Orientation;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -15,22 +14,30 @@ fn main() {
     const PRECISION: u64 = 12;
     const FILTERING_RADIUS: u64 = 0;
     let output_dir: &Path = Path::new("projections/");
+    // Set up view angles
+    const PI: f32 = std::f32::consts::PI;
+    const VIEW_ANGLES: [[f32; 3]; 6] = [
+        [0.0, 0.0, 0.0],       // Front: Cam at +Z, looking -Z. No rotation.
+        [0.0, PI, 0.0],        // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
+        [0.0, PI / 2.0, 0.0],  // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
+        [0.0, -PI / 2.0, 0.0], // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
+        [PI / 2.0, 0.0, 0.0],  // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
+        [-PI / 2.0, 0.0, 0.0], // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
+    ];
+    let view_angles = VIEW_ANGLES
+        .iter()
+        .map(|angle| Orientation::from(*angle))
+        .collect();
     // Read mesh from OBJ file
     let mesh = mesh_projector::mesh_io::read_mesh(MESH_PATH, None, 12, true, false).unwrap();
-    // Set up rotation config for cube projection (will be handled internally)
-    let rotation_config = RotationConfig {
-        angle_deltas: Orientation::from([0.0, 0.0, 0.0]),
-        num_steps: 1,
-    };
     // Set up projection settings for cube projection
     let settings = ProjectionConfig {
         precision: PRECISION,
         filtering_window_radius: FILTERING_RADIUS,
-        rotation_config,
+        view_angles,
     };
     // Project to image on bounding cube
-    let projections =
-        mesh_projector::projector::project_to_image_on_bounding_cube(&mesh, &settings);
+    let projections = mesh_projector::projector::project_to_image(&mesh, &settings);
     // Save projections
     projections
         .par_iter()

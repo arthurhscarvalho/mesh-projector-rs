@@ -13,8 +13,8 @@ pub struct ProjectionConfig {
     pub precision: u64,
     /// Radius for outlier filtering (0 = disabled).
     pub filtering_window_radius: u64,
-    /// Optional rotation configuration. If None, uses default 6-view orthographic projection.
-    pub rotation_config: RotationConfig,
+    /// Angles for rotation (pitch, yaw, roll in radians)
+    pub view_angles: Vec<Orientation>,
 }
 
 /// Defines the parameters for the point cloud generation.
@@ -23,12 +23,4 @@ pub struct PointCloudConfig {
     pub precision: u64,
     /// Factor to control the density of points in the discretized point cloud.
     pub point_cloud_density_factor: f32,
-}
-
-/// Contains settings for controlling mesh rotation during projection.
-pub struct RotationConfig {
-    /// Angle deltas for rotation (pitch, yaw, roll in radians)
-    pub angle_deltas: Orientation,
-    /// Number of steps for each rotation axis
-    pub num_steps: usize,
 }

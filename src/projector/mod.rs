@@ -5,31 +5,26 @@ pub mod constants;
 mod point_cloud;
 mod projection;
 
-use crate::mesh_io::save_image_data;
 use crate::projector::config::{PointCloudConfig, ProjectionConfig};
 use crate::renderer::config::{LightSource, ViewConfig};
 use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
 use crate::types::mesh::Scene;
-use crate::types::orientation::Orientation;
 use constants::NUM_CHANNELS;
 use ndarray::Array2;
 use rayon::iter::IndexedParallelIterator;
-use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
-use std::path::Path;
 
 /// Computes cube projections for the given mesh and settings.
 ///
 /// Returns:
 /// An ImageBatch containing all projection data.
-pub fn project_to_image_on_bounding_cube(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
     log::info!(
-        "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
+        "Initializing projector. Mode: {:?}, Precision: {}",
         mesh.mode,
-        settings.precision,
-        settings.filtering_window_radius
+        settings.precision
     );
     // Setup & Validation
     let max_bound: u64 = 1 << settings.precision;
@@ -38,90 +33,7 @@ pub fn project_to_image_on_bounding_cube(mesh: &Scene, settings: &ProjectionConf
     let rows = max_bound_u;
     let cols = max_bound_u;
     // Determine number of views and prepare view configurations
-    const NUM_VIEWS: usize = 6;
-    let mut view_configs = Vec::with_capacity(NUM_VIEWS);
-    // Initialize image batch
-    let mut image_batch = ImageBatch::new(NUM_VIEWS, rows, cols, NUM_CHANNELS);
-    // Handle empty meshes
-    if mesh.meshes.is_empty() {
-        log::warn!("Empty mesh (no meshes). Returning empty image batch.");
-        return image_batch;
-    }
-    // Set view configs for cube projection
-    const PI: f32 = std::f32::consts::PI;
-    const VIEW_ANGLES: [[f32; 3]; 6] = [
-        [0.0, 0.0, 0.0],       // Front: Cam at +Z, looking -Z. No rotation.
-        [0.0, PI, 0.0],        // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
-        [0.0, PI / 2.0, 0.0],  // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
-        [0.0, -PI / 2.0, 0.0], // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
-        [PI / 2.0, 0.0, 0.0],  // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
-        [-PI / 2.0, 0.0, 0.0], // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
-    ];
-    // Set view configs for cube projection
-    for i in 0..NUM_VIEWS {
-        // Create orientation from the view angles
-        let angles = Orientation::from(VIEW_ANGLES[i]);
-        // Create rotation matrix from the orientation
-        let rotation_matrix = angles.to_rotation_matrix();
-        // Create view direction from the rotation matrix
-        let view_direction = Coordinate::new(
-            rotation_matrix[[0, 2]],
-            rotation_matrix[[1, 2]],
-            rotation_matrix[[2, 2]],
-        );
-        // Create view config for the current view
-        view_configs.push(ViewConfig {
-            view_direction,
-            transformation_matrix: create_view_matrix(&rotation_matrix),
-            max_bound_f32,
-            light_source: LightSource::Headlight,
-        });
-    }
-    // Compute projections for each view in parallel
-    image_batch.par_iter_mut().enumerate().for_each(
-        |(i, (mut projection, mut depth_map, mut normal_map, mut occupancy_map))| {
-            let view_config = &view_configs[i];
-            log::info!("Computing projection {} of {}", i + 1, NUM_VIEWS);
-            // Compute projection for this view
-            let (proj, depth, normal, occ, outliers) =
-                projection::compute_projection(&mesh, &settings, view_config);
-            // Log outlier filtering results if requested
-            if settings.filtering_window_radius > 0 {
-                log::info!(
-                    "Outlier filtering removed {} points for view {}",
-                    outliers,
-                    i + 1
-                );
-            }
-            // Store results in the image batch
-            projection.assign(&proj);
-            depth_map.assign(&depth);
-            normal_map.assign(&normal);
-            occupancy_map.assign(&occ);
-        },
-    );
-    image_batch
-}
-
-/// Computes projections based on the specified mode (either 6 orthographic views or rotation-based).
-///
-/// Returns an ImageBatch containing all projection data.
-pub fn project_to_image_by_rotation(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
-    log::info!(
-        "Initializing projector. Mode: {:?}, Precision: {}, Filtering: {}",
-        mesh.mode,
-        settings.precision,
-        settings.filtering_window_radius
-    );
-    // Setup & Validation
-    let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f32: f32 = max_bound as f32;
-    let max_bound_u: usize = max_bound as usize;
-    let rows = max_bound_u;
-    let cols = max_bound_u;
-    // Determine number of views and prepare view configurations
-    let rotation_config = &settings.rotation_config;
-    let num_views = rotation_config.num_steps;
+    let num_views = settings.view_angles.len();
     let mut view_configs = Vec::with_capacity(num_views);
     // Initialize image batch
     let mut image_batch = ImageBatch::new(num_views, rows, cols, NUM_CHANNELS);
@@ -130,16 +42,12 @@ pub fn project_to_image_by_rotation(mesh: &Scene, settings: &ProjectionConfig) -
         log::warn!("Empty mesh (no meshes). Returning empty image batch.");
         return image_batch;
     }
-    // Create view configs for rotation-based projection
+    // Set view configs for cube projection
     for i in 0..num_views {
         // Create orientation from the view angles
-        let angles = Orientation::new(
-            rotation_config.angle_deltas.pitch() * i as f32,
-            rotation_config.angle_deltas.yaw() * i as f32,
-            rotation_config.angle_deltas.roll() * i as f32,
-        );
+        let view_angle = &settings.view_angles[i];
         // Create rotation matrix from the orientation
-        let rotation_matrix = angles.to_rotation_matrix();
+        let rotation_matrix = view_angle.to_rotation_matrix();
         // Create view direction from the rotation matrix
         let view_direction = Coordinate::new(
             rotation_matrix[[0, 2]],
@@ -178,79 +86,6 @@ pub fn project_to_image_by_rotation(mesh: &Scene, settings: &ProjectionConfig) -
         },
     );
     image_batch
-}
-
-/// Computes rotation-based projections and saves them on-the-fly in parallel.
-/// This function does not return any projection data.
-pub fn project_to_image_by_rotation_to_file(
-    mesh: &Scene,
-    settings: &ProjectionConfig,
-    output_dir: &Path,
-) {
-    log::info!(
-        "Initializing rotation-based projector. Precision: {}, Filtering: {}",
-        settings.precision,
-        settings.filtering_window_radius
-    );
-    // Setup & Validation
-    let max_bound: u64 = 1 << settings.precision;
-    let max_bound_f32: f32 = max_bound as f32;
-    // Determine number of views and prepare view configurations
-    let rotation_config = &settings.rotation_config;
-    let num_steps = rotation_config.num_steps;
-    let mut view_configs = Vec::with_capacity(num_steps);
-    // Handle empty meshes
-    if mesh.meshes.is_empty() {
-        log::warn!("Empty mesh (no meshes). Skipping projection.");
-        return;
-    }
-    // Create view configs for rotation-based projection
-    for i in 0..num_steps {
-        // Create orientation from the view angles
-        let angles = Orientation::new(
-            rotation_config.angle_deltas.pitch() * i as f32,
-            rotation_config.angle_deltas.yaw() * i as f32,
-            rotation_config.angle_deltas.roll() * i as f32,
-        );
-        // Create rotation matrix from the orientation
-        let rotation_matrix = angles.to_rotation_matrix();
-        // Create view direction from the rotation matrix
-        let view_direction = Coordinate::new(
-            rotation_matrix[[0, 2]],
-            rotation_matrix[[1, 2]],
-            rotation_matrix[[2, 2]],
-        );
-        // Create view config for the current view
-        view_configs.push(ViewConfig {
-            view_direction,
-            transformation_matrix: create_view_matrix(&rotation_matrix),
-            max_bound_f32,
-            light_source: LightSource::Headlight,
-        });
-    }
-    // Compute projections for each view in parallel
-    view_configs
-        .par_iter()
-        .enumerate()
-        .for_each(|(i, view_config)| {
-            log::info!("Computing projection {} of {}", i + 1, num_steps);
-            // Compute projection for this view
-            let (proj, _, _, _, outliers) =
-                projection::compute_projection(mesh, settings, view_config);
-            // Log outlier filtering results if requested
-            if settings.filtering_window_radius > 0 {
-                log::info!(
-                    "Outlier filtering removed {} points for view {}",
-                    outliers,
-                    i + 1
-                );
-            }
-            // Save the projection data for the current view
-            if let Err(e) = save_image_data(&proj, output_dir, i) {
-                log::error!("Failed to save data for view {}: {}", i, e);
-            }
-        });
-    log::info!("Finished computing and saving all rotation-based projections.");
 }
 
 /// Discretizes a mesh into a point cloud.
