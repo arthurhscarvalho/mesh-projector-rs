@@ -1,6 +1,8 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
 use mesh_projector::projector::config::ProjectionConfig;
+use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig};
+use mesh_projector::types::color::Color;
 use mesh_projector::types::orientation::Orientation;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -37,8 +39,18 @@ fn main() {
         filtering_window_radius: FILTERING_RADIUS,
         view_angles,
     };
+    // Set up lighting configuration
+    let lighting_config = LightingConfig {
+        source: LightSource::Headlight,
+        components: LightComponents {
+            ambient: Color::from_srgb(0.5, 0.5, 0.5),
+            diffuse: Color::from_srgb(1.0, 1.0, 1.0),
+            specular: Color::from_srgb(0.0, 0.0, 0.0),
+        },
+    };
     // Project to image on bounding cube
-    let projections = mesh_projector::projector::project_to_image(&mesh, &settings);
+    let projections =
+        mesh_projector::projector::project_to_image(&mesh, &settings, &lighting_config);
     // Save projections
     projections.par_iter().enumerate().for_each(
         |(i, (projection, depth_map, normal_map, occupancy_map))| {

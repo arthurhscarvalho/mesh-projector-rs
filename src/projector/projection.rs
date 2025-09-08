@@ -6,7 +6,7 @@
 use crate::projector::config::ProjectionConfig;
 use crate::projector::constants::NUM_CHANNELS;
 use crate::renderer::buffers::ImageBuffers;
-use crate::renderer::config::ViewConfig;
+use crate::renderer::config::RenderPassConfig;
 use crate::renderer::filtering::filter_outliers;
 use crate::renderer::rasterization::rasterize_triangle_to_images;
 use crate::types::mesh::Scene;
@@ -16,7 +16,7 @@ use ndarray::{Array2, Array3};
 pub fn compute_projection(
     mesh: &Scene,
     settings: &ProjectionConfig,
-    view_config: &ViewConfig,
+    render_pass_config: &RenderPassConfig,
 ) -> (Array3<u8>, Array2<u8>, Array3<u8>, Array2<u8>, u64) {
     let max_bound: u16 = settings.resolution;
     let rows = max_bound as usize;
@@ -30,7 +30,7 @@ pub fn compute_projection(
         for triangle_index in 0..num_faces {
             rasterize_triangle_to_images(
                 &mesh,
-                view_config,
+                render_pass_config,
                 &mut buffers,
                 submesh_index,
                 triangle_index, // Local triangle index for geometry

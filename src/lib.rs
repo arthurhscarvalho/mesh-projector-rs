@@ -8,5 +8,5 @@ extern crate rayon;
 pub mod logging;
 pub mod mesh_io;
 pub mod projector;
-mod renderer;
+pub mod renderer;
 pub mod types;

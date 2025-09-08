@@ -4,16 +4,19 @@
 //! in 3D scenes, taking into account ambient, diffuse, and specular lighting
 //! components, as well as transformations between world and view space.
 
-use crate::renderer::config::{LightSource, ViewConfig};
+use crate::renderer::config::{LightSource, RenderPassConfig};
 use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
 use crate::types::mesh::{MeshMaterial, ShadingMode};
 
-fn calculate_light_direction(view_config: &ViewConfig, normal_n_vs: Coordinate) -> Coordinate {
-    let light_source = &view_config.light_source;
-    let view_dir_ws = view_config.view_direction;
-    let transformation_matrix = &view_config.transformation_matrix;
+fn calculate_light_direction(
+    render_pass_config: &RenderPassConfig,
+    normal_n_vs: Coordinate,
+) -> Coordinate {
+    let light_source = &render_pass_config.lighting.source;
+    let view_dir_ws = render_pass_config.view.view_direction;
+    let transformation_matrix = &render_pass_config.view.transformation_matrix;
     let light_dir_vs = match light_source {
         LightSource::Ambient => {
             // Ambient lighting: no specific light direction. We emulate uniform illumination
@@ -56,17 +59,17 @@ fn calculate_light_direction(view_config: &ViewConfig, normal_n_vs: Coordinate) 
 /// Calculates the final linear color based on base color, material properties, lighting, and normal.
 pub fn calculate_lighting(
     interpolated_point: &TrianglePoint,
-    view_config: &ViewConfig,
+    render_pass_config: &RenderPassConfig,
     material: &MeshMaterial, // Material properties of the surface
-    mesh_mode: &ShadingMode,    // Current rendering mode
+    mesh_mode: &ShadingMode, // Current rendering mode
 ) -> Color {
-    let global_ambient: Color = Color::from_srgb(0.5, 0.5, 0.5);
-    let global_diffuse: Color = Color::from_srgb(1.0, 1.0, 1.0);
-    let global_specular: Color = Color::from_srgb(0.0, 0.0, 0.0);
     // Extract data from interpolated attributes
     let base_color_linear = interpolated_point.base_color;
     let normal_ws = interpolated_point.normal_ws;
     let vertex_position_ws = interpolated_point.position_ws;
+    let global_ambient = render_pass_config.lighting.components.ambient;
+    let global_diffuse = render_pass_config.lighting.components.diffuse;
+    let global_specular = render_pass_config.lighting.components.specular;
     // For illum model 0, return base color modulated by ambient only
     if material.illum == 0
         && (*mesh_mode == ShadingMode::VertexColor || *mesh_mode == ShadingMode::TextureMapped)
@@ -78,7 +81,7 @@ pub fn calculate_lighting(
     let linear_kd = Color::from(material.kd);
     let linear_ks = Color::from(material.ks);
     // Transform normal and vertex position to view space
-    let transformation_matrix = &view_config.transformation_matrix;
+    let transformation_matrix = &render_pass_config.view.transformation_matrix;
     let normal_vs = normal_ws.to_view_space_as_vector(transformation_matrix);
     let vertex_position_vs = vertex_position_ws.to_view_space_as_point(transformation_matrix);
     // Normalize the normal in view space
@@ -86,7 +89,7 @@ pub fn calculate_lighting(
     normal_n_vs.normalize();
     // Determine light direction and light color in view-space
     let light_color = Color::white();
-    let light_dir_vs = calculate_light_direction(view_config, normal_n_vs);
+    let light_dir_vs = calculate_light_direction(render_pass_config, normal_n_vs);
     // View direction in view space is from surface point to camera (origin in VS)
     let mut view_dir_vs = -vertex_position_vs;
     view_dir_vs.normalize();

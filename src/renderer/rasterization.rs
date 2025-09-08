@@ -4,7 +4,7 @@
 
 use crate::projector::config::PointCloudConfig;
 use crate::renderer::buffers::{ImageBuffers, PointCloudBuffers};
-use crate::renderer::config::ViewConfig;
+use crate::renderer::config::RenderPassConfig;
 use crate::renderer::constants::{
     DEFAULT_MISSING_TEXTURE_COLOR, TRIANGLE_AREA_DEGENERACY_THRESHOLD,
 };
@@ -256,7 +256,7 @@ pub fn interpolate_triangle_surface(
 /// Rasterizes a single triangle based on the projection mesh.mode.
 pub fn rasterize_triangle_to_images(
     mesh: &Scene,
-    view_config: &ViewConfig,
+    render_pass_config: &RenderPassConfig,
     buffers: &mut ImageBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
@@ -269,16 +269,19 @@ pub fn rasterize_triangle_to_images(
         Err(()) => return, // Skip degenerate triangles
     };
     // Back-face Culling (using world-space face normal and world-space view direction)
-    if !is_triangle_visible(triangle_surface.face_normal_ws, view_config.view_direction) {
+    if !is_triangle_visible(
+        triangle_surface.face_normal_ws,
+        render_pass_config.view.view_direction,
+    ) {
         return;
     }
     // Define projection plane axes from the rotation matrix
-    let view_mat = &view_config.transformation_matrix;
+    let view_mat = &render_pass_config.view.transformation_matrix;
     let u_axis_ws = Coordinate::new(view_mat[[0, 0]], view_mat[[1, 0]], view_mat[[2, 0]]);
     let v_axis_ws = Coordinate::new(view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]);
-    let plane_normal_ws = view_config.view_direction;
+    let plane_normal_ws = render_pass_config.view.view_direction;
     // Calculate cube center coordinates
-    let cube_center = (view_config.max_bound_f32 - 1.0) / 2.0;
+    let cube_center = (render_pass_config.view.max_bound_f32 - 1.0) / 2.0;
     let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
     let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
     let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
@@ -325,7 +328,7 @@ pub fn rasterize_triangle_to_images(
             // Calculate final color with lighting (linear space)
             let final_color_linear = calculate_lighting(
                 &interpolated_point,
-                &view_config,
+                &render_pass_config,
                 &submesh.material,
                 &mesh.mode,
             );
@@ -343,11 +346,11 @@ pub fn rasterize_triangle_to_images(
             // obtaining the minimum and maximum possible dot-products without enumerating
             // all eight corners explicitly.  This gives the *exact* depth range even for
             // arbitrary (non-axis aligned) view directions.
-            let vd = view_config.view_direction;
-            let max_depth_along_view =
-                view_config.max_bound_f32 * (vd.x().max(0.0) + vd.y().max(0.0) + vd.z().max(0.0));
-            let min_depth_along_view =
-                view_config.max_bound_f32 * (vd.x().min(0.0) + vd.y().min(0.0) + vd.z().min(0.0));
+            let vd = render_pass_config.view.view_direction;
+            let max_depth_along_view = render_pass_config.view.max_bound_f32
+                * (vd.x().max(0.0) + vd.y().max(0.0) + vd.z().max(0.0));
+            let min_depth_along_view = render_pass_config.view.max_bound_f32
+                * (vd.x().min(0.0) + vd.y().min(0.0) + vd.z().min(0.0));
             let depth_range = max_depth_along_view - min_depth_along_view;
             // Normalise such that "near" (smaller z) becomes 1 and "far" (larger z) becomes
             // 0, independent of the sign of the view direction components.
@@ -358,7 +361,7 @@ pub fn rasterize_triangle_to_images(
             // View-space normals
             let interpolated_normal_vs = interpolated_point
                 .normal_ws
-                .to_view_space_as_vector(&view_config.transformation_matrix);
+                .to_view_space_as_vector(&render_pass_config.view.transformation_matrix);
             // Normalize the normal vector from [-1,1] to [0,1] and encode to 8-bit directly
             let nx = ((interpolated_normal_vs.x() + 1.0) * 0.5 * 255.0)
                 .round()
@@ -382,7 +385,7 @@ fn process_point(
     barycentric_coords: (f32, f32, f32),
     triangle_surface: &TriangleSurface,
     mesh: &Scene,
-    view_config: &ViewConfig,
+    render_pass_config: &RenderPassConfig,
     submesh: &Mesh,
     buffers: &mut PointCloudBuffers,
 ) {
@@ -399,7 +402,7 @@ fn process_point(
     // Calculate final color using the shared lighting function
     let final_color = calculate_lighting(
         &interpolated_point,
-        &view_config,
+        &render_pass_config,
         &submesh.material,
         &mesh.mode,
     )
@@ -411,7 +414,7 @@ fn process_point(
 pub fn rasterize_triangle_to_point_cloud(
     mesh: &Scene,
     settings: &PointCloudConfig,
-    view_config: &ViewConfig,
+    render_pass_config: &RenderPassConfig,
     buffers: &mut PointCloudBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
@@ -464,7 +467,7 @@ pub fn rasterize_triangle_to_point_cloud(
                 (u, v, w),
                 &triangle_surface,
                 &mesh,
-                &view_config,
+                &render_pass_config,
                 &submesh,
                 buffers,
             );

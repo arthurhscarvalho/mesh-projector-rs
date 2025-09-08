@@ -6,7 +6,7 @@ mod point_cloud;
 mod projection;
 
 use crate::projector::config::{PointCloudConfig, ProjectionConfig};
-use crate::renderer::config::{LightSource, ViewConfig};
+use crate::renderer::config::{LightingConfig, RenderPassConfig, ViewConfig};
 use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
@@ -20,7 +20,11 @@ use rayon::iter::ParallelIterator;
 ///
 /// Returns:
 /// An ImageBatch containing all projection data.
-pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch {
+pub fn project_to_image(
+    mesh: &Scene,
+    settings: &ProjectionConfig,
+    lighting_config: &LightingConfig,
+) -> ImageBatch {
     log::info!(
         "Initializing projector. Mode: {:?}, Resolution: {}",
         mesh.mode,
@@ -32,9 +36,8 @@ pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch
     let max_bound_u: usize = max_bound as usize;
     let rows = max_bound_u;
     let cols = max_bound_u;
-    // Determine number of views and prepare view configurations
     let num_views = settings.view_angles.len();
-    let mut view_configs = Vec::with_capacity(num_views);
+    let mut render_pass_configs = Vec::with_capacity(num_views);
     // Initialize image batch
     let mut image_batch = ImageBatch::new(num_views, rows, cols, NUM_CHANNELS);
     // Handle empty meshes
@@ -55,21 +58,24 @@ pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch
             rotation_matrix[[2, 2]],
         );
         // Create view config for the current view
-        view_configs.push(ViewConfig {
+        let view_config = ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
-            light_source: LightSource::Headlight,
+        };
+        render_pass_configs.push(RenderPassConfig {
+            view: view_config,
+            lighting: *lighting_config,
         });
     }
     // Compute projections for each view in parallel
     image_batch.par_iter_mut().enumerate().for_each(
         |(i, (mut projection, mut depth_map, mut normal_map, mut occupancy_map))| {
-            let view_config = &view_configs[i];
             log::info!("Computing projection {} of {}", i + 1, num_views);
+            let render_pass_config = &render_pass_configs[i];
             // Compute projection for this view
             let (proj, depth, normal, occ, outliers) =
-                projection::compute_projection(&mesh, &settings, view_config);
+                projection::compute_projection(&mesh, &settings, &render_pass_config);
             // Log outlier filtering results if requested
             if settings.filtering_window_radius > 0 {
                 log::info!(
@@ -95,6 +101,7 @@ pub fn project_to_image(mesh: &Scene, settings: &ProjectionConfig) -> ImageBatch
 pub fn project_to_point_cloud_by_sampling(
     mesh: &Scene,
     settings: &PointCloudConfig,
+    lighting_config: &LightingConfig,
 ) -> (Array2<f32>, Array2<u8>) {
-    point_cloud::discretize_mesh_to_point_cloud(mesh, settings)
+    point_cloud::discretize_mesh_to_point_cloud(mesh, settings, lighting_config)
 }
