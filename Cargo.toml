@@ -1,23 +1,17 @@
 [package]
 name = "mesh_projector"
-version = "1.0.0"
 edition = "2021"
+version = "1.0.0"
 
 [lib]
 name = "mesh_projector"
-crate-type = ["cdylib"]
 
 [dependencies]
 ndarray = "0.16.1"
 num = "0.4.3"
-numpy = "0.24.0"
 log = "0.4.27"
 colog = "1.3.0"
 rayon = "1.10.0"
 tobj = "4.0.0"
 image = "0.24.7"
 once_cell = "1.21.3"
-
-[dependencies.pyo3]
-version = "0.24.1"
-features = ["extension-module"]

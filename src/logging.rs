@@ -1,6 +1,4 @@
 use log::LevelFilter;
-use pyo3::exceptions::PyRuntimeError;
-use pyo3::PyErr;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -17,11 +15,9 @@ pub fn init_logger() -> Result<(), io::Error> {
 
 /// Initialize the logger for the Rust library.
 /// This function is thread-safe and ensures that the logger is initialized only once.
-pub fn atomic_init_logger(verbose: bool) -> Result<(), PyErr> {
+pub fn atomic_init_logger(verbose: bool) -> Result<(), io::Error> {
     if verbose && !IS_LOGGER_INITIALIZED.load(Ordering::Acquire) {
-        init_logger().map_err(|e| {
-            PyErr::new::<PyRuntimeError, _>(format!("Failed to initialize logger: {}", e))
-        })?;
+        init_logger()?;
         IS_LOGGER_INITIALIZED.store(true, Ordering::Release);
     }
     Ok(())
