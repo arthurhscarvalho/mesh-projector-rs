@@ -49,7 +49,7 @@ pub fn discretize_mesh_to_point_cloud(
     };
     let render_pass_config = RenderPassConfig {
         view: view_config,
-        lighting: *lighting_config,
+        lighting: lighting_config,
     };
     // Initialize point cloud buffers
     let mut buffers = PointCloudBuffers::new();
