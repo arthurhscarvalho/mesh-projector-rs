@@ -295,16 +295,35 @@ fn load_texture_for_model(
     texture_images: &mut Vec<Arc<Array3<u8>>>,
 ) -> MeshResult<Option<MeshTexture>> {
     // Fetch the texture path from the linked tobj material if available via material_id
-    let tex_path_opt: Option<String> = model.mesh.material_id.and_then(|idx| {
-        materials_raw_opt.and_then(|materials_raw| {
+    let tex_path_opt: Option<String> = match model.mesh.material_id {
+        Some(idx) => materials_raw_opt.and_then(|materials_raw| {
             materials_raw.get(idx).and_then(|mtl| {
                 mtl.diffuse_texture
                     .as_ref()
                     .cloned()
                     .or_else(|| mtl.ambient_texture.as_ref().cloned())
             })
-        })
-    });
+        }),
+        None => {
+            // Fallback: Some exporters omit `usemtl`, leaving material_id unset even though an MTL exists.
+            // In that case, try the first available material to discover a texture path.
+            let fallback = materials_raw_opt.and_then(|materials_raw| {
+                materials_raw.get(0).and_then(|mtl| {
+                    mtl.diffuse_texture
+                        .as_ref()
+                        .cloned()
+                        .or_else(|| mtl.ambient_texture.as_ref().cloned())
+                })
+            });
+            if fallback.is_some() {
+                warn!(
+                    "Model '{}' has no material_id; using first material's texture as fallback.",
+                    model.name
+                );
+            }
+            fallback
+        }
+    };
     let tex_path_str = match tex_path_opt {
         Some(p) if !p.is_empty() => p,
         _ => return Ok(None),
