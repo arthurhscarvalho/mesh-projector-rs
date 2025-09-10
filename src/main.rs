@@ -19,18 +19,14 @@ fn main() {
     let output_dir: &Path = Path::new("projections/");
     // Set up view angles
     const PI: f32 = std::f32::consts::PI;
-    const VIEW_ANGLES: [[f32; 3]; 6] = [
-        [0.0, 0.0, 0.0],       // Front: Cam at +Z, looking -Z. No rotation.
-        [0.0, PI, 0.0],        // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
-        [0.0, PI / 2.0, 0.0],  // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
-        [0.0, -PI / 2.0, 0.0], // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
-        [PI / 2.0, 0.0, 0.0],  // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
-        [-PI / 2.0, 0.0, 0.0], // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
+    let view_angles = vec![
+        Orientation::new(0.0, 0.0, 0.0), // Front: Cam at +Z, looking -Z. No rotation.
+        Orientation::new(0.0, PI, 0.0),  // Back: Cam at -Z, looking +Z. Rotate 180 deg around Y.
+        Orientation::new(0.0, PI / 2.0, 0.0), // Right: Cam at +X, looking -X. Rotate 90 deg around Y.
+        Orientation::new(0.0, -PI / 2.0, 0.0), // Left: Cam at -X, looking +X. Rotate -90 deg around Y.
+        Orientation::new(PI / 2.0, 0.0, 0.0), // Top: Cam at +Y, looking -Y. Rotate 90 deg around X.
+        Orientation::new(-PI / 2.0, 0.0, 0.0), // Bottom: Cam at -Y, looking +Y. Rotate -90 deg around X.
     ];
-    let view_angles = VIEW_ANGLES
-        .iter()
-        .map(|angle| Orientation::from(*angle))
-        .collect();
     // Read mesh from OBJ file
     let mesh =
         mesh_projector::mesh_io::read_mesh(MESH_PATH, None, RESOLUTION, true, false).unwrap();
