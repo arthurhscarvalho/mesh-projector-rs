@@ -3,6 +3,7 @@ use mesh_projector::logging::atomic_init_logger;
 use mesh_projector::projector::config::ProjectionConfig;
 use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig};
 use mesh_projector::types::color::Color;
+use mesh_projector::types::coordinate::Coordinate;
 use mesh_projector::types::orientation::Orientation;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -41,10 +42,15 @@ fn main() {
     };
     // Set up lighting configuration
     let lighting_config = LightingConfig {
-        source: LightSource::Headlight,
+        source: LightSource::Point(vec![
+            Coordinate::new(1.0, 1.0, 1.0),
+            Coordinate::new(-1.0, 1.0, 1.0),
+            Coordinate::new(-1.0, 1.0, -1.0),
+            Coordinate::new(1.0, 1.0, -1.0),
+        ]),
         components: LightComponents {
-            global_ambient: Color::from_srgb(0.5, 0.5, 0.5),
-            global_diffuse: Color::from_srgb(1.0, 1.0, 1.0),
+            global_ambient: Color::from_srgb(0.4, 0.4, 0.4),
+            global_diffuse: Color::from_srgb(0.7, 0.7, 0.7),
             global_specular: Color::from_srgb(0.0, 0.0, 0.0),
         },
     };

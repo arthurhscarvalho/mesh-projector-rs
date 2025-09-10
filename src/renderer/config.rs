@@ -10,8 +10,9 @@ pub enum LightSource {
     Directional(Coordinate),
     /// Headlight attached to the camera.
     Headlight,
-    /// Point light (omnidirectional) fixed in world coordinates.
-    Point(Coordinate),
+    /// Point lights (omnidirectional) fixed in world coordinates.
+    /// Supports multiple point light positions.
+    Point(Vec<Coordinate>),
 }
 
 pub struct LightComponents {
