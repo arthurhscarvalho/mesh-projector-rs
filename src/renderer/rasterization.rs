@@ -326,12 +326,8 @@ pub fn rasterize_triangle_to_images(
             let interpolated_point =
                 interpolate_triangle_surface(&triangle_surface, (w0, w1, w2), &mesh, &submesh);
             // Calculate final color with lighting (linear space)
-            let final_color_linear = calculate_lighting(
-                &interpolated_point,
-                &render_pass_config,
-                &submesh.material,
-                &mesh.mode,
-            );
+            let final_color_linear =
+                calculate_lighting(&interpolated_point, &render_pass_config, &submesh.material);
             // Fast linear→sRGB conversion using LUT
             let final_color_srgb = final_color_linear.to_srgb8();
             // Update buffers
@@ -400,13 +396,8 @@ fn process_point(
     let interpolated_point =
         interpolate_triangle_surface(&triangle_surface, barycentric_coords, &mesh, &submesh);
     // Calculate final color using the shared lighting function
-    let final_color = calculate_lighting(
-        &interpolated_point,
-        &render_pass_config,
-        &submesh.material,
-        &mesh.mode,
-    )
-    .to_srgb();
+    let final_color =
+        calculate_lighting(&interpolated_point, &render_pass_config, &submesh.material).to_srgb();
     // Add point and color to the flatten arrays
     buffers.add_point(interpolated_point.position_ws, final_color);
 }

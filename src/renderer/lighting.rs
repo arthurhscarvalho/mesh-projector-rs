@@ -8,7 +8,7 @@ use crate::renderer::config::{LightSource, RenderPassConfig};
 use crate::renderer::rasterization::TrianglePoint;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
-use crate::types::mesh::{MeshMaterial, ShadingMode};
+use crate::types::mesh::MeshMaterial;
 
 fn calculate_single_light_direction(
     render_pass_config: &RenderPassConfig,
@@ -35,8 +35,7 @@ fn calculate_single_light_direction(
             dir_ws.normalize();
             let mut dir_vs = dir_ws.to_view_space_as_vector(transformation_matrix);
             dir_vs.normalize();
-            // Negate to make light point toward surface from camera
-            dir_vs = -dir_vs;
+            dir_vs = -dir_vs; // Negate to make light point toward surface from camera
             dir_vs
         }
         _ => panic!("Invalid light source, this function expects a single light source"),
@@ -44,11 +43,9 @@ fn calculate_single_light_direction(
     light_dir_vs
 }
 
-fn flat_color_lighting(interpolated_point: &TrianglePoint, material: &MeshMaterial) -> Color {
+fn flat_color_lighting(interpolated_point: &TrianglePoint) -> Color {
     let base_color_linear = interpolated_point.base_color;
-    let linear_ka = Color::from(material.ka);
-    // Constant color - ambient only, modulated by base color
-    base_color_linear * linear_ka
+    base_color_linear
 }
 
 fn lambertian_lighting(
@@ -92,7 +89,6 @@ fn blinn_phong_lighting(
     interpolated_point: &TrianglePoint,
     render_pass_config: &RenderPassConfig,
     material: &MeshMaterial,
-    mesh_mode: &ShadingMode,
 ) -> Color {
     // Extract data from interpolated attributes
     let base_color_linear = interpolated_point.base_color;
@@ -102,12 +98,6 @@ fn blinn_phong_lighting(
     let global_ambient = render_pass_config.lighting.components.global_ambient;
     let global_diffuse = render_pass_config.lighting.components.global_diffuse;
     let global_specular = render_pass_config.lighting.components.global_specular;
-    // For illum model 0, return base color modulated by ambient only
-    if material.illum == 0
-        && (*mesh_mode == ShadingMode::VertexColor || *mesh_mode == ShadingMode::TextureMapped)
-    {
-        return base_color_linear;
-    }
     // Material coefficients are stored in linear space; avoid costly per-pixel gamma conversion
     let linear_ka = Color::from(material.ka);
     let linear_kd = Color::from(material.kd);
@@ -179,13 +169,12 @@ pub fn calculate_lighting(
     interpolated_point: &TrianglePoint,
     render_pass_config: &RenderPassConfig,
     material: &MeshMaterial,
-    mesh_mode: &ShadingMode,
 ) -> Color {
     let final_color_linear = match material.illum {
-        0 => flat_color_lighting(interpolated_point, material),
+        0 => flat_color_lighting(interpolated_point),
         1 => lambertian_lighting(interpolated_point, material, render_pass_config),
         // Default to Blinn-Phong lighting
-        _ => blinn_phong_lighting(interpolated_point, render_pass_config, material, mesh_mode),
+        _ => blinn_phong_lighting(interpolated_point, render_pass_config, material),
     };
     // Clamp to valid range and return the final color
     let final_color_clamped = final_color_linear.clamp(0.0, 1.0);

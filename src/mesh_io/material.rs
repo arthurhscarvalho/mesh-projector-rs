@@ -60,10 +60,7 @@ pub fn get_submesh_material(
     model_name: &str,
 ) -> MeshMaterial {
     match material_idx_opt {
-        Some(idx) if idx < materials.len() => {
-            log_material_assignment(&materials[idx], idx, model_name);
-            materials[idx].clone()
-        }
+        Some(idx) if idx < materials.len() => materials[idx].clone(),
         Some(idx) => {
             warn!(
                 "Material index {} out of bounds for model '{}' ({} materials loaded). Using first available material.",
@@ -109,21 +106,6 @@ fn convert_tobj_material(mtl: tobj::Material, ignore_opacity: bool) -> MeshMater
     }
     material.opacity = material.opacity.clamp(0.0, 1.0);
     material
-}
-
-/// Log material assignment information
-fn log_material_assignment(material: &MeshMaterial, idx: usize, model_name: &str) {
-    info!(
-        "Assigning material '{}' ({}) to submesh from model '{}'",
-        material
-            .kd
-            .iter()
-            .map(|&x| format!("{:.2}", x))
-            .collect::<Vec<_>>()
-            .join(", "),
-        idx,
-        model_name
-    );
 }
 
 /// Process materials for BlinnPhong mode: load from MTL file and map based on OBJ material references
