@@ -11,30 +11,26 @@ pub mod errors;
 pub mod image;
 pub mod loaders;
 pub mod material;
-pub mod mesh_mode;
 pub mod preprocessing;
 pub mod utils;
 
-use crate::types::mesh::Mesh;
+use crate::types::mesh::Scene;
 pub use errors::MeshError;
 pub use image::save_image_data;
 
-/// Main entry point for loading a mesh with automatic mode inference
-pub fn load_mesh_auto(
+/// Read a mesh from an OBJ file. Optionally provide a mesh mode; when None, the mode is inferred
+/// from the OBJ/MTL contents (textures/materials discovered while reading the OBJ).
+pub fn read_mesh(
     obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
-    precision: u32,
+    mesh_mode: Option<crate::types::mesh::ShadingMode>,
+    resolution: u16,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> Result<Mesh, MeshError> {
-    let mode = mesh_mode::infer_mesh_mode(texture_path, mtl_path)?;
-    loaders::load_mesh_with_mode(
+) -> Result<Scene, MeshError> {
+    loaders::read_mesh_internal(
         obj_path,
-        texture_path,
-        mtl_path,
-        mode,
-        precision,
+        mesh_mode,
+        resolution,
         flip_v_coordinate,
         ignore_opacity,
     )

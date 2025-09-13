@@ -6,15 +6,16 @@
 //! throughout the projection and rasterization pipeline.
 
 use ndarray::{Array2, Array3};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MeshMode {
-    /// Only the OBJ file is used.
-    ObjOnly,
-    /// The OBJ file and texture are used.
-    ObjTexture,
-    /// The OBJ file, texture, and material are used.
-    Full,
+pub enum ShadingMode {
+    /// Uses per-vertex colors for shading without additional lighting.
+    VertexColor,
+    /// Applies a texture directly to the mesh (unlit).
+    TextureMapped,
+    /// Lit shading using the Blinn-Phong model.
+    BlinnPhong,
 }
 
 pub struct MeshGeometry {
@@ -26,13 +27,13 @@ pub struct MeshGeometry {
     pub vertex_normals: Option<Array2<f32>>,
     /// Precomputed triangle face normals (M, 3), in world space (derived from scaled vertices).
     pub face_normals: Array2<f32>,
-    /// Vertex colors (N, 3) (optional, primarily for ObjOnly mode).
+    /// Vertex colors (N, 3) (optional, primarily for VertexColor mode).
     pub vertex_colors: Option<Array2<f32>>,
 }
 
 pub struct MeshTexture {
     /// Texture image data (optional).
-    pub texture: Option<Array3<u8>>,
+    pub texture: Option<Arc<Array3<u8>>>,
     /// Triangle UV coordinates (optional).
     pub triangle_uvs: Option<Array2<f32>>,
     /// Number of color channels in the texture (e.g., 3 for RGB, 4 for RGBA).
@@ -53,18 +54,34 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
-pub struct SubMesh {
-    /// Geometry of the submesh.
+pub struct Mesh {
+    /// Geometry of the mesh.
     pub geometry: MeshGeometry,
-    /// Material of the submesh.
+    /// Material of the mesh.
     pub material: MeshMaterial,
+    /// Texture of the mesh.
+    pub texture: Option<MeshTexture>,
 }
 
-pub struct Mesh {
-    // Submeshes: each submesh has its own geometry, texture, material, and mode
-    pub submeshes: Vec<SubMesh>,
-    // Texture: shared texture for all submeshes
-    pub texture: MeshTexture,
+pub struct Scene {
+    // Meshes: each mesh has its own geometry, texture, and material
+    pub meshes: Vec<Mesh>,
     // Rendering mode
-    pub mode: MeshMode,
+    pub mode: ShadingMode,
+    // Textures: shared textures for all meshes
+    pub texture_images: Option<Vec<Arc<Array3<u8>>>>,
+}
+
+impl Scene {
+    pub fn new(
+        meshes: Vec<Mesh>,
+        mode: ShadingMode,
+        texture_images: Option<Vec<Arc<Array3<u8>>>>,
+    ) -> Self {
+        Self {
+            meshes,
+            mode,
+            texture_images,
+        }
+    }
 }

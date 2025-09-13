@@ -53,15 +53,13 @@ impl Coordinate {
     /// rotation (upper-left 3×3) and no translation. Because the last column is `[0, 0, 0, 1]ᵀ`,
     /// the homogeneous divide is unnecessary and we can perform a light-weight 3×3 multiply.
     pub fn to_view_space_as_point(&self, matrix: &Array2<f32>) -> Coordinate {
-        // SAFETY / ASSUMPTION: `create_view_matrix` guarantees a pure-rotation matrix with
-        // zero translation, so we only need the upper-left 3×3 sub-matrix.
         let x = self.0[0];
         let y = self.0[1];
         let z = self.0[2];
         Coordinate([
-            matrix[[0, 0]] * x + matrix[[0, 1]] * y + matrix[[0, 2]] * z,
-            matrix[[1, 0]] * x + matrix[[1, 1]] * y + matrix[[1, 2]] * z,
-            matrix[[2, 0]] * x + matrix[[2, 1]] * y + matrix[[2, 2]] * z,
+            matrix[[0, 0]] * x + matrix[[1, 0]] * y + matrix[[2, 0]] * z,
+            matrix[[0, 1]] * x + matrix[[1, 1]] * y + matrix[[2, 1]] * z,
+            matrix[[0, 2]] * x + matrix[[1, 2]] * y + matrix[[2, 2]] * z,
         ])
     }
 
@@ -73,9 +71,9 @@ impl Coordinate {
         let y = self.0[1];
         let z = self.0[2];
         Coordinate([
-            matrix[[0, 0]] * x + matrix[[0, 1]] * y + matrix[[0, 2]] * z,
-            matrix[[1, 0]] * x + matrix[[1, 1]] * y + matrix[[1, 2]] * z,
-            matrix[[2, 0]] * x + matrix[[2, 1]] * y + matrix[[2, 2]] * z,
+            matrix[[0, 0]] * x + matrix[[1, 0]] * y + matrix[[2, 0]] * z,
+            matrix[[0, 1]] * x + matrix[[1, 1]] * y + matrix[[2, 1]] * z,
+            matrix[[0, 2]] * x + matrix[[1, 2]] * y + matrix[[2, 2]] * z,
         ])
     }
 

@@ -3,67 +3,80 @@
 use crate::mesh_io::{
     errors::{MeshError, MeshResult},
     material::{get_submesh_material, process_materials_from_obj},
-    preprocessing::{compute_vertex_normals, normalize_normals, preprocess_vertices},
+    preprocessing::{
+        apply_transform_to_vertices, build_transform_from_bounds, compute_vertex_normals,
+        normalize_normals, preprocess_vertices, PreprocessTransform,
+    },
     utils::{
-        aggregate_model_data, convert_triangle_indices, convert_vertex_colors,
-        convert_vertex_normals, convert_vertex_positions, create_global_triangle_indices,
-        create_triangle_uvs, create_triangle_uvs_from_indices, has_separate_texcoord_indices,
-        load_texture, process_uv_coordinates, validate_file_exists,
+        convert_triangle_indices, convert_vertex_colors, convert_vertex_normals,
+        convert_vertex_positions, create_global_triangle_indices, create_triangle_uvs,
+        create_triangle_uvs_from_indices, load_texture, process_uv_coordinates,
+        validate_file_exists,
     },
 };
 use crate::renderer::geometry::precompute_triangle_normals;
-use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshMode, MeshTexture, SubMesh};
+use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture, Scene, ShadingMode};
 use log::{info, warn};
+use ndarray::Array3;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tobj;
 
-/// Load a mesh using a specific projection mode
-pub fn load_mesh_with_mode(
+/// Read a mesh from an OBJ, inferring materials/textures from the OBJ/MTL unless a mode is supplied
+pub fn read_mesh_internal(
     obj_path: &str,
-    texture_path: Option<&str>,
-    mtl_path: Option<&str>,
-    mode: MeshMode,
-    precision: u32,
+    mesh_mode: Option<ShadingMode>,
+    resolution: u16,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> MeshResult<Mesh> {
-    info!("Loading mesh: {} in mode: {:?}", obj_path, mode);
-
-    // Validate precision (This limit is set just to set consistent bounds)
-    if precision < 8 || precision > 16 {
-        return Err(MeshError::PrecisionError(format!(
-            "Invalid precision value: {}. Must be between 8 and 16.",
-            precision
-        )));
-    }
-
+) -> MeshResult<Scene> {
     // Validate input files
     validate_file_exists(obj_path)?;
-
     // Load OBJ file
     let (models, materials_result) = load_obj_file(obj_path)?;
-
     if models.is_empty() {
         return Err(MeshError::NoModelsFound);
     }
-
-    // Process materials
-    let materials = process_materials_from_obj(materials_result, mtl_path, mode, ignore_opacity)?;
-
-    // Process texture if needed
-    let shared_texture = process_texture_data(&models, texture_path, mode, flip_v_coordinate)?;
-
-    // Process submeshes
-    let submeshes = process_submeshes(&models, &materials, mode, precision)?;
-
-    if submeshes.is_empty() {
+    // Decide mode if not provided
+    let mut inferred_mode = ShadingMode::VertexColor;
+    if let Some(mode) = mesh_mode {
+        inferred_mode = mode;
+    } else if let Ok(materials) = &materials_result {
+        if !materials.is_empty() {
+            inferred_mode = ShadingMode::BlinnPhong;
+        }
+    }
+    info!("Reading mesh: {} in mode: {:?}", obj_path, inferred_mode);
+    // Clone raw tobj materials (if available) for texture filename lookup without borrowing conflict
+    let materials_raw_vec_opt: Option<Vec<tobj::Material>> =
+        materials_result.as_ref().ok().cloned();
+    // Process materials (for BlinnPhong/VertexColor/TextureMapped unified path)
+    let materials = process_materials_from_obj(materials_result, inferred_mode, ignore_opacity)?;
+    // Texture cache for deduplication and storage in Scene
+    let mut texture_cache: HashMap<String, Arc<Array3<u8>>> = HashMap::new();
+    let mut texture_images: Vec<Arc<Array3<u8>>> = Vec::new();
+    // Load textures per-submesh when needed and build meshes
+    let meshes = process_submeshes_with_textures(
+        &models,
+        &materials,
+        inferred_mode,
+        resolution,
+        flip_v_coordinate,
+        obj_path,
+        materials_raw_vec_opt.as_deref(),
+        &mut texture_cache,
+        &mut texture_images,
+    )?;
+    if meshes.is_empty() {
         return Err(MeshError::NoProcessableSubmeshes);
     }
-
-    Ok(Mesh {
-        submeshes,
-        texture: shared_texture,
-        mode,
-    })
+    let textures_vec = if texture_images.is_empty() {
+        None
+    } else {
+        Some(texture_images)
+    };
+    Ok(Scene::new(meshes, inferred_mode, textures_vec))
 }
 
 /// Load OBJ file using tobj
@@ -78,116 +91,76 @@ fn load_obj_file(
         single_index: false,
         ..Default::default()
     };
-
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
 }
 
-/// Process texture data for shared texture modes
-fn process_texture_data(
-    models: &[tobj::Model],
-    texture_path: Option<&str>,
-    mode: MeshMode,
-    flip_v_coordinate: bool,
-) -> MeshResult<MeshTexture> {
-    match mode {
-        MeshMode::Full | MeshMode::ObjTexture => {
-            process_texture_for_mode(models, texture_path, flip_v_coordinate)
-        }
-        MeshMode::ObjOnly => {
-            // No texture needed for ObjOnly mode
-            Ok(create_empty_texture())
+fn bounding_box(models: &[tobj::Model]) -> ([f32; 3], [f32; 3]) {
+    let mut min = [f32::MAX; 3];
+    let mut max = [f32::MIN; 3];
+    for model in models {
+        for vertex in model.mesh.positions.chunks_exact(3) {
+            for i in 0..3 {
+                min[i] = min[i].min(vertex[i]);
+                max[i] = max[i].max(vertex[i]);
+            }
         }
     }
+    (min, max)
 }
 
-/// Process texture for modes that require it
-fn process_texture_for_mode(
-    models: &[tobj::Model],
-    texture_path: Option<&str>,
-    flip_v_coordinate: bool,
-) -> MeshResult<MeshTexture> {
-    let tex_path = texture_path.ok_or_else(|| {
-        MeshError::MissingRequiredData("Texture file is required but none was provided".to_string())
-    })?;
-
-    let texture_data = load_texture(tex_path)?;
-    let (tex_height, tex_width, tex_channels) = (
-        texture_data.shape()[0],
-        texture_data.shape()[1],
-        texture_data.shape()[2],
-    );
-    info!(
-        "Shared texture load successful: {} ({}x{}x{})",
-        tex_path, tex_height, tex_width, tex_channels
-    );
-
-    // Check if we have separate texture coordinate indices (single_index: false)
-    let triangle_uvs = if has_separate_texcoord_indices(models) {
-        info!("Using separate texture coordinate indices from OBJ models for shared texture.");
-        create_triangle_uvs_from_indices(models, flip_v_coordinate)?
-    } else {
-        info!("Using vertex-based UV coordinates from all OBJ models for shared texture.");
-        let (_, all_texcoords, total_vertex_count) = aggregate_model_data(models);
-
-        if all_texcoords.is_empty() || all_texcoords.len() != total_vertex_count * 2 {
-            return Err(MeshError::InvalidUvData(
-                "Mesh has no usable UV coordinates for shared texture".to_string(),
-            ));
-        }
-
-        let vertex_uvs =
-            process_uv_coordinates(&all_texcoords, total_vertex_count, flip_v_coordinate)?;
-        let global_triangle_indices = create_global_triangle_indices(models);
-        create_triangle_uvs(&vertex_uvs, &global_triangle_indices)?
-    };
-
-    Ok(MeshTexture {
-        texture: Some(texture_data),
-        triangle_uvs: Some(triangle_uvs),
-        channels: tex_channels,
-        height_f32: tex_height as f32,
-        width_f32: tex_width as f32,
-    })
-}
-
-/// Create empty texture for modes that don't need it
-fn create_empty_texture() -> MeshTexture {
-    MeshTexture {
-        texture: None,
-        triangle_uvs: None,
-        channels: 0,
-        height_f32: 0.0,
-        width_f32: 0.0,
-    }
-}
-
-/// Process all submeshes from the loaded models
-fn process_submeshes(
+/// Process all meshes from the loaded models
+fn process_submeshes_with_textures(
     models: &[tobj::Model],
     materials: &[MeshMaterial],
-    mode: MeshMode,
-    precision: u32,
-) -> MeshResult<Vec<SubMesh>> {
-    let mut submeshes = Vec::new();
-
+    mode: ShadingMode,
+    resolution: u16,
+    flip_v_coordinate: bool,
+    obj_path: &str,
+    materials_raw_opt: Option<&[tobj::Material]>,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<Vec<Mesh>> {
+    let mut meshes: Vec<Mesh> = Vec::new();
+    let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
+    // First pass: compute global bounds across all models
+    let (global_min, global_max) = bounding_box(&models);
+    // Build a single transform to be applied to every submesh
+    let global_transform: PreprocessTransform =
+        build_transform_from_bounds(global_min, global_max, resolution);
+    // Second pass: process each model using the global transform
     for model in models {
-        if let Some(submesh) = process_single_submesh(model, materials, mode, precision)? {
-            submeshes.push(submesh);
+        if let Some(submesh) = process_single_submesh_with_texture(
+            model,
+            materials,
+            mode,
+            resolution,
+            flip_v_coordinate,
+            obj_dir.as_ref(),
+            materials_raw_opt,
+            Some(&global_transform),
+            texture_cache,
+            texture_images,
+        )? {
+            meshes.push(submesh);
         }
     }
-
-    Ok(submeshes)
+    Ok(meshes)
 }
 
 /// Process a single model into a submesh
-fn process_single_submesh(
+fn process_single_submesh_with_texture(
     model: &tobj::Model,
     materials: &[MeshMaterial],
-    mode: MeshMode,
-    precision: u32,
-) -> MeshResult<Option<SubMesh>> {
+    mode: ShadingMode,
+    resolution: u16,
+    flip_v_coordinate: bool,
+    obj_dir: Option<&PathBuf>,
+    materials_raw_opt: Option<&[tobj::Material]>,
+    global_transform_opt: Option<&PreprocessTransform>,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<Option<Mesh>> {
     let mesh = &model.mesh;
-
     if mesh.positions.is_empty() {
         warn!(
             "Skipping model '{}' as it has no vertex positions.",
@@ -195,26 +168,19 @@ fn process_single_submesh(
         );
         return Ok(None);
     }
-
     let num_vertices = mesh.positions.len() / 3;
-
-    // Convert geometry data
     let vertices = convert_vertex_positions(&mesh.positions)?;
     let triangles = convert_triangle_indices(&mesh.indices)?;
-
-    // Process normals
     let vertex_normals = process_vertex_normals(mesh, num_vertices, &vertices, &triangles)?;
-
-    // Process vertex colors if available
     let vertex_colors = process_vertex_colors(mesh, num_vertices, &model.name);
-
-    // Preprocess vertices
-    let processed_vertices = preprocess_vertices(vertices, precision);
-
-    // Compute face normals
+    let processed_vertices = if let Some(t) = global_transform_opt {
+        let mut v = vertices;
+        apply_transform_to_vertices(&mut v, t);
+        v
+    } else {
+        preprocess_vertices(vertices, resolution)
+    };
     let face_normals = precompute_triangle_normals(processed_vertices.view(), triangles.view());
-
-    // Create geometry
     let geometry = MeshGeometry {
         vertices: processed_vertices,
         triangles,
@@ -222,11 +188,26 @@ fn process_single_submesh(
         face_normals,
         vertex_colors,
     };
-
-    // Get material for this submesh
     let material = get_submesh_material(mesh.material_id, materials, mode, &model.name);
-
-    Ok(Some(SubMesh { geometry, material }))
+    let mut mesh_texture_opt: Option<MeshTexture> = None;
+    if matches!(mode, ShadingMode::BlinnPhong | ShadingMode::TextureMapped) {
+        if let Some(tex) = load_texture_for_model(
+            model,
+            flip_v_coordinate,
+            obj_dir,
+            materials_raw_opt,
+            texture_cache,
+            texture_images,
+        )? {
+            mesh_texture_opt = Some(tex);
+        }
+    }
+    let mesh = Mesh {
+        geometry,
+        material,
+        texture: mesh_texture_opt,
+    };
+    Ok(Some(mesh))
 }
 
 /// Process vertex normals for a model
@@ -238,7 +219,6 @@ fn process_vertex_normals(
 ) -> MeshResult<Option<ndarray::Array2<f32>>> {
     if !mesh.normals.is_empty() && mesh.normals.len() == num_vertices * 3 {
         info!("Using vertex normals from OBJ data.");
-
         match convert_vertex_normals(&mesh.normals, num_vertices) {
             Ok(mut normals_arr) => {
                 normalize_normals(&mut normals_arr);
@@ -283,7 +263,6 @@ fn process_vertex_colors(
             "Using vertex colors from OBJ data for model '{}'.",
             model_name
         );
-
         match convert_vertex_colors(&mesh.vertex_color, num_vertices) {
             Ok(colors_arr) => Some(colors_arr),
             Err(e) => {
@@ -303,4 +282,127 @@ fn process_vertex_colors(
         }
         None
     }
+}
+
+/// Attempt to load a texture for a model by inspecting its material for a diffuse/albedo texture.
+/// Returns a MeshTexture with per-triangle UVs for this model if successful, otherwise None.
+fn load_texture_for_model(
+    model: &tobj::Model,
+    flip_v_coordinate: bool,
+    obj_dir: Option<&PathBuf>,
+    materials_raw_opt: Option<&[tobj::Material]>,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<Option<MeshTexture>> {
+    // Fetch the texture path from the linked tobj material if available via material_id
+    let tex_path_opt: Option<String> = match model.mesh.material_id {
+        Some(idx) => materials_raw_opt.and_then(|materials_raw| {
+            materials_raw.get(idx).and_then(|mtl| {
+                mtl.diffuse_texture
+                    .as_ref()
+                    .cloned()
+                    .or_else(|| mtl.ambient_texture.as_ref().cloned())
+            })
+        }),
+        None => {
+            // Fallback: Some exporters omit `usemtl`, leaving material_id unset even though an MTL exists.
+            // In that case, try the first available material to discover a texture path.
+            let fallback = materials_raw_opt.and_then(|materials_raw| {
+                materials_raw.get(0).and_then(|mtl| {
+                    mtl.diffuse_texture
+                        .as_ref()
+                        .cloned()
+                        .or_else(|| mtl.ambient_texture.as_ref().cloned())
+                })
+            });
+            if fallback.is_some() {
+                warn!(
+                    "Model '{}' has no material_id; using first material's texture as fallback.",
+                    model.name
+                );
+            }
+            fallback
+        }
+    };
+    let tex_path_str = match tex_path_opt {
+        Some(p) if !p.is_empty() => p,
+        _ => return Ok(None),
+    };
+    // Resolve texture path relative to OBJ directory if needed
+    let resolved_path = if Path::new(&tex_path_str).is_absolute() {
+        PathBuf::from(&tex_path_str)
+    } else if let Some(dir) = obj_dir {
+        dir.join(&tex_path_str)
+    } else {
+        PathBuf::from(&tex_path_str)
+    };
+    // Load or fetch shared texture reference (per-scene cache)
+    let (texture_ref, tex_height, tex_width, tex_channels) =
+        match get_or_load_shared_texture_with_cache(&resolved_path, texture_cache, texture_images) {
+            Ok((tex_ref, h, w, c)) => (tex_ref, h, w, c),
+            Err(e) => {
+                warn!(
+                    "Failed to load texture for model '{}': {}. Proceeding without texture.",
+                    model.name, e
+                );
+                return Ok(None);
+            }
+        };
+    info!(
+        "Loaded texture for model '{}': {} ({}x{}x{})",
+        model.name,
+        resolved_path.display(),
+        tex_height,
+        tex_width,
+        tex_channels
+    );
+    // Compute triangle UVs for this model only
+    let triangle_uvs = if !model.mesh.texcoord_indices.is_empty() {
+        create_triangle_uvs_from_indices(std::slice::from_ref(model), flip_v_coordinate)?
+    } else {
+        // Legacy single-index path: create from vertex UVs and triangle indices
+        let vertex_count = model.mesh.positions.len() / 3;
+        if model.mesh.texcoords.len() < vertex_count * 2 {
+            warn!(
+                "Model '{}' has insufficient UV data; defaulting to zeros.",
+                model.name
+            );
+            let num_corners = model.mesh.indices.len();
+            let uv = ndarray::Array2::<f32>::zeros((num_corners, 2));
+            uv
+        } else {
+            let vertex_uvs = process_uv_coordinates(
+                &model.mesh.texcoords[..vertex_count * 2],
+                vertex_count,
+                flip_v_coordinate,
+            )?;
+            let triangle_indices = create_global_triangle_indices(std::slice::from_ref(model));
+            create_triangle_uvs(&vertex_uvs, &triangle_indices)?
+        }
+    };
+    Ok(Some(MeshTexture {
+        texture: Some(texture_ref),
+        triangle_uvs: Some(triangle_uvs),
+        channels: tex_channels,
+        height_f32: tex_height as f32,
+        width_f32: tex_width as f32,
+    }))
+}
+
+fn get_or_load_shared_texture_with_cache(
+    path: &PathBuf,
+    texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
+    texture_images: &mut Vec<Arc<Array3<u8>>>,
+) -> MeshResult<(Arc<Array3<u8>>, usize, usize, usize)> {
+    let key = path.to_string_lossy().to_string();
+    if let Some(tex_ref) = texture_cache.get(&key) {
+        let (h, w, c) = (tex_ref.shape()[0], tex_ref.shape()[1], tex_ref.shape()[2]);
+        return Ok((tex_ref.clone(), h, w, c));
+    }
+    let img = load_texture(&key)?;
+    let (h, w, c) = (img.shape()[0], img.shape()[1], img.shape()[2]);
+    let arc_img = Arc::new(img);
+    texture_cache.insert(key, arc_img.clone());
+    texture_images.push(arc_img.clone());
+    Ok((arc_img, h, w, c))
 }

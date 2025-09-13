@@ -9,25 +9,18 @@ pub enum MeshError {
     FileNotFound(String),
     FileReadError(String),
     DirectoryCreateError(String),
-
     /// Parsing and format errors
     ObjParseError(String),
-    MtlParseError(String),
     TextureLoadError(String),
     ImageBufferError(String),
-
     /// Data validation errors
     NoModelsFound,
     NoProcessableSubmeshes,
     InvalidVertexData(String),
     InvalidTriangleData(String),
     InvalidUvData(String),
-    MissingRequiredData(String),
-
     /// Configuration errors
-    UnsupportedMode(String),
-    PrecisionError(String),
-
+    ResolutionError(String),
     /// Internal processing errors
     GeometryProcessingError(String),
     MaterialProcessingError(String),
@@ -42,27 +35,20 @@ impl fmt::Display for MeshError {
             MeshError::DirectoryCreateError(details) => {
                 write!(f, "Failed to create directory: {}", details)
             }
-
             MeshError::ObjParseError(details) => write!(f, "Failed to parse OBJ file: {}", details),
-            MeshError::MtlParseError(details) => write!(f, "Failed to parse MTL file: {}", details),
             MeshError::TextureLoadError(details) => {
                 write!(f, "Failed to load texture: {}", details)
             }
             MeshError::ImageBufferError(details) => write!(f, "Image buffer error: {}", details),
 
             MeshError::NoModelsFound => write!(f, "No models found in the OBJ file"),
-            MeshError::NoProcessableSubmeshes => write!(f, "No processable submeshes found"),
+            MeshError::NoProcessableSubmeshes => write!(f, "No processable meshes found"),
             MeshError::InvalidVertexData(details) => write!(f, "Invalid vertex data: {}", details),
             MeshError::InvalidTriangleData(details) => {
                 write!(f, "Invalid triangle data: {}", details)
             }
             MeshError::InvalidUvData(details) => write!(f, "Invalid UV data: {}", details),
-            MeshError::MissingRequiredData(details) => {
-                write!(f, "Missing required data: {}", details)
-            }
-
-            MeshError::UnsupportedMode(details) => write!(f, "Unsupported mode: {}", details),
-            MeshError::PrecisionError(details) => write!(f, "Precision error: {}", details),
+            MeshError::ResolutionError(details) => write!(f, "Resolution error: {}", details),
 
             MeshError::GeometryProcessingError(details) => {
                 write!(f, "Geometry processing error: {}", details)

@@ -1,26 +1,73 @@
 //! Image saving operations.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use image::{ImageBuffer, Rgb};
+use image::{ImageBuffer, Luma, Rgb};
 use log::warn;
-use ndarray::Array3;
+use ndarray::ArrayViewD;
 use std::fs;
 use std::path::Path;
 
-/// Saves projection data for a single view to specified files
-pub fn save_image_data(image: &Array3<u8>, output_dir: &Path, view_index: usize) -> MeshResult<()> {
-    create_output_directory(output_dir)?;
-    let (rows, cols) = (image.shape()[0], image.shape()[1]);
-    let channels = image.shape()[2];
-    if channels == 3 || channels == 4 {
-        save_rgb_image(image, output_dir, view_index, rows, cols)?;
-    } else {
-        warn!(
-            "Image array has unsupported number of channels: {}. Skipping save.",
-            channels
-        );
+/// Saves image data (H, W) or (H, W, C) to a specific output path (creates parent directories if needed)
+pub fn save_image_data(image: ArrayViewD<u8>, output_path: &Path) -> MeshResult<()> {
+    // Ensure parent directory exists
+    if let Some(parent_dir) = output_path.parent() {
+        if !parent_dir.as_os_str().is_empty() {
+            create_output_directory(parent_dir)?;
+        }
     }
-    Ok(())
+    match image.ndim() {
+        2 => {
+            let (rows, cols) = (image.shape()[0], image.shape()[1]);
+            let pixels: Vec<u8> = image.iter().cloned().collect();
+            let buffer = ImageBuffer::<Luma<u8>, _>::from_raw(cols as u32, rows as u32, pixels)
+                .ok_or_else(|| {
+                    MeshError::ImageBufferError(
+                        "Failed to create grayscale image buffer".to_string(),
+                    )
+                })?;
+            buffer.save(output_path).map_err(|e| {
+                MeshError::FileReadError(format!("Failed to save image {:?}: {}", output_path, e))
+            })
+        }
+        3 => {
+            let (rows, cols) = (image.shape()[0], image.shape()[1]);
+            let channels = image.shape()[2];
+            let rgb_pixels: Vec<u8> = match channels {
+                3 => image.iter().cloned().collect(),
+                4 => {
+                    let flat = image.iter().cloned().collect::<Vec<u8>>();
+                    let mut out = Vec::with_capacity(rows * cols * 3);
+                    for chunk in flat.chunks(4) {
+                        if chunk.len() >= 3 {
+                            out.extend_from_slice(&chunk[0..3]);
+                        }
+                    }
+                    out
+                }
+                other => {
+                    warn!(
+                        "Image array has unsupported number of channels: {}. Skipping save.",
+                        other
+                    );
+                    return Ok(());
+                }
+            };
+            let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(cols as u32, rows as u32, rgb_pixels)
+                .ok_or_else(|| {
+                    MeshError::ImageBufferError("Failed to create image buffer".to_string())
+                })?;
+            buffer.save(output_path).map_err(|e| {
+                MeshError::FileReadError(format!("Failed to save image {:?}: {}", output_path, e))
+            })
+        }
+        other => {
+            warn!(
+                "Image array has unsupported number of dimensions: {}. Skipping save.",
+                other
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Create output directory if it doesn't exist
@@ -30,28 +77,5 @@ fn create_output_directory(output_dir: &Path) -> MeshResult<()> {
             "Failed to create output directory {:?}: {}",
             output_dir, e
         ))
-    })
-}
-
-/// Save RGB image data to file
-fn save_rgb_image(
-    image: &Array3<u8>,
-    output_dir: &Path,
-    view_index: usize,
-    rows: usize,
-    cols: usize,
-) -> MeshResult<()> {
-    // Handle potentially non-contiguous arrays by ensuring contiguity
-    let contiguous_image = image.iter().cloned().collect::<Vec<u8>>();
-    let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(cols as u32, rows as u32, contiguous_image)
-        .ok_or_else(|| MeshError::ImageBufferError("Failed to create image buffer".to_string()))?;
-    let image_path = output_dir.join(format!("image_{:04}.png", view_index));
-    save_image_buffer(buffer, &image_path)
-}
-
-/// Save image buffer to file
-fn save_image_buffer(buffer: ImageBuffer<Rgb<u8>, Vec<u8>>, image_path: &Path) -> MeshResult<()> {
-    buffer.save(image_path).map_err(|e| {
-        MeshError::FileReadError(format!("Failed to save image {:?}: {}", image_path, e))
     })
 }
