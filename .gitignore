@@ -3,7 +3,6 @@
 *.ply
 projections/
 SJTU-TMQA/
-*.lock
 .DS_Store
 !assets/*
 
