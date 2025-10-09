@@ -2,7 +2,6 @@
 *.png
 *.ply
 projections/
-SJTU-TMQA/
 .DS_Store
 !assets/*
 
