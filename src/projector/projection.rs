@@ -39,8 +39,9 @@ pub fn compute_projection(
     }
     // Apply outlier filtering
     filter_outliers(&mut buffers, &settings, max_bound as f32);
-    // Vertically flip buffers
+    // Flip buffers
     buffers.v_flip();
+    buffers.h_flip();
     // Return from buffers
     (
         buffers.image,

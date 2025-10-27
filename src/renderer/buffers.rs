@@ -50,6 +50,15 @@ impl ImageBuffers {
         self.occupancy_map.invert_axis(Axis(0));
         self.z_buffer.invert_axis(Axis(0));
     }
+
+    /// Horizontally flip all buffers in-place.
+    pub fn h_flip(&mut self) {
+        self.image.invert_axis(Axis(1));
+        self.depth_map.invert_axis(Axis(1));
+        self.normal_map.invert_axis(Axis(1));
+        self.occupancy_map.invert_axis(Axis(1));
+        self.z_buffer.invert_axis(Axis(1));
+    }
 }
 
 pub struct PointCloudBuffers {
