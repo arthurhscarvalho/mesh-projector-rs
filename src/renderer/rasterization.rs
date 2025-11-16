@@ -436,14 +436,14 @@ pub fn rasterize_triangle_to_point_cloud(
     //      n^2 + 3n + (2 - 2s) ≥ 0
     //
     // Solve n from the quadratic equation:
-    //      n = (-3 ± sqrt(9 + 8s)) / 2
+    //      n = (-3 ± sqrt(1 + 8s)) / 2
     //
     // We take the positive root and round up:
-    //      n = ceil((-3 + sqrt(9 + 8s)) / 2)
+    //      n = ceil((-3 + sqrt(1 + 8s)) / 2)
     // Compute subdivision level where n is a triangular number
     let n = {
         let s = (triangle_area * settings.point_cloud_density_factor).round();
-        let n = ((-3.0 + (9.0 + 8.0 * s).sqrt()) * 0.5).ceil();
+        let n = ((-3.0 + (1.0 + 8.0 * s).sqrt()) * 0.5).ceil();
         n as usize
     };
     // Deterministic centroid sampling of subtriangles

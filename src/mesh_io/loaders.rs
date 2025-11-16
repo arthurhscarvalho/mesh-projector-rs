@@ -86,11 +86,7 @@ fn load_obj_file(
     Vec<tobj::Model>,
     Result<Vec<tobj::Material>, tobj::LoadError>,
 )> {
-    let load_options = tobj::LoadOptions {
-        triangulate: true,
-        single_index: false,
-        ..Default::default()
-    };
+    let load_options = tobj::GPU_LOAD_OPTIONS;
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
 }
 
