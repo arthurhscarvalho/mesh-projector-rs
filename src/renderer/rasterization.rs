@@ -442,7 +442,7 @@ pub fn rasterize_triangle_to_point_cloud(
     //      n = ceil((-3 + sqrt(1 + 8s)) / 2)
     // Compute subdivision level where n is a triangular number
     let n = {
-        let s = (triangle_area * settings.point_cloud_density_factor).round();
+        let s = triangle_area * settings.point_cloud_density_factor;
         let n = ((-3.0 + (1.0 + 8.0 * s).sqrt()) * 0.5).ceil();
         n as usize
     };
