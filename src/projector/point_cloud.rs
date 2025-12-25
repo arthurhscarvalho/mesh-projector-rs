@@ -50,7 +50,7 @@ pub fn discretize_mesh_to_point_cloud(
         max_bound_f32,
         projection: ProjectionModel::Orthographic,
     };
-    let ssao_config = SsaoConfig::default();
+    let ssao_config = SsaoConfig::disabled();
     let render_pass_config = RenderPassConfig {
         view: view_config,
         lighting: lighting_config,
