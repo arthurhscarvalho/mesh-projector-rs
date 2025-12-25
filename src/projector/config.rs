@@ -7,6 +7,34 @@
 
 use crate::types::orientation::Orientation;
 
+/// Defines which projection model the camera should use.
+pub enum ProjectionType {
+    /// Orthographic camera (default).
+    Orthographic,
+    /// Perspective camera with configurable parameters.
+    Perspective(PerspectiveCameraConfig),
+}
+
+/// Perspective camera parameters.
+pub struct PerspectiveCameraConfig {
+    /// Vertical field of view in degrees.
+    pub vertical_fov_degrees: f32,
+}
+
+/// Camera configuration for projections.
+pub struct CameraConfig {
+    /// Projection model and its parameters.
+    pub projection: ProjectionType,
+}
+
+impl Default for CameraConfig {
+    fn default() -> Self {
+        Self {
+            projection: ProjectionType::Orthographic,
+        }
+    }
+}
+
 /// Contains all the settings for controlling the projection process.
 pub struct ProjectionConfig {
     /// The resolution of the output images.
@@ -15,6 +43,8 @@ pub struct ProjectionConfig {
     pub filtering_window_radius: u64,
     /// Angles for rotation (pitch, yaw, roll in radians)
     pub view_angles: Vec<Orientation>,
+    /// Camera configuration used for the projection.
+    pub camera: CameraConfig,
 }
 
 /// Defines the parameters for the point cloud generation.

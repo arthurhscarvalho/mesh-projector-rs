@@ -5,8 +5,10 @@ pub mod constants;
 mod point_cloud;
 mod projection;
 
-use crate::projector::config::{PointCloudConfig, ProjectionConfig};
-use crate::renderer::config::{LightingConfig, RenderPassConfig, ViewConfig};
+use crate::projector::config::{CameraConfig, PointCloudConfig, ProjectionConfig, ProjectionType};
+use crate::renderer::config::{
+    LightingConfig, PerspectiveParameters, ProjectionModel, RenderPassConfig, ViewConfig,
+};
 use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
@@ -57,11 +59,14 @@ pub fn project_to_image(
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
+        let projection_model =
+            build_projection_model(&settings.camera, view_direction, max_bound_f32);
         // Create view config for the current view
         let view_config = ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
+            projection: projection_model,
         };
         render_pass_configs.push(RenderPassConfig {
             view: view_config,
@@ -104,4 +109,35 @@ pub fn project_to_point_cloud_by_sampling(
     lighting_config: &LightingConfig,
 ) -> (Array2<f32>, Array2<u8>) {
     point_cloud::discretize_mesh_to_point_cloud(mesh, settings, lighting_config)
+}
+
+fn build_projection_model(
+    camera_config: &CameraConfig,
+    view_direction: Coordinate,
+    max_bound_f32: f32,
+) -> ProjectionModel {
+    let cube_center = (max_bound_f32 - 1.0) / 2.0;
+    let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
+    match &camera_config.projection {
+        ProjectionType::Orthographic => ProjectionModel::Orthographic,
+        ProjectionType::Perspective(perspective_cfg) => {
+            let half_fov_rad = 0.5 * perspective_cfg.vertical_fov_degrees.to_radians();
+            let tan_half_fov = half_fov_rad.tan();
+            let focal_length_px = if tan_half_fov.abs() < 1e-6 {
+                max_bound_f32 * 0.5
+            } else {
+                (max_bound_f32 * 0.5) / tan_half_fov
+            };
+            let camera_position_ws =
+                cube_center_coordinate - view_direction * (cube_center + focal_length_px);
+            let z_near = focal_length_px;
+            let z_far = focal_length_px + 2.0 * cube_center;
+            ProjectionModel::Perspective(PerspectiveParameters {
+                camera_position_ws,
+                focal_length_px,
+                z_near,
+                z_far,
+            })
+        }
+    }
 }

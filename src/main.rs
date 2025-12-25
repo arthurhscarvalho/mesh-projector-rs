@@ -1,6 +1,8 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
-use mesh_projector::projector::config::ProjectionConfig;
+use mesh_projector::projector::config::{
+    CameraConfig, PerspectiveCameraConfig, ProjectionConfig, ProjectionType,
+};
 use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig};
 use mesh_projector::types::color::Color;
 use mesh_projector::types::coordinate::Coordinate;
@@ -35,6 +37,11 @@ fn main() {
         resolution: RESOLUTION,
         filtering_window_radius: FILTERING_RADIUS,
         view_angles,
+        camera: CameraConfig {
+            projection: ProjectionType::Perspective(PerspectiveCameraConfig {
+                vertical_fov_degrees: 70.0,
+            }),
+        },
     };
     // Set up lighting configuration
     let lighting_config = LightingConfig {

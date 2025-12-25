@@ -2,6 +2,26 @@ use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
 use ndarray::Array2;
 
+/// Supported projection models for the renderer.
+pub enum ProjectionModel {
+    /// Orthographic projection (default).
+    Orthographic,
+    /// Perspective projection with explicit camera parameters.
+    Perspective(PerspectiveParameters),
+}
+
+/// Derived perspective parameters for a render pass.
+pub struct PerspectiveParameters {
+    /// Camera position in world space.
+    pub camera_position_ws: Coordinate,
+    /// Focal length in pixel units (derived from FOV and resolution).
+    pub focal_length_px: f32,
+    /// Near plane distance in camera space.
+    pub z_near: f32,
+    /// Far plane distance in camera space.
+    pub z_far: f32,
+}
+
 /// Defines the source of the light.
 pub enum LightSource {
     /// Ambient light, constant across the mesh.
@@ -30,6 +50,7 @@ pub struct ViewConfig {
     pub view_direction: Coordinate,
     pub transformation_matrix: Array2<f32>,
     pub max_bound_f32: f32,
+    pub projection: ProjectionModel,
 }
 
 pub struct RenderPassConfig<'a> {
