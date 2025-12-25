@@ -5,6 +5,7 @@
 //! are generated from 3D meshes. These settings are consumed by the projector pipeline to
 //! produce images, depth maps, and related outputs.
 
+use crate::renderer::config::SsaoConfig;
 use crate::types::color::Color;
 use crate::types::orientation::Orientation;
 
@@ -48,6 +49,8 @@ pub struct ProjectionConfig {
     pub camera: CameraConfig,
     /// Multi-sample anti-aliasing configuration.
     pub msaa: MsaaConfig,
+    /// Screen-space ambient occlusion configuration.
+    pub ssao: SsaoConfig,
     /// Background color (linear RGB) and alpha for the output images.
     pub background: BackgroundConfig,
 }
@@ -112,7 +115,7 @@ impl Default for BackgroundConfig {
     fn default() -> Self {
         Self {
             color: Color::white(),
-            alpha: 0,
+            alpha: u8::MAX,
         }
     }
 }

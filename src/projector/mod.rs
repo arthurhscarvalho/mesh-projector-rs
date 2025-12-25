@@ -72,6 +72,7 @@ pub fn project_to_image(
         render_pass_configs.push(RenderPassConfig {
             view: view_config,
             lighting: lighting_config,
+            ssao: &settings.ssao,
         });
     }
     // Compute projections for each view in parallel

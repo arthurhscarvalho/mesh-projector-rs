@@ -46,6 +46,47 @@ pub struct LightingConfig {
     pub components: LightComponents,
 }
 
+/// Screen-space ambient occlusion configuration.
+#[derive(Clone, Debug)]
+pub struct SsaoConfig {
+    /// Whether SSAO is enabled for this render pass.
+    pub enabled: bool,
+    /// Radius of the sampling hemisphere in view-space units.
+    pub sample_radius: f32,
+    /// Number of samples to take around each pixel.
+    pub num_samples: usize,
+    /// Bias to prevent self-occlusion artifacts.
+    pub bias: f32,
+    /// Strength in `[0, 1]` applied when darkening the final color.
+    pub intensity: f32,
+    /// Radius of the optional blur applied after computing raw occlusion.
+    pub blur_radius: usize,
+    /// Maximum distance for occlusion contribution (in view-space units).
+    pub max_distance: f32,
+}
+
+impl Default for SsaoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            sample_radius: 0.75,
+            num_samples: 32,
+            bias: 0.025,
+            intensity: 0.5,
+            blur_radius: 4,
+            max_distance: 2.0,
+        }
+    }
+}
+
+impl SsaoConfig {
+    pub fn disabled() -> Self {
+        let mut defaults = Self::default();
+        defaults.enabled = false;
+        defaults
+    }
+}
+
 pub struct ViewConfig {
     pub view_direction: Coordinate,
     pub transformation_matrix: Array2<f32>,
@@ -56,4 +97,5 @@ pub struct ViewConfig {
 pub struct RenderPassConfig<'a> {
     pub view: ViewConfig,
     pub lighting: &'a LightingConfig,
+    pub ssao: &'a SsaoConfig,
 }

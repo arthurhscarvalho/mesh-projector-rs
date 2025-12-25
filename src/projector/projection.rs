@@ -10,7 +10,9 @@ use crate::renderer::config::RenderPassConfig;
 use crate::renderer::filtering::filter_outliers;
 use crate::renderer::msaa::{sample_offsets, MsaaAccumulator};
 use crate::renderer::rasterization::rasterize_triangle_to_images;
+use crate::renderer::ssao::apply_ssao;
 use crate::types::mesh::Scene;
+use crate::types::mesh::ShadingMode;
 use ndarray::{Array2, Array3};
 
 /// Computes a single orthographic projection for the given view configuration.
@@ -55,6 +57,17 @@ pub fn compute_projection(
     let mut buffers = msaa_accum.resolve(sample_count);
     // Apply outlier filtering
     filter_outliers(&mut buffers, &settings, max_bound as f32);
+    // Apply SSAO if enabled and compatible with the shading mode
+    if render_pass_config.ssao.enabled {
+        if mesh.mode == ShadingMode::BlinnPhong {
+            apply_ssao(&mut buffers, render_pass_config);
+        } else {
+            log::warn!(
+                "SSAO enabled but shading mode is {:?}. SSAO is only applied with Blinn-Phong lighting.",
+                mesh.mode
+            );
+        }
+    }
     // Flip buffers
     buffers.v_flip();
     buffers.h_flip();
