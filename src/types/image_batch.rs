@@ -18,11 +18,17 @@ pub struct ImageBatch {
 }
 
 impl ImageBatch {
-    pub fn new(num_images: usize, rows: usize, cols: usize, channels: usize) -> Self {
+    pub fn new(
+        num_images: usize,
+        rows: usize,
+        cols: usize,
+        image_channels: usize,
+        normal_channels: usize,
+    ) -> Self {
         ImageBatch {
-            images: Array4::zeros((num_images, rows, cols, channels)),
+            images: Array4::zeros((num_images, rows, cols, image_channels)),
             depth_maps: Array3::zeros((num_images, rows, cols)),
-            normal_maps: Array4::zeros((num_images, rows, cols, channels)),
+            normal_maps: Array4::zeros((num_images, rows, cols, normal_channels)),
             occupancy_maps: Array3::zeros((num_images, rows, cols)),
         }
     }

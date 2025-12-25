@@ -393,6 +393,7 @@ pub fn rasterize_triangle_to_images(
     buffers: &mut ImageBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
+    pixel_offset: (f32, f32),
 ) {
     let submesh = &mesh.meshes[submesh_index];
     let triangle_surface = match extract_triangle_surface(mesh, submesh_index, triangle_index) {
@@ -412,9 +413,14 @@ pub fn rasterize_triangle_to_images(
     else {
         return;
     };
+    let alpha_u8 = (submesh.material.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let color_channels = buffers.image.shape()[2];
     for row in min_row..max_row {
         for col in min_col..max_col {
-            let pixel_center = (col as f32 + 0.5, row as f32 + 0.5);
+            let pixel_center = (
+                col as f32 + 0.5 + pixel_offset.0,
+                row as f32 + 0.5 + pixel_offset.1,
+            );
             let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
                 continue;
             };
@@ -440,6 +446,9 @@ pub fn rasterize_triangle_to_images(
             buffers.image[[row, col, 0]] = final_color_srgb[0];
             buffers.image[[row, col, 1]] = final_color_srgb[1];
             buffers.image[[row, col, 2]] = final_color_srgb[2];
+            if color_channels > 3 {
+                buffers.image[[row, col, 3]] = alpha_u8;
+            }
             buffers.occupancy_map[[row, col]] = 255;
             let depth_byte = projected_triangle.depth_norm.to_byte(depth_value);
             buffers.depth_map[[row, col]] = depth_byte;

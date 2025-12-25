@@ -6,7 +6,6 @@
 //! initialized, updated, and accessed throughout the projection pipeline to accumulate
 //! per-pixel results and support post-processing operations.
 
-use crate::renderer::constants::BACKGROUND_BRIGHTNESS;
 use crate::types::color::Color;
 use crate::types::coordinate::Coordinate;
 use ndarray::{Array2, Array3, Axis};
@@ -26,19 +25,36 @@ pub struct ImageBuffers {
     pub z_buffer: Array2<f32>,
     /// The number of outliers filtered out.
     pub outlier_count: u64,
+    /// Number of color channels in the image buffer.
+    pub image_channels: usize,
+    /// Number of channels in the normal map.
+    pub normal_channels: usize,
+    /// Background color stored as sRGBA8.
+    pub background_color: [u8; 4],
 }
 
 impl ImageBuffers {
     /// Creates new buffers sized according to the specified dimensions.
     /// Initializes the buffers appropriately for the projection process.
-    pub fn new(rows: usize, cols: usize, channels: usize) -> Self {
+    pub fn new(
+        rows: usize,
+        cols: usize,
+        image_channels: usize,
+        normal_channels: usize,
+        background_color: [u8; 4],
+    ) -> Self {
         ImageBuffers {
-            image: Array3::from_elem((rows, cols, channels), BACKGROUND_BRIGHTNESS),
+            image: Array3::from_shape_fn((rows, cols, image_channels), |(_, _, ch)| {
+                *background_color.get(ch).unwrap_or(&0)
+            }),
             depth_map: Array2::zeros((rows, cols)),
-            normal_map: Array3::zeros((rows, cols, channels)),
+            normal_map: Array3::zeros((rows, cols, normal_channels)),
             occupancy_map: Array2::zeros((rows, cols)),
             z_buffer: Array2::from_elem((rows, cols), f32::INFINITY),
             outlier_count: 0,
+            image_channels,
+            normal_channels,
+            background_color,
         }
     }
 

@@ -13,7 +13,7 @@ use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
 use crate::types::mesh::Scene;
-use constants::NUM_CHANNELS;
+use constants::{IMAGE_CHANNELS, NORMAL_CHANNELS};
 use ndarray::Array2;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -41,7 +41,8 @@ pub fn project_to_image(
     let num_views = settings.view_angles.len();
     let mut render_pass_configs = Vec::with_capacity(num_views);
     // Initialize image batch
-    let mut image_batch = ImageBatch::new(num_views, rows, cols, NUM_CHANNELS);
+    let mut image_batch =
+        ImageBatch::new(num_views, rows, cols, IMAGE_CHANNELS, NORMAL_CHANNELS);
     // Handle empty meshes
     if mesh.meshes.is_empty() {
         log::warn!("Empty mesh (no meshes). Returning empty image batch.");

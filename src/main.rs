@@ -1,7 +1,8 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
 use mesh_projector::projector::config::{
-    CameraConfig, PerspectiveCameraConfig, ProjectionConfig, ProjectionType,
+    BackgroundConfig, CameraConfig, MsaaConfig, MsaaSampleCount, PerspectiveCameraConfig,
+    ProjectionConfig, ProjectionType,
 };
 use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig};
 use mesh_projector::types::color::Color;
@@ -42,6 +43,10 @@ fn main() {
                 vertical_fov_degrees: 70.0,
             }),
         },
+        msaa: MsaaConfig {
+            sample_count: MsaaSampleCount::X4,
+        },
+        background: BackgroundConfig::default(),
     };
     // Set up lighting configuration
     let lighting_config = LightingConfig {

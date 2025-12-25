@@ -5,6 +5,7 @@
 //! are generated from 3D meshes. These settings are consumed by the projector pipeline to
 //! produce images, depth maps, and related outputs.
 
+use crate::types::color::Color;
 use crate::types::orientation::Orientation;
 
 /// Defines which projection model the camera should use.
@@ -45,6 +46,10 @@ pub struct ProjectionConfig {
     pub view_angles: Vec<Orientation>,
     /// Camera configuration used for the projection.
     pub camera: CameraConfig,
+    /// Multi-sample anti-aliasing configuration.
+    pub msaa: MsaaConfig,
+    /// Background color (linear RGB) and alpha for the output images.
+    pub background: BackgroundConfig,
 }
 
 /// Defines the parameters for the point cloud generation.
@@ -53,4 +58,61 @@ pub struct PointCloudConfig {
     pub resolution: u16,
     /// Factor to control the density of points in the discretized point cloud.
     pub point_cloud_density_factor: f32,
+}
+
+/// Supported multi-sample anti-aliasing sample counts.
+pub enum MsaaSampleCount {
+    X1,
+    X2,
+    X4,
+    X8,
+}
+
+impl MsaaSampleCount {
+    /// Returns the numeric sample count represented by this enum.
+    pub fn samples(&self) -> u8 {
+        match self {
+            MsaaSampleCount::X1 => 1,
+            MsaaSampleCount::X2 => 2,
+            MsaaSampleCount::X4 => 4,
+            MsaaSampleCount::X8 => 8,
+        }
+    }
+}
+
+/// Multi-sample anti-aliasing configuration.
+pub struct MsaaConfig {
+    /// Desired sample count (1 = disabled).
+    pub sample_count: MsaaSampleCount,
+}
+
+impl Default for MsaaConfig {
+    fn default() -> Self {
+        Self {
+            sample_count: MsaaSampleCount::X1,
+        }
+    }
+}
+
+/// Background color (linear RGB) plus alpha channel for the output images.
+pub struct BackgroundConfig {
+    pub color: Color,
+    pub alpha: u8,
+}
+
+impl BackgroundConfig {
+    /// Returns the background color encoded as sRGBA8 for buffer initialization.
+    pub fn to_srgba8(&self) -> [u8; 4] {
+        let srgb = self.color.to_srgb8();
+        [srgb[0], srgb[1], srgb[2], self.alpha]
+    }
+}
+
+impl Default for BackgroundConfig {
+    fn default() -> Self {
+        Self {
+            color: Color::white(),
+            alpha: 0,
+        }
+    }
 }
