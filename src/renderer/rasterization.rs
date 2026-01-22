@@ -4,7 +4,7 @@
 
 use crate::projector::config::PointCloudConfig;
 use crate::renderer::buffers::{ImageBuffers, PointCloudBuffers};
-use crate::renderer::config::RenderPassConfig;
+use crate::renderer::config::{ProjectionModel, RenderPassConfig};
 use crate::renderer::constants::{
     DEFAULT_MISSING_TEXTURE_COLOR, TRIANGLE_AREA_DEGENERACY_THRESHOLD,
 };
@@ -49,6 +49,35 @@ pub struct TriangleSurface {
     pub colors: [Color; 3],
     /// The face normal of the triangle in world space.
     pub face_normal_ws: Coordinate,
+}
+
+struct DepthNormalization {
+    far: f32,
+    near: f32,
+    range: f32,
+}
+
+impl DepthNormalization {
+    fn new(far: f32, near: f32) -> Self {
+        let range = (far - near).abs().max(1e-6);
+        Self { far, near, range }
+    }
+
+    #[inline]
+    fn to_byte(&self, depth_value: f32) -> u8 {
+        let near = self.near.min(self.far);
+        let far = self.near.max(self.far);
+        let depth_clamped = depth_value.clamp(near, far);
+        let depth_val_norm = ((far - depth_clamped) / self.range).clamp(0.0, 1.0);
+        (depth_val_norm * 255.0).round() as u8
+    }
+}
+
+struct ProjectedTriangle {
+    screen_points: [(f32, f32); 3],
+    depth_values: [f32; 3],
+    inv_depths: Option<[f32; 3]>,
+    depth_norm: DepthNormalization,
 }
 
 #[inline]
@@ -199,6 +228,110 @@ pub fn interpolate_colors(barycentric_coords: &(f32, f32, f32), colors: &[Color;
     interpolated_color
 }
 
+fn project_triangle_to_screen(
+    triangle_surface: &TriangleSurface,
+    render_pass_config: &RenderPassConfig,
+) -> Option<ProjectedTriangle> {
+    let view_config = &render_pass_config.view;
+    let view_mat = &view_config.transformation_matrix;
+    let u_axis_ws = Coordinate::new(view_mat[[0, 0]], view_mat[[1, 0]], view_mat[[2, 0]]);
+    let v_axis_ws = Coordinate::new(view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]);
+    let vd = view_config.view_direction;
+    let cube_center = (view_config.max_bound_f32 - 1.0) / 2.0;
+    let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
+    match &view_config.projection {
+        ProjectionModel::Orthographic => {
+            if !is_triangle_visible(triangle_surface.face_normal_ws, vd) {
+                return None;
+            }
+            let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
+            let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
+            let vertices_proj: [Coordinate; 3] = triangle_surface.vertices_ws.map(|vertex_ws| {
+                let proj_x = vertex_ws.dot(&u_axis_ws) - offset_u_on_plane;
+                let proj_y = vertex_ws.dot(&v_axis_ws) - offset_v_on_plane;
+                let z = vertex_ws.dot(&vd);
+                Coordinate::new(proj_x, proj_y, z)
+            });
+            let max_depth_along_view =
+                view_config.max_bound_f32 * (vd.x().max(0.0) + vd.y().max(0.0) + vd.z().max(0.0));
+            let min_depth_along_view =
+                view_config.max_bound_f32 * (vd.x().min(0.0) + vd.y().min(0.0) + vd.z().min(0.0));
+            Some(ProjectedTriangle {
+                screen_points: [
+                    (vertices_proj[0].x(), vertices_proj[0].y()),
+                    (vertices_proj[1].x(), vertices_proj[1].y()),
+                    (vertices_proj[2].x(), vertices_proj[2].y()),
+                ],
+                depth_values: [
+                    vertices_proj[0].z(),
+                    vertices_proj[1].z(),
+                    vertices_proj[2].z(),
+                ],
+                inv_depths: None,
+                depth_norm: DepthNormalization::new(max_depth_along_view, min_depth_along_view),
+            })
+        }
+        ProjectionModel::Perspective(params) => {
+            let centroid_ws = (triangle_surface.vertices_ws[0]
+                + triangle_surface.vertices_ws[1]
+                + triangle_surface.vertices_ws[2])
+                * (1.0 / 3.0);
+            let view_vec = centroid_ws - params.camera_position_ws;
+            if triangle_surface.face_normal_ws.dot(&view_vec) >= 0.0 {
+                return None;
+            }
+            let mut screen_pts: [(f32, f32); 3] = [(0.0, 0.0); 3];
+            let mut z_cam_vals: [f32; 3] = [0.0; 3];
+            for (i, vertex_ws) in triangle_surface.vertices_ws.iter().enumerate() {
+                let to_vertex = *vertex_ws - params.camera_position_ws;
+                let x_cam = to_vertex.dot(&u_axis_ws);
+                let y_cam = to_vertex.dot(&v_axis_ws);
+                let z_cam = to_vertex.dot(&vd);
+                if z_cam <= 1e-6 {
+                    return None;
+                }
+                let scale = params.focal_length_px / z_cam;
+                let col = scale * x_cam + cube_center;
+                let row = scale * y_cam + cube_center;
+                screen_pts[i] = (col, row);
+                z_cam_vals[i] = z_cam;
+            }
+            let inv_depths = [
+                1.0 / z_cam_vals[0],
+                1.0 / z_cam_vals[1],
+                1.0 / z_cam_vals[2],
+            ];
+            Some(ProjectedTriangle {
+                screen_points: screen_pts,
+                depth_values: z_cam_vals,
+                inv_depths: Some(inv_depths),
+                depth_norm: DepthNormalization::new(params.z_far, params.z_near),
+            })
+        }
+    }
+}
+
+#[inline]
+fn compute_depth_and_weights(
+    barycentric_coords: (f32, f32, f32),
+    projected: &ProjectedTriangle,
+) -> (f32, (f32, f32, f32)) {
+    let (w0, w1, w2) = barycentric_coords;
+    if let Some(inv_depths) = projected.inv_depths {
+        let denom = w0 * inv_depths[0] + w1 * inv_depths[1] + w2 * inv_depths[2];
+        let iw0 = (w0 * inv_depths[0]) / denom;
+        let iw1 = (w1 * inv_depths[1]) / denom;
+        let iw2 = (w2 * inv_depths[2]) / denom;
+        let depth_value = 1.0 / denom;
+        (depth_value, (iw0, iw1, iw2))
+    } else {
+        let depth_value = w0 * projected.depth_values[0]
+            + w1 * projected.depth_values[1]
+            + w2 * projected.depth_values[2];
+        (depth_value, barycentric_coords)
+    }
+}
+
 /// Interpolates triangle surface at a specific barycentric coordinate within a triangle
 /// returning a TrianglePoint struct with the interpolated triangle.
 pub fn interpolate_triangle_surface(
@@ -260,43 +393,19 @@ pub fn rasterize_triangle_to_images(
     buffers: &mut ImageBuffers,
     submesh_index: usize,
     triangle_index: usize, // Local triangle index for geometry
+    pixel_offset: (f32, f32),
 ) {
-    // Get submesh
     let submesh = &mesh.meshes[submesh_index];
-    // Extract triangle data
     let triangle_surface = match extract_triangle_surface(mesh, submesh_index, triangle_index) {
         Ok(surface) => surface,
-        Err(()) => return, // Skip degenerate triangles
+        Err(()) => return,
     };
-    // Back-face Culling (using world-space face normal and world-space view direction)
-    if !is_triangle_visible(
-        triangle_surface.face_normal_ws,
-        render_pass_config.view.view_direction,
-    ) {
+    let Some(projected_triangle) =
+        project_triangle_to_screen(&triangle_surface, render_pass_config)
+    else {
         return;
-    }
-    // Define projection plane axes from the rotation matrix
-    let view_mat = &render_pass_config.view.transformation_matrix;
-    let u_axis_ws = Coordinate::new(view_mat[[0, 0]], view_mat[[1, 0]], view_mat[[2, 0]]);
-    let v_axis_ws = Coordinate::new(view_mat[[0, 1]], view_mat[[1, 1]], view_mat[[2, 1]]);
-    let plane_normal_ws = render_pass_config.view.view_direction;
-    // Calculate cube center coordinates
-    let cube_center = (render_pass_config.view.max_bound_f32 - 1.0) / 2.0;
-    let cube_center_coordinate = Coordinate::new(cube_center, cube_center, cube_center);
-    let offset_u_on_plane = cube_center_coordinate.dot(&u_axis_ws) - cube_center;
-    let offset_v_on_plane = cube_center_coordinate.dot(&v_axis_ws) - cube_center;
-    // Project world-space vertices onto the view plane
-    let vertices_proj: [Coordinate; 3] = triangle_surface.vertices_ws.map(|vertex_ws| {
-        let proj_x = vertex_ws.dot(&u_axis_ws) - offset_u_on_plane;
-        let proj_y = vertex_ws.dot(&v_axis_ws) - offset_v_on_plane;
-        let z = vertex_ws.dot(&plane_normal_ws);
-        Coordinate::new(proj_x, proj_y, z)
-    });
-    // Project vertices onto the view plane
-    let p0_proj = (vertices_proj[0].x(), vertices_proj[0].y());
-    let p1_proj = (vertices_proj[1].x(), vertices_proj[1].y());
-    let p2_proj = (vertices_proj[2].x(), vertices_proj[2].y());
-    // Get the bounding box for the triangle
+    };
+    let [p0_proj, p1_proj, p2_proj] = projected_triangle.screen_points;
     let z_buffer_shape = buffers.z_buffer.shape();
     let (rows, cols) = (z_buffer_shape[0], z_buffer_shape[1]);
     let Some((min_row, max_row, min_col, max_col)) =
@@ -304,61 +413,48 @@ pub fn rasterize_triangle_to_images(
     else {
         return;
     };
-    // Rasterize the triangle
+    let alpha_u8 = (submesh.material.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+    let color_channels = buffers.image.shape()[2];
     for row in min_row..max_row {
         for col in min_col..max_col {
-            let pixel_center = (col as f32 + 0.5, row as f32 + 0.5);
+            let pixel_center = (
+                col as f32 + 0.5 + pixel_offset.0,
+                row as f32 + 0.5 + pixel_offset.1,
+            );
             let Some((w0, w1, w2)) = barycentric(p0_proj, p1_proj, p2_proj, pixel_center) else {
                 continue;
             };
             if !is_inside_triangle(w0, w1, w2) {
                 continue;
             }
-            let interpolated_z =
-                w0 * vertices_proj[0].z() + w1 * vertices_proj[1].z() + w2 * vertices_proj[2].z();
+            let (depth_value, interpolated_weights) =
+                compute_depth_and_weights((w0, w1, w2), &projected_triangle);
             let current_z = buffers.z_buffer[[row, col]];
-            let depth_test_passed = interpolated_z < current_z;
-            // If the depth test passed, interpolate attributes and update buffers, else skip
-            if !depth_test_passed {
+            if !(depth_value < current_z) {
                 continue;
             }
-            // Interpolate triangle
-            let interpolated_point =
-                interpolate_triangle_surface(&triangle_surface, (w0, w1, w2), &mesh, &submesh);
-            // Calculate final color with lighting (linear space)
+            let interpolated_point = interpolate_triangle_surface(
+                &triangle_surface,
+                interpolated_weights,
+                &mesh,
+                &submesh,
+            );
             let final_color_linear =
                 calculate_lighting(&interpolated_point, &render_pass_config, &submesh.material);
-            // Fast linear→sRGB conversion using LUT
             let final_color_srgb = final_color_linear.to_srgb8();
-            // Update buffers
-            buffers.z_buffer[[row, col]] = interpolated_z;
+            buffers.z_buffer[[row, col]] = depth_value;
             buffers.image[[row, col, 0]] = final_color_srgb[0];
             buffers.image[[row, col, 1]] = final_color_srgb[1];
             buffers.image[[row, col, 2]] = final_color_srgb[2];
+            if color_channels > 3 {
+                buffers.image[[row, col, 3]] = alpha_u8;
+            }
             buffers.occupancy_map[[row, col]] = 255;
-            // Compute the signed depth range spanned by the bounding cube along the current
-            // view direction.  For each axis we take either 0 or `max_bound_f32` depending
-            // on the sign of the corresponding component of the view direction, thereby
-            // obtaining the minimum and maximum possible dot-products without enumerating
-            // all eight corners explicitly.  This gives the *exact* depth range even for
-            // arbitrary (non-axis aligned) view directions.
-            let vd = render_pass_config.view.view_direction;
-            let max_depth_along_view = render_pass_config.view.max_bound_f32
-                * (vd.x().max(0.0) + vd.y().max(0.0) + vd.z().max(0.0));
-            let min_depth_along_view = render_pass_config.view.max_bound_f32
-                * (vd.x().min(0.0) + vd.y().min(0.0) + vd.z().min(0.0));
-            let depth_range = max_depth_along_view - min_depth_along_view;
-            // Normalise such that "near" (smaller z) becomes 1 and "far" (larger z) becomes
-            // 0, independent of the sign of the view direction components.
-            let depth_val_norm =
-                ((max_depth_along_view - interpolated_z) / depth_range).clamp(0.0, 1.0);
-            let depth_byte = (depth_val_norm * 255.0).round() as u8;
+            let depth_byte = projected_triangle.depth_norm.to_byte(depth_value);
             buffers.depth_map[[row, col]] = depth_byte;
-            // View-space normals
             let interpolated_normal_vs = interpolated_point
                 .normal_ws
                 .to_view_space_as_vector(&render_pass_config.view.transformation_matrix);
-            // Normalize the normal vector from [-1,1] to [0,1] and encode to 8-bit directly
             let nx = ((interpolated_normal_vs.x() + 1.0) * 0.5 * 255.0)
                 .round()
                 .clamp(0.0, 255.0);

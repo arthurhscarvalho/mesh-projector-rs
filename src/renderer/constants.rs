@@ -3,9 +3,6 @@
 //! and default values used throughout the projector pipeline.
 
 use crate::types::color::Color;
-
-/// Default background color/brightness for output images.
-pub const BACKGROUND_BRIGHTNESS: u8 = 255;
 /// Epsilon value for checking division by zero in barycentric coordinate calculation.
 pub const BARYCENTRIC_EPSILON: f32 = 1e-8;
 /// Epsilon tolerance for checking if calculated barycentric coordinates (u,v,w) are within the valid range [0, 1].

@@ -1,7 +1,9 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
-use mesh_projector::projector::config::ProjectionConfig;
-use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig};
+use mesh_projector::projector::config::{
+    BackgroundConfig, CameraConfig, MsaaConfig, ProjectionConfig,
+};
+use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig, SsaoConfig};
 use mesh_projector::types::color::Color;
 use mesh_projector::types::coordinate::Coordinate;
 use mesh_projector::types::orientation::Orientation;
@@ -35,18 +37,20 @@ fn main() {
         resolution: RESOLUTION,
         filtering_window_radius: FILTERING_RADIUS,
         view_angles,
+        camera: CameraConfig::default(),
+        msaa: MsaaConfig::default(),
+        ssao: SsaoConfig::default(),
+        background: BackgroundConfig::default(),
     };
     // Set up lighting configuration
     let lighting_config = LightingConfig {
         source: LightSource::Point(vec![
-            Coordinate::new(1.0, 1.0, 1.0),
             Coordinate::new(-1.0, 1.0, 1.0),
-            Coordinate::new(-1.0, 1.0, -1.0),
             Coordinate::new(1.0, 1.0, -1.0),
         ]),
         components: LightComponents {
-            global_ambient: Color::from_srgb(0.4, 0.4, 0.4),
-            global_diffuse: Color::from_srgb(0.7, 0.7, 0.7),
+            global_ambient: Color::from_srgb(0.6, 0.6, 0.6),
+            global_diffuse: Color::from_srgb(0.6, 0.6, 0.6),
             global_specular: Color::from_srgb(0.0, 0.0, 0.0),
         },
     };

@@ -3,9 +3,8 @@
 //! their local neighborhood.
 
 use crate::projector::config::ProjectionConfig;
-use crate::projector::constants::NUM_CHANNELS;
 use crate::renderer::buffers::ImageBuffers;
-use crate::renderer::constants::{BACKGROUND_BRIGHTNESS, FILTERING_NEIGHBORHOOD_FACTOR};
+use crate::renderer::constants::FILTERING_NEIGHBORHOOD_FACTOR;
 use nd::Array2;
 use rayon::iter::IntoParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -127,6 +126,9 @@ pub fn filter_outliers(buffers: &mut ImageBuffers, settings: &ProjectionConfig, 
             buffers.occupancy_map[[r, c]] = 0;
         }
     }
+    let image_channels = buffers.image.shape()[2];
+    let background_color = buffers.background_color;
+    let fallback_background = *background_color.last().unwrap_or(&0);
     for r in 0..rows {
         for c in 0..cols {
             // Check the occlusion map's single channel
@@ -134,8 +136,12 @@ pub fn filter_outliers(buffers: &mut ImageBuffers, settings: &ProjectionConfig, 
                 continue;
             }
             // If outlier, set all channels of the image pixel to background
-            for chan in 0..NUM_CHANNELS {
-                buffers.image[[r, c, chan]] = BACKGROUND_BRIGHTNESS;
+            for chan in 0..image_channels {
+                let bg_val = background_color
+                    .get(chan)
+                    .copied()
+                    .unwrap_or(fallback_background);
+                buffers.image[[r, c, chan]] = bg_val;
             }
         }
     }

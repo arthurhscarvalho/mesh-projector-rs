@@ -11,7 +11,7 @@ use crate::renderer::geometry::create_view_matrix;
 use crate::types::coordinate::Coordinate;
 use crate::types::image_batch::ImageBatch;
 use crate::types::mesh::Scene;
-use constants::NUM_CHANNELS;
+use constants::NORMAL_CHANNELS;
 use ndarray::Array2;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
@@ -37,9 +37,10 @@ pub fn project_to_image(
     let rows = max_bound_u;
     let cols = max_bound_u;
     let num_views = settings.view_angles.len();
+    let image_channels = settings.background.channels();
     let mut render_pass_configs = Vec::with_capacity(num_views);
     // Initialize image batch
-    let mut image_batch = ImageBatch::new(num_views, rows, cols, NUM_CHANNELS);
+    let mut image_batch = ImageBatch::new(num_views, rows, cols, image_channels, NORMAL_CHANNELS);
     // Handle empty meshes
     if mesh.meshes.is_empty() {
         log::warn!("Empty mesh (no meshes). Returning empty image batch.");
@@ -57,15 +58,19 @@ pub fn project_to_image(
             rotation_matrix[[1, 2]],
             rotation_matrix[[2, 2]],
         );
+        let projection_model =
+            projection::build_projection_model(&settings.camera, view_direction, max_bound_f32);
         // Create view config for the current view
         let view_config = ViewConfig {
             view_direction,
             transformation_matrix: create_view_matrix(&rotation_matrix),
             max_bound_f32,
+            projection: projection_model,
         };
         render_pass_configs.push(RenderPassConfig {
             view: view_config,
             lighting: lighting_config,
+            ssao: &settings.ssao,
         });
     }
     // Compute projections for each view in parallel

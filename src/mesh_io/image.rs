@@ -1,7 +1,7 @@
 //! Image saving operations.
 
 use crate::mesh_io::errors::{MeshError, MeshResult};
-use image::{ImageBuffer, Luma, Rgb};
+use image::{ImageBuffer, Luma, Rgb, Rgba};
 use log::warn;
 use ndarray::ArrayViewD;
 use std::fs;
@@ -32,17 +32,37 @@ pub fn save_image_data(image: ArrayViewD<u8>, output_path: &Path) -> MeshResult<
         3 => {
             let (rows, cols) = (image.shape()[0], image.shape()[1]);
             let channels = image.shape()[2];
-            let rgb_pixels: Vec<u8> = match channels {
-                3 => image.iter().cloned().collect(),
+            match channels {
+                3 => {
+                    let rgb_pixels: Vec<u8> = image.iter().cloned().collect();
+                    let buffer =
+                        ImageBuffer::<Rgb<u8>, _>::from_raw(cols as u32, rows as u32, rgb_pixels)
+                            .ok_or_else(|| {
+                                MeshError::ImageBufferError("Failed to create image buffer".to_string())
+                            })?;
+                    buffer.save(output_path).map_err(|e| {
+                        MeshError::FileReadError(format!(
+                            "Failed to save image {:?}: {}",
+                            output_path, e
+                        ))
+                    })
+                }
                 4 => {
-                    let flat = image.iter().cloned().collect::<Vec<u8>>();
-                    let mut out = Vec::with_capacity(rows * cols * 3);
-                    for chunk in flat.chunks(4) {
-                        if chunk.len() >= 3 {
-                            out.extend_from_slice(&chunk[0..3]);
-                        }
-                    }
-                    out
+                    let rgba_pixels: Vec<u8> = image.iter().cloned().collect();
+                    let buffer = ImageBuffer::<Rgba<u8>, _>::from_raw(
+                        cols as u32,
+                        rows as u32,
+                        rgba_pixels,
+                    )
+                    .ok_or_else(|| {
+                        MeshError::ImageBufferError("Failed to create RGBA image buffer".to_string())
+                    })?;
+                    buffer.save(output_path).map_err(|e| {
+                        MeshError::FileReadError(format!(
+                            "Failed to save image {:?}: {}",
+                            output_path, e
+                        ))
+                    })
                 }
                 other => {
                     warn!(
@@ -51,14 +71,7 @@ pub fn save_image_data(image: ArrayViewD<u8>, output_path: &Path) -> MeshResult<
                     );
                     return Ok(());
                 }
-            };
-            let buffer = ImageBuffer::<Rgb<u8>, _>::from_raw(cols as u32, rows as u32, rgb_pixels)
-                .ok_or_else(|| {
-                    MeshError::ImageBufferError("Failed to create image buffer".to_string())
-                })?;
-            buffer.save(output_path).map_err(|e| {
-                MeshError::FileReadError(format!("Failed to save image {:?}: {}", output_path, e))
-            })
+            }
         }
         other => {
             warn!(
