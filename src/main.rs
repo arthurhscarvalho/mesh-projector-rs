@@ -1,8 +1,7 @@
 use mesh_projector;
 use mesh_projector::logging::atomic_init_logger;
 use mesh_projector::projector::config::{
-    BackgroundConfig, CameraConfig, MsaaConfig, MsaaSampleCount, PerspectiveCameraConfig,
-    ProjectionConfig, ProjectionType,
+    BackgroundConfig, CameraConfig, MsaaConfig, ProjectionConfig,
 };
 use mesh_projector::renderer::config::{LightComponents, LightSource, LightingConfig, SsaoConfig};
 use mesh_projector::types::color::Color;
@@ -38,14 +37,8 @@ fn main() {
         resolution: RESOLUTION,
         filtering_window_radius: FILTERING_RADIUS,
         view_angles,
-        camera: CameraConfig {
-            projection: ProjectionType::Perspective(PerspectiveCameraConfig {
-                vertical_fov_degrees: 70.0,
-            }),
-        },
-        msaa: MsaaConfig {
-            sample_count: MsaaSampleCount::X4,
-        },
+        camera: CameraConfig::default(),
+        msaa: MsaaConfig::default(),
         ssao: SsaoConfig::default(),
         background: BackgroundConfig::default(),
     };
