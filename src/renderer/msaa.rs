@@ -125,12 +125,28 @@ impl MsaaAccumulator {
                 let alpha_total = self.alpha_accum[[r, c]];
                 let alpha_avg = (alpha_total * inv_samples).clamp(0.0, 1.0);
                 let color_srgb = if alpha_total > 0.0 {
-                    let lin = [
+                    let mesh_color_linear = [
                         self.color_accum[[r, c, 0]] / alpha_total,
                         self.color_accum[[r, c, 1]] / alpha_total,
                         self.color_accum[[r, c, 2]] / alpha_total,
                     ];
-                    Color::new(lin[0], lin[1], lin[2]).to_srgb8()
+                    if self.image_channels == 3 {
+                        // RGB mode: blend mesh color with background based on coverage
+                        let bg_linear = [
+                            srgb_byte_to_linear(self.background_color[0]),
+                            srgb_byte_to_linear(self.background_color[1]),
+                            srgb_byte_to_linear(self.background_color[2]),
+                        ];
+                        let blended_linear = [
+                            mesh_color_linear[0] * alpha_avg + bg_linear[0] * (1.0 - alpha_avg),
+                            mesh_color_linear[1] * alpha_avg + bg_linear[1] * (1.0 - alpha_avg),
+                            mesh_color_linear[2] * alpha_avg + bg_linear[2] * (1.0 - alpha_avg),
+                        ];
+                        Color::new(blended_linear[0], blended_linear[1], blended_linear[2]).to_srgb8()
+                    } else {
+                        // RGBA mode: pure mesh color, alpha channel handles coverage
+                        Color::new(mesh_color_linear[0], mesh_color_linear[1], mesh_color_linear[2]).to_srgb8()
+                    }
                 } else {
                     [
                         self.background_color[0],
