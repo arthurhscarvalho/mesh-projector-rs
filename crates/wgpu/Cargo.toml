@@ -1,0 +1,16 @@
+[package]
+name = "mesh-projector-wgpu"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+name = "mesh_projector_wgpu"
+
+[dependencies]
+mesh-projector-core.workspace = true
+ndarray.workspace = true
+log.workspace = true
+rayon.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
