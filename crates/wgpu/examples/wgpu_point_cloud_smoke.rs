@@ -1,6 +1,7 @@
 use mesh_projector_core::config::PointCloudConfig;
 use mesh_projector_core::config::{LightComponents, LightSource, LightingConfig};
 use mesh_projector_core::logging::atomic_init_logger;
+use mesh_projector_core::mesh_io::{build_preprocessing_from_scene, preprocessed_scene};
 use mesh_projector_core::types::color::Color;
 use mesh_projector_wgpu::WgpuProjector;
 
@@ -14,6 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         true,
         false,
     )?;
+    let preprocessing = build_preprocessing_from_scene(&mesh, 256);
+    let mesh = preprocessed_scene(&mesh, &preprocessing);
     let settings = PointCloudConfig {
         resolution: 256,
         point_cloud_density_factor: 0.001,

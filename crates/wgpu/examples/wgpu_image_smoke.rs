@@ -3,6 +3,7 @@ use mesh_projector_core::config::{
 };
 use mesh_projector_core::config::{LightComponents, LightSource, LightingConfig, SsaoConfig};
 use mesh_projector_core::logging::atomic_init_logger;
+use mesh_projector_core::mesh_io::{build_preprocessing_from_scene, preprocessed_scene};
 use mesh_projector_core::types::color::Color;
 use mesh_projector_core::types::orientation::Orientation;
 use mesh_projector_wgpu::WgpuProjector;
@@ -24,6 +25,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         true,
         false,
     )?;
+    let preprocessing = build_preprocessing_from_scene(&mesh, 256);
+    let mesh = preprocessed_scene(&mesh, &preprocessing);
     let settings = ProjectionConfig {
         resolution: 256,
         filtering_window_radius: 0,

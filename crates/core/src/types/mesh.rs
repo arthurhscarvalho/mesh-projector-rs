@@ -18,6 +18,7 @@ pub enum ShadingMode {
     BlinnPhong,
 }
 
+#[derive(Clone)]
 pub struct MeshGeometry {
     /// Vertex positions (N, 3).
     pub vertices: Array2<f32>,
@@ -31,6 +32,7 @@ pub struct MeshGeometry {
     pub vertex_colors: Option<Array2<f32>>,
 }
 
+#[derive(Clone)]
 pub struct MeshTexture {
     /// Texture image data (optional).
     pub texture: Option<Arc<Array3<u8>>>,
@@ -54,6 +56,7 @@ pub struct MeshMaterial {
     pub illum: i64,   // Illumination model
 }
 
+#[derive(Clone)]
 pub struct Mesh {
     /// Geometry of the mesh.
     pub geometry: MeshGeometry,
@@ -63,6 +66,7 @@ pub struct Mesh {
     pub texture: Option<MeshTexture>,
 }
 
+#[derive(Clone)]
 pub struct Scene {
     // Meshes: each mesh has its own geometry, texture, and material
     pub meshes: Vec<Mesh>,

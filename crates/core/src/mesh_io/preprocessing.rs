@@ -1,19 +1,24 @@
 //! Scene preprocessing operations for vertex and normal data.
 
 use crate::constants::{BOUNDS_EPSILON, MIN_BOUNDING_SPHERE_RADIUS};
+use crate::geometry::precompute_triangle_normals;
+use crate::types::mesh::{Mesh, Scene};
 use log::{info, warn};
 use ndarray::Array2;
 
-/// Describes a deterministic preprocessing transform applied uniformly
-/// across all meshes of a model: translate to global center, scale
-/// to target resolution cube, then shift to the cube center.
+/// Describes the complete geometry preprocessing recipe applied uniformly
+/// across all meshes of a scene: translate to global center, scale
+/// to the target resolution cube, optionally clamp to bounds, then shift to the cube center.
 #[derive(Clone, Copy, Debug)]
-pub struct PreprocessTransform {
+pub struct MeshPreprocessing {
     pub center: [f32; 3],
     pub scale: f32,
     pub shift: [f32; 3],
     pub target_max_val: f32,
+    pub clamp_to_target_bounds: bool,
 }
+
+pub type PreprocessTransform = MeshPreprocessing;
 
 #[derive(Clone, Copy, Debug)]
 struct BoundingSphere {
@@ -76,8 +81,8 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, resolution: u16) -> Array2
         original_bounds.min, original_bounds.max
     );
     let points = collect_vertices(&vertices);
-    let transform = build_transform_from_vertices(&points, resolution);
-    apply_transform_to_vertices(&mut vertices, &transform);
+    let preprocessing = build_preprocessing_from_vertices(&points, resolution);
+    apply_preprocessing_to_vertices(&mut vertices, &preprocessing);
     let final_bounds = calculate_bounding_box(&vertices);
     info!(
         "Final BBox Min: {:?}, Max: {:?}",
@@ -86,12 +91,11 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, resolution: u16) -> Array2
     vertices
 }
 
-/// Build a global preprocessing transform from vertex positions and resolution.
-/// This lets us preprocess all meshes consistently using a single transform.
-pub fn build_transform_from_vertices(
+/// Build a reusable preprocessing recipe from vertex positions and resolution.
+pub fn build_preprocessing_from_vertices(
     vertices: &[[f32; 3]],
     resolution: u16,
-) -> PreprocessTransform {
+) -> MeshPreprocessing {
     let sphere = ritter_bounding_sphere(vertices);
     let target_max_val = resolution as f32 - 1.0;
     let diameter = 2.0 * sphere.radius.max(MIN_BOUNDING_SPHERE_RADIUS);
@@ -102,38 +106,94 @@ pub fn build_transform_from_vertices(
         "Global sphere transform — center: {:?}, radius: {}, scale: {}, cube_center: {}",
         sphere.center, sphere.radius, scale_factor, cube_center
     );
-    PreprocessTransform {
+    MeshPreprocessing {
         center: sphere.center,
         scale: scale_factor,
         shift,
         target_max_val,
+        clamp_to_target_bounds: true,
     }
 }
 
-/// Apply a previously built preprocessing transform to a vertex array.
+/// Build a reusable preprocessing recipe from all vertices in a scene.
+pub fn build_preprocessing_from_scene(scene: &Scene, resolution: u16) -> MeshPreprocessing {
+    let mut vertices = Vec::new();
+    for mesh in &scene.meshes {
+        vertices.extend(collect_vertices(&mesh.geometry.vertices));
+    }
+    build_preprocessing_from_vertices(&vertices, resolution)
+}
+
+/// Apply a previously built preprocessing recipe to a vertex array.
 /// Order: translate by -center, scale uniformly, then shift to cube center.
-pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTransform) {
+pub fn apply_preprocessing_to_vertices(vertices: &mut Array2<f32>, p: &MeshPreprocessing) {
     let vertex_count = vertices.shape()[0];
     // Translate by global center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
-            vertices[[vertex_idx, component]] -= t.center[component];
+            vertices[[vertex_idx, component]] -= p.center[component];
         }
     }
     // Uniform scale
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
-            vertices[[vertex_idx, component]] *= t.scale;
+            vertices[[vertex_idx, component]] *= p.scale;
         }
     }
     // Shift to cube center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
-            vertices[[vertex_idx, component]] += t.shift[component];
+            vertices[[vertex_idx, component]] += p.shift[component];
         }
     }
-    // Clamp to valid range if needed
-    clamp_vertices_if_needed(vertices, t.target_max_val);
+    if p.clamp_to_target_bounds {
+        clamp_vertices_if_needed(vertices, p.target_max_val);
+    }
+}
+
+pub fn apply_preprocessing_to_mesh(mesh: &mut Mesh, preprocessing: &MeshPreprocessing) {
+    apply_preprocessing_to_vertices(&mut mesh.geometry.vertices, preprocessing);
+    mesh.geometry.face_normals = precompute_triangle_normals(
+        mesh.geometry.vertices.view(),
+        mesh.geometry.triangles.view(),
+    );
+    if let Some(normals) = mesh.geometry.vertex_normals.as_mut() {
+        normalize_normals(normals);
+    } else {
+        mesh.geometry.vertex_normals =
+            compute_vertex_normals(&mesh.geometry.vertices, &mesh.geometry.triangles);
+    }
+}
+
+pub fn apply_preprocessing_to_scene(scene: &mut Scene, preprocessing: &MeshPreprocessing) {
+    for mesh in &mut scene.meshes {
+        apply_preprocessing_to_mesh(mesh, preprocessing);
+    }
+}
+
+pub fn preprocessed_scene(scene: &Scene, preprocessing: &MeshPreprocessing) -> Scene {
+    let mut scene = scene.clone();
+    apply_preprocessing_to_scene(&mut scene, preprocessing);
+    scene
+}
+
+pub fn preprocessed_mesh(mesh: &Mesh, preprocessing: &MeshPreprocessing) -> Mesh {
+    let mut mesh = mesh.clone();
+    apply_preprocessing_to_mesh(&mut mesh, preprocessing);
+    mesh
+}
+
+/// Backward-compatible alias for older internal callers.
+pub fn build_transform_from_vertices(
+    vertices: &[[f32; 3]],
+    resolution: u16,
+) -> PreprocessTransform {
+    build_preprocessing_from_vertices(vertices, resolution)
+}
+
+/// Backward-compatible alias for older internal callers.
+pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTransform) {
+    apply_preprocessing_to_vertices(vertices, t);
 }
 
 fn collect_vertices(vertices: &Array2<f32>) -> Vec<[f32; 3]> {
@@ -365,6 +425,7 @@ fn set_default_normal(normals: &mut Array2<f32>, vertex_idx: usize) {
 mod tests {
     use super::*;
     use ndarray::arr2;
+    use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, Scene, ShadingMode};
 
     fn assert_close(actual: f32, expected: f32, epsilon: f32) {
         assert!(
@@ -451,11 +512,12 @@ mod tests {
     fn degenerate_vertices_produce_finite_nonzero_transform() {
         let vertices = [[3.0, -2.0, 7.0]; 4];
 
-        let transform = build_transform_from_vertices(&vertices, 64);
+        let transform = build_preprocessing_from_vertices(&vertices, 64);
 
         assert_eq!(transform.center, [3.0, -2.0, 7.0]);
         assert!(transform.scale.is_finite());
         assert!(transform.scale > 0.0);
+        assert!(transform.clamp_to_target_bounds);
     }
 
     #[test]
@@ -474,9 +536,9 @@ mod tests {
         ]);
         let resolution = 128;
         let max_val = resolution as f32 - 1.0;
-        let transform = build_transform_from_vertices(&points, resolution);
+        let transform = build_preprocessing_from_vertices(&points, resolution);
 
-        apply_transform_to_vertices(&mut vertices, &transform);
+        apply_preprocessing_to_vertices(&mut vertices, &transform);
 
         assert_vertices_in_resolution_cube(&vertices, max_val);
     }
@@ -500,9 +562,9 @@ mod tests {
         let resolution = 256;
         let max_val = resolution as f32 - 1.0;
         let cube_center = max_val * 0.5;
-        let transform = build_transform_from_vertices(&points, resolution);
+        let transform = build_preprocessing_from_vertices(&points, resolution);
 
-        apply_transform_to_vertices(&mut vertices, &transform);
+        apply_preprocessing_to_vertices(&mut vertices, &transform);
         rotate_vertices_around_center(&mut vertices, cube_center, 0.37, -0.71, 0.23);
 
         assert_vertices_in_resolution_cube(&vertices, max_val);
@@ -542,6 +604,106 @@ mod tests {
             vertices[[vertex_idx, 0]] = x + center;
             vertices[[vertex_idx, 1]] = y + center;
             vertices[[vertex_idx, 2]] = z + center;
+        }
+    }
+
+    fn test_material() -> MeshMaterial {
+        MeshMaterial {
+            ka: [0.0, 0.0, 0.0],
+            kd: [1.0, 1.0, 1.0],
+            ks: [0.0, 0.0, 0.0],
+            ns: 1.0,
+            opacity: 1.0,
+            illum: 1,
+        }
+    }
+
+    fn single_triangle_scene(vertices: Array2<f32>) -> Scene {
+        let triangles = arr2(&[[0usize, 1usize, 2usize]]);
+        let vertex_normals = Some(arr2(&[
+            [0.0, 0.0, 5.0],
+            [0.0, 0.0, 5.0],
+            [0.0, 0.0, 5.0],
+        ]));
+        let face_normals = precompute_triangle_normals(vertices.view(), triangles.view());
+        Scene::new(
+            vec![Mesh {
+                geometry: MeshGeometry {
+                    vertices,
+                    triangles,
+                    vertex_normals,
+                    face_normals,
+                    vertex_colors: None,
+                },
+                material: test_material(),
+                texture: None,
+            }],
+            ShadingMode::VertexColor,
+            None,
+        )
+    }
+
+    #[test]
+    fn preprocessing_from_scene_matches_vertex_builder() {
+        let scene = single_triangle_scene(arr2(&[
+            [-2.0, 0.0, 1.0],
+            [1.0, 3.0, -1.0],
+            [4.0, -2.0, 0.5],
+        ]));
+        let expected = build_preprocessing_from_vertices(
+            &[
+                [-2.0, 0.0, 1.0],
+                [1.0, 3.0, -1.0],
+                [4.0, -2.0, 0.5],
+            ],
+            64,
+        );
+        let actual = build_preprocessing_from_scene(&scene, 64);
+
+        assert_eq!(actual.center, expected.center);
+        assert_eq!(actual.shift, expected.shift);
+        assert_eq!(actual.target_max_val, expected.target_max_val);
+        assert_eq!(actual.clamp_to_target_bounds, expected.clamp_to_target_bounds);
+        assert_close(actual.scale, expected.scale, 1e-6);
+    }
+
+    #[test]
+    fn preprocessed_scene_matches_vertex_preprocessing() {
+        let scene = single_triangle_scene(arr2(&[
+            [-4.0, -1.0, 0.0],
+            [7.0, 2.0, 1.0],
+            [0.0, 5.0, -3.0],
+        ]));
+        let preprocessing = build_preprocessing_from_scene(&scene, 128);
+        let expected_vertices = preprocess_vertices(scene.meshes[0].geometry.vertices.clone(), 128);
+        let actual = preprocessed_scene(&scene, &preprocessing);
+
+        assert_eq!(actual.meshes[0].geometry.vertices, expected_vertices);
+    }
+
+    #[test]
+    fn apply_preprocessing_to_mesh_recomputes_and_normalizes_normals() {
+        let mut scene = single_triangle_scene(arr2(&[
+            [0.0, 0.0, 0.0],
+            [2.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+        ]));
+        let preprocessing = build_preprocessing_from_scene(&scene, 32);
+
+        apply_preprocessing_to_mesh(&mut scene.meshes[0], &preprocessing);
+
+        let face_normal = scene.meshes[0].geometry.face_normals.row(0);
+        assert!(face_normal[2] > 0.0);
+        let vertex_normals = scene.meshes[0]
+            .geometry
+            .vertex_normals
+            .as_ref()
+            .expect("vertex normals should exist");
+        for vertex_idx in 0..vertex_normals.shape()[0] {
+            let x = vertex_normals[[vertex_idx, 0]];
+            let y = vertex_normals[[vertex_idx, 1]];
+            let z = vertex_normals[[vertex_idx, 2]];
+            assert_close((x * x + y * y + z * z).sqrt(), 1.0, 1e-6);
         }
     }
 }
