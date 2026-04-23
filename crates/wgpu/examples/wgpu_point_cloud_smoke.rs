@@ -1,7 +1,7 @@
 use mesh_projector_core::config::PointCloudConfig;
 use mesh_projector_core::config::{LightComponents, LightSource, LightingConfig};
 use mesh_projector_core::logging::atomic_init_logger;
-use mesh_projector_core::mesh_io::{build_preprocessing_from_scene, preprocessed_scene};
+use mesh_projector_core::preprocessing::{build_preprocessing_from_scene, preprocessed_scene};
 use mesh_projector_core::types::color::Color;
 use mesh_projector_wgpu::WgpuProjector;
 

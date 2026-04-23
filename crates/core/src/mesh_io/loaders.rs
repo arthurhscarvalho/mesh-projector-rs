@@ -4,10 +4,6 @@ use crate::geometry::precompute_triangle_normals;
 use crate::mesh_io::{
     errors::{MeshError, MeshResult},
     material::{get_submesh_material, process_materials_from_obj},
-    preprocessing::{
-        apply_preprocessing_to_vertices, build_preprocessing_from_vertices,
-        compute_vertex_normals, normalize_normals, MeshPreprocessing,
-    },
     utils::{
         convert_triangle_indices, convert_vertex_colors, convert_vertex_normals,
         convert_vertex_positions, create_global_triangle_indices, create_triangle_uvs,
@@ -15,6 +11,7 @@ use crate::mesh_io::{
         validate_file_exists,
     },
 };
+use crate::preprocessing::{compute_vertex_normals, normalize_normals};
 use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, MeshTexture, Scene, ShadingMode};
 use log::{info, warn};
 use ndarray::Array3;
@@ -23,31 +20,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tobj;
 
-/// Read a mesh from an OBJ, inferring materials/textures from the OBJ/MTL unless a mode is supplied
 pub fn read_mesh_internal(
     obj_path: &str,
     mesh_mode: Option<ShadingMode>,
-    resolution: u16,
+    _resolution: u16,
     flip_v_coordinate: bool,
     ignore_opacity: bool,
-) -> MeshResult<Scene> {
-    read_mesh_internal_with_preprocessing(
-        obj_path,
-        mesh_mode,
-        resolution,
-        flip_v_coordinate,
-        ignore_opacity,
-        false,
-    )
-}
-
-pub fn read_mesh_internal_with_preprocessing(
-    obj_path: &str,
-    mesh_mode: Option<ShadingMode>,
-    resolution: u16,
-    flip_v_coordinate: bool,
-    ignore_opacity: bool,
-    apply_preprocessing: bool,
 ) -> MeshResult<Scene> {
     // Validate input files
     validate_file_exists(obj_path)?;
@@ -79,8 +57,6 @@ pub fn read_mesh_internal_with_preprocessing(
         &models,
         &materials,
         inferred_mode,
-        resolution,
-        apply_preprocessing,
         flip_v_coordinate,
         obj_path,
         materials_raw_vec_opt.as_deref(),
@@ -109,27 +85,11 @@ fn load_obj_file(
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
 }
 
-fn collect_model_vertices(models: &[tobj::Model]) -> Vec<[f32; 3]> {
-    let vertex_count = models
-        .iter()
-        .map(|model| model.mesh.positions.len() / 3)
-        .sum();
-    let mut vertices = Vec::with_capacity(vertex_count);
-    for model in models {
-        for vertex in model.mesh.positions.chunks_exact(3) {
-            vertices.push([vertex[0], vertex[1], vertex[2]]);
-        }
-    }
-    vertices
-}
-
 /// Process all meshes from the loaded models
 fn process_submeshes_with_textures(
     models: &[tobj::Model],
     materials: &[MeshMaterial],
     mode: ShadingMode,
-    resolution: u16,
-    apply_preprocessing: bool,
     flip_v_coordinate: bool,
     obj_path: &str,
     materials_raw_opt: Option<&[tobj::Material]>,
@@ -138,25 +98,14 @@ fn process_submeshes_with_textures(
 ) -> MeshResult<Vec<Mesh>> {
     let mut meshes: Vec<Mesh> = Vec::new();
     let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
-    // First pass: collect global vertices across all models.
-    let global_vertices = collect_model_vertices(models);
-    // Build a single transform to be applied to every submesh
-    let global_preprocessing: Option<MeshPreprocessing> = if apply_preprocessing {
-        Some(build_preprocessing_from_vertices(&global_vertices, resolution))
-    } else {
-        None
-    };
-    // Second pass: process each model using the global transform
     for model in models {
         if let Some(submesh) = process_single_submesh_with_texture(
             model,
             materials,
             mode,
-            resolution,
             flip_v_coordinate,
             obj_dir.as_ref(),
             materials_raw_opt,
-            global_preprocessing.as_ref(),
             texture_cache,
             texture_images,
         )? {
@@ -171,11 +120,9 @@ fn process_single_submesh_with_texture(
     model: &tobj::Model,
     materials: &[MeshMaterial],
     mode: ShadingMode,
-    _resolution: u16,
     flip_v_coordinate: bool,
     obj_dir: Option<&PathBuf>,
     materials_raw_opt: Option<&[tobj::Material]>,
-    global_transform_opt: Option<&MeshPreprocessing>,
     texture_cache: &mut HashMap<String, Arc<Array3<u8>>>,
     texture_images: &mut Vec<Arc<Array3<u8>>>,
 ) -> MeshResult<Option<Mesh>> {
@@ -192,16 +139,9 @@ fn process_single_submesh_with_texture(
     let triangles = convert_triangle_indices(&mesh.indices)?;
     let vertex_normals = process_vertex_normals(mesh, num_vertices, &vertices, &triangles)?;
     let vertex_colors = process_vertex_colors(mesh, num_vertices, &model.name);
-    let processed_vertices = if let Some(t) = global_transform_opt {
-        let mut v = vertices;
-        apply_preprocessing_to_vertices(&mut v, t);
-        v
-    } else {
-        vertices
-    };
-    let face_normals = precompute_triangle_normals(processed_vertices.view(), triangles.view());
+    let face_normals = precompute_triangle_normals(vertices.view(), triangles.view());
     let geometry = MeshGeometry {
-        vertices: processed_vertices,
+        vertices,
         triangles,
         vertex_normals,
         face_normals,

@@ -1,7 +1,7 @@
 use mesh_projector_core::config::{BackgroundConfig, CameraConfig, MsaaConfig, ProjectionConfig};
 use mesh_projector_core::config::{LightComponents, LightSource, LightingConfig, SsaoConfig};
 use mesh_projector_core::logging::atomic_init_logger;
-use mesh_projector_core::mesh_io::{build_preprocessing_from_scene, preprocessed_scene};
+use mesh_projector_core::preprocessing::{build_preprocessing_from_scene, preprocessed_scene};
 use mesh_projector_core::types::color::Color;
 use mesh_projector_core::types::coordinate::Coordinate;
 use mesh_projector_core::types::orientation::Orientation;

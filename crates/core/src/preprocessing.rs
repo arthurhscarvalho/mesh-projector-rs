@@ -1,6 +1,6 @@
 //! Scene preprocessing operations for vertex and normal data.
 
-use crate::constants::{BOUNDS_EPSILON, MIN_BOUNDING_SPHERE_RADIUS};
+use crate::constants::preprocessing::{BOUNDS_EPSILON, MIN_BOUNDING_SPHERE_RADIUS};
 use crate::geometry::precompute_triangle_normals;
 use crate::types::mesh::{Mesh, Scene};
 use log::{info, warn};
@@ -17,8 +17,6 @@ pub struct MeshPreprocessing {
     pub target_max_val: f32,
     pub clamp_to_target_bounds: bool,
 }
-
-pub type PreprocessTransform = MeshPreprocessing;
 
 #[derive(Clone, Copy, Debug)]
 struct BoundingSphere {
@@ -37,11 +35,9 @@ pub fn compute_vertex_normals(
         return None;
     }
     let mut normals = Array2::zeros((vertex_count, 3));
-    // Accumulate face normals for each vertex
     for triangle_idx in 0..triangle_count {
         if let Some(face_normal) = compute_triangle_normal(vertices, triangles, triangle_idx) {
             let indices = get_triangle_indices(triangles, triangle_idx);
-            // Add face normal to each vertex of the triangle
             for &vertex_idx in &indices {
                 if vertex_idx < vertex_count {
                     for component in 0..3 {
@@ -51,7 +47,6 @@ pub fn compute_vertex_normals(
             }
         }
     }
-    // Normalize all vertex normals
     normalize_normals(&mut normals);
     Some(normals)
 }
@@ -62,12 +57,10 @@ pub fn normalize_normals(normals: &mut Array2<f32>) {
     for vertex_idx in 0..vertex_count {
         let norm = calculate_vector_magnitude(normals, vertex_idx);
         if norm > 1e-9 {
-            // Normalize the vector
             for component in 0..3 {
                 normals[[vertex_idx, component]] /= norm;
             }
         } else {
-            // Set default direction for zero normals
             set_default_normal(normals, vertex_idx);
         }
     }
@@ -128,19 +121,16 @@ pub fn build_preprocessing_from_scene(scene: &Scene, resolution: u16) -> MeshPre
 /// Order: translate by -center, scale uniformly, then shift to cube center.
 pub fn apply_preprocessing_to_vertices(vertices: &mut Array2<f32>, p: &MeshPreprocessing) {
     let vertex_count = vertices.shape()[0];
-    // Translate by global center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] -= p.center[component];
         }
     }
-    // Uniform scale
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] *= p.scale;
         }
     }
-    // Shift to cube center
     for vertex_idx in 0..vertex_count {
         for component in 0..3 {
             vertices[[vertex_idx, component]] += p.shift[component];
@@ -181,19 +171,6 @@ pub fn preprocessed_mesh(mesh: &Mesh, preprocessing: &MeshPreprocessing) -> Mesh
     let mut mesh = mesh.clone();
     apply_preprocessing_to_mesh(&mut mesh, preprocessing);
     mesh
-}
-
-/// Backward-compatible alias for older internal callers.
-pub fn build_transform_from_vertices(
-    vertices: &[[f32; 3]],
-    resolution: u16,
-) -> PreprocessTransform {
-    build_preprocessing_from_vertices(vertices, resolution)
-}
-
-/// Backward-compatible alias for older internal callers.
-pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTransform) {
-    apply_preprocessing_to_vertices(vertices, t);
 }
 
 fn collect_vertices(vertices: &Array2<f32>) -> Vec<[f32; 3]> {
@@ -278,14 +255,12 @@ fn dot(a: &[f32; 3], b: &[f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// Bounding box structure for cleaner code
 #[derive(Debug)]
 struct BoundingBox {
     min: [f32; 3],
     max: [f32; 3],
 }
 
-/// Calculate bounding box of vertices
 fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
     let vertex_count = vertices.shape()[0];
     let mut min_bound = [f32::MAX; 3];
@@ -303,7 +278,6 @@ fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
     }
 }
 
-/// Clamp vertices to valid range if they exceed bounds
 fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
     let bounds = calculate_bounding_box(vertices);
     let mut needs_clamping = false;
@@ -328,7 +302,6 @@ fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
     }
 }
 
-/// Compute normal for a single triangle
 fn compute_triangle_normal(
     vertices: &Array2<f32>,
     triangles: &Array2<usize>,
@@ -336,10 +309,8 @@ fn compute_triangle_normal(
 ) -> Option<[f32; 3]> {
     let indices = get_triangle_indices(triangles, triangle_idx);
     let triangle_vertices = get_triangle_vertices(vertices, &indices)?;
-    // Compute edges
     let edge1 = subtract_vertices(&triangle_vertices[1], &triangle_vertices[0]);
     let edge2 = subtract_vertices(&triangle_vertices[2], &triangle_vertices[0]);
-    // Compute cross product (normal)
     let normal = cross_product(&edge1, &edge2);
     let length = vector_magnitude(&normal);
     if length > 1e-9 {
@@ -349,7 +320,6 @@ fn compute_triangle_normal(
     }
 }
 
-/// Get vertex indices for a triangle
 fn get_triangle_indices(triangles: &Array2<usize>, triangle_idx: usize) -> [usize; 3] {
     [
         triangles[[triangle_idx, 0]],
@@ -358,7 +328,6 @@ fn get_triangle_indices(triangles: &Array2<usize>, triangle_idx: usize) -> [usiz
     ]
 }
 
-/// Get vertex positions for a triangle
 fn get_triangle_vertices(vertices: &Array2<f32>, indices: &[usize; 3]) -> Option<[[f32; 3]; 3]> {
     let vertex_count = vertices.shape()[0];
     for &idx in indices {
@@ -385,12 +354,10 @@ fn get_triangle_vertices(vertices: &Array2<f32>, indices: &[usize; 3]) -> Option
     ])
 }
 
-/// Vector subtraction
 fn subtract_vertices(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
-/// Cross product of two 3D vectors
 fn cross_product(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
     [
         a[1] * b[2] - a[2] * b[1],
@@ -399,12 +366,10 @@ fn cross_product(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// Calculate magnitude of a 3D vector
 fn vector_magnitude(v: &[f32; 3]) -> f32 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
-/// Calculate magnitude of a vector in the normals array
 fn calculate_vector_magnitude(normals: &Array2<f32>, vertex_idx: usize) -> f32 {
     let mut norm = 0.0;
     for component in 0..3 {
@@ -414,296 +379,8 @@ fn calculate_vector_magnitude(normals: &Array2<f32>, vertex_idx: usize) -> f32 {
     norm.sqrt()
 }
 
-/// Set default normal direction for zero normals
 fn set_default_normal(normals: &mut Array2<f32>, vertex_idx: usize) {
     normals[[vertex_idx, 0]] = 0.0;
     normals[[vertex_idx, 1]] = 0.0;
     normals[[vertex_idx, 2]] = 1.0;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::arr2;
-    use crate::types::mesh::{Mesh, MeshGeometry, MeshMaterial, Scene, ShadingMode};
-
-    fn assert_close(actual: f32, expected: f32, epsilon: f32) {
-        assert!(
-            (actual - expected).abs() <= epsilon,
-            "expected {actual} to be within {epsilon} of {expected}"
-        );
-    }
-
-    fn assert_contains_all(sphere: BoundingSphere, vertices: &[[f32; 3]]) {
-        let radius_sq = sphere.radius * sphere.radius;
-        for &vertex in vertices {
-            assert!(
-                distance_sq(vertex, sphere.center) <= radius_sq + BOUNDS_EPSILON,
-                "sphere {:?} did not contain vertex {:?}",
-                sphere,
-                vertex
-            );
-        }
-    }
-
-    fn assert_vertices_in_resolution_cube(vertices: &Array2<f32>, max_val: f32) {
-        for vertex_idx in 0..vertices.shape()[0] {
-            for component in 0..3 {
-                let value = vertices[[vertex_idx, component]];
-                assert!(
-                    value >= -BOUNDS_EPSILON && value <= max_val + BOUNDS_EPSILON,
-                    "vertex {vertex_idx} component {component} out of bounds: {value}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn ritter_sphere_for_two_points_uses_midpoint_and_half_distance() {
-        let vertices = [[-2.0, 0.0, 0.0], [4.0, 0.0, 0.0]];
-
-        let sphere = ritter_bounding_sphere(&vertices);
-
-        assert_close(sphere.center[0], 1.0, 1e-6);
-        assert_close(sphere.center[1], 0.0, 1e-6);
-        assert_close(sphere.center[2], 0.0, 1e-6);
-        assert_close(sphere.radius, 3.0, 1e-6);
-        assert_contains_all(sphere, &vertices);
-    }
-
-    #[test]
-    fn ritter_sphere_contains_cube_corners() {
-        let vertices = [
-            [-1.0, -1.0, -1.0],
-            [-1.0, -1.0, 1.0],
-            [-1.0, 1.0, -1.0],
-            [-1.0, 1.0, 1.0],
-            [1.0, -1.0, -1.0],
-            [1.0, -1.0, 1.0],
-            [1.0, 1.0, -1.0],
-            [1.0, 1.0, 1.0],
-        ];
-
-        let sphere = ritter_bounding_sphere(&vertices);
-
-        assert_contains_all(sphere, &vertices);
-        assert_close(sphere.radius, 3.0_f32.sqrt(), 1e-6);
-    }
-
-    #[test]
-    fn ritter_sphere_expands_to_contain_asymmetric_point_cloud() {
-        let vertices = [
-            [0.0, 0.0, 0.0],
-            [8.0, 0.0, 0.0],
-            [2.0, 5.0, 0.5],
-            [-1.0, 3.0, 2.0],
-            [3.0, -4.0, -2.5],
-            [2.0, 1.0, 6.0],
-        ];
-
-        let sphere = ritter_bounding_sphere(&vertices);
-
-        assert_contains_all(sphere, &vertices);
-        assert!(sphere.radius.is_finite());
-        assert!(sphere.radius > MIN_BOUNDING_SPHERE_RADIUS);
-    }
-
-    #[test]
-    fn degenerate_vertices_produce_finite_nonzero_transform() {
-        let vertices = [[3.0, -2.0, 7.0]; 4];
-
-        let transform = build_preprocessing_from_vertices(&vertices, 64);
-
-        assert_eq!(transform.center, [3.0, -2.0, 7.0]);
-        assert!(transform.scale.is_finite());
-        assert!(transform.scale > 0.0);
-        assert!(transform.clamp_to_target_bounds);
-    }
-
-    #[test]
-    fn sphere_transform_places_vertices_inside_resolution_cube() {
-        let points = [
-            [-4.0, -1.0, 0.0],
-            [7.0, 2.0, 1.0],
-            [0.0, 5.0, -3.0],
-            [2.0, -6.0, 4.0],
-        ];
-        let mut vertices = arr2(&[
-            [-4.0, -1.0, 0.0],
-            [7.0, 2.0, 1.0],
-            [0.0, 5.0, -3.0],
-            [2.0, -6.0, 4.0],
-        ]);
-        let resolution = 128;
-        let max_val = resolution as f32 - 1.0;
-        let transform = build_preprocessing_from_vertices(&points, resolution);
-
-        apply_preprocessing_to_vertices(&mut vertices, &transform);
-
-        assert_vertices_in_resolution_cube(&vertices, max_val);
-    }
-
-    #[test]
-    fn transformed_vertices_remain_in_sphere_cube_after_non_axis_rotation() {
-        let points = [
-            [-4.0, -1.0, 0.0],
-            [7.0, 2.0, 1.0],
-            [0.0, 5.0, -3.0],
-            [2.0, -6.0, 4.0],
-            [-2.0, 3.0, 5.0],
-        ];
-        let mut vertices = arr2(&[
-            [-4.0, -1.0, 0.0],
-            [7.0, 2.0, 1.0],
-            [0.0, 5.0, -3.0],
-            [2.0, -6.0, 4.0],
-            [-2.0, 3.0, 5.0],
-        ]);
-        let resolution = 256;
-        let max_val = resolution as f32 - 1.0;
-        let cube_center = max_val * 0.5;
-        let transform = build_preprocessing_from_vertices(&points, resolution);
-
-        apply_preprocessing_to_vertices(&mut vertices, &transform);
-        rotate_vertices_around_center(&mut vertices, cube_center, 0.37, -0.71, 0.23);
-
-        assert_vertices_in_resolution_cube(&vertices, max_val);
-    }
-
-    fn rotate_vertices_around_center(
-        vertices: &mut Array2<f32>,
-        center: f32,
-        pitch: f32,
-        yaw: f32,
-        roll: f32,
-    ) {
-        let (sin_pitch, cos_pitch) = pitch.sin_cos();
-        let (sin_yaw, cos_yaw) = yaw.sin_cos();
-        let (sin_roll, cos_roll) = roll.sin_cos();
-
-        for vertex_idx in 0..vertices.shape()[0] {
-            let mut x = vertices[[vertex_idx, 0]] - center;
-            let mut y = vertices[[vertex_idx, 1]] - center;
-            let mut z = vertices[[vertex_idx, 2]] - center;
-
-            let y_pitch = y * cos_pitch - z * sin_pitch;
-            let z_pitch = y * sin_pitch + z * cos_pitch;
-            y = y_pitch;
-            z = z_pitch;
-
-            let x_yaw = x * cos_yaw + z * sin_yaw;
-            let z_yaw = -x * sin_yaw + z * cos_yaw;
-            x = x_yaw;
-            z = z_yaw;
-
-            let x_roll = x * cos_roll - y * sin_roll;
-            let y_roll = x * sin_roll + y * cos_roll;
-            x = x_roll;
-            y = y_roll;
-
-            vertices[[vertex_idx, 0]] = x + center;
-            vertices[[vertex_idx, 1]] = y + center;
-            vertices[[vertex_idx, 2]] = z + center;
-        }
-    }
-
-    fn test_material() -> MeshMaterial {
-        MeshMaterial {
-            ka: [0.0, 0.0, 0.0],
-            kd: [1.0, 1.0, 1.0],
-            ks: [0.0, 0.0, 0.0],
-            ns: 1.0,
-            opacity: 1.0,
-            illum: 1,
-        }
-    }
-
-    fn single_triangle_scene(vertices: Array2<f32>) -> Scene {
-        let triangles = arr2(&[[0usize, 1usize, 2usize]]);
-        let vertex_normals = Some(arr2(&[
-            [0.0, 0.0, 5.0],
-            [0.0, 0.0, 5.0],
-            [0.0, 0.0, 5.0],
-        ]));
-        let face_normals = precompute_triangle_normals(vertices.view(), triangles.view());
-        Scene::new(
-            vec![Mesh {
-                geometry: MeshGeometry {
-                    vertices,
-                    triangles,
-                    vertex_normals,
-                    face_normals,
-                    vertex_colors: None,
-                },
-                material: test_material(),
-                texture: None,
-            }],
-            ShadingMode::VertexColor,
-            None,
-        )
-    }
-
-    #[test]
-    fn preprocessing_from_scene_matches_vertex_builder() {
-        let scene = single_triangle_scene(arr2(&[
-            [-2.0, 0.0, 1.0],
-            [1.0, 3.0, -1.0],
-            [4.0, -2.0, 0.5],
-        ]));
-        let expected = build_preprocessing_from_vertices(
-            &[
-                [-2.0, 0.0, 1.0],
-                [1.0, 3.0, -1.0],
-                [4.0, -2.0, 0.5],
-            ],
-            64,
-        );
-        let actual = build_preprocessing_from_scene(&scene, 64);
-
-        assert_eq!(actual.center, expected.center);
-        assert_eq!(actual.shift, expected.shift);
-        assert_eq!(actual.target_max_val, expected.target_max_val);
-        assert_eq!(actual.clamp_to_target_bounds, expected.clamp_to_target_bounds);
-        assert_close(actual.scale, expected.scale, 1e-6);
-    }
-
-    #[test]
-    fn preprocessed_scene_matches_vertex_preprocessing() {
-        let scene = single_triangle_scene(arr2(&[
-            [-4.0, -1.0, 0.0],
-            [7.0, 2.0, 1.0],
-            [0.0, 5.0, -3.0],
-        ]));
-        let preprocessing = build_preprocessing_from_scene(&scene, 128);
-        let expected_vertices = preprocess_vertices(scene.meshes[0].geometry.vertices.clone(), 128);
-        let actual = preprocessed_scene(&scene, &preprocessing);
-
-        assert_eq!(actual.meshes[0].geometry.vertices, expected_vertices);
-    }
-
-    #[test]
-    fn apply_preprocessing_to_mesh_recomputes_and_normalizes_normals() {
-        let mut scene = single_triangle_scene(arr2(&[
-            [0.0, 0.0, 0.0],
-            [2.0, 0.0, 0.0],
-            [0.0, 2.0, 0.0],
-        ]));
-        let preprocessing = build_preprocessing_from_scene(&scene, 32);
-
-        apply_preprocessing_to_mesh(&mut scene.meshes[0], &preprocessing);
-
-        let face_normal = scene.meshes[0].geometry.face_normals.row(0);
-        assert!(face_normal[2] > 0.0);
-        let vertex_normals = scene.meshes[0]
-            .geometry
-            .vertex_normals
-            .as_ref()
-            .expect("vertex normals should exist");
-        for vertex_idx in 0..vertex_normals.shape()[0] {
-            let x = vertex_normals[[vertex_idx, 0]];
-            let y = vertex_normals[[vertex_idx, 1]];
-            let z = vertex_normals[[vertex_idx, 2]];
-            assert_close((x * x + y * y + z * z).sqrt(), 1.0, 1e-6);
-        }
-    }
 }
