@@ -5,7 +5,7 @@ use crate::mesh_io::{
     errors::{MeshError, MeshResult},
     material::{get_submesh_material, process_materials_from_obj},
     preprocessing::{
-        apply_transform_to_vertices, build_transform_from_bounds, compute_vertex_normals,
+        apply_transform_to_vertices, build_transform_from_vertices, compute_vertex_normals,
         normalize_normals, preprocess_vertices, PreprocessTransform,
     },
     utils::{
@@ -90,18 +90,18 @@ fn load_obj_file(
     tobj::load_obj(obj_path, &load_options).map_err(MeshError::from)
 }
 
-fn bounding_box(models: &[tobj::Model]) -> ([f32; 3], [f32; 3]) {
-    let mut min = [f32::MAX; 3];
-    let mut max = [f32::MIN; 3];
+fn collect_model_vertices(models: &[tobj::Model]) -> Vec<[f32; 3]> {
+    let vertex_count = models
+        .iter()
+        .map(|model| model.mesh.positions.len() / 3)
+        .sum();
+    let mut vertices = Vec::with_capacity(vertex_count);
     for model in models {
         for vertex in model.mesh.positions.chunks_exact(3) {
-            for i in 0..3 {
-                min[i] = min[i].min(vertex[i]);
-                max[i] = max[i].max(vertex[i]);
-            }
+            vertices.push([vertex[0], vertex[1], vertex[2]]);
         }
     }
-    (min, max)
+    vertices
 }
 
 /// Process all meshes from the loaded models
@@ -118,11 +118,11 @@ fn process_submeshes_with_textures(
 ) -> MeshResult<Vec<Mesh>> {
     let mut meshes: Vec<Mesh> = Vec::new();
     let obj_dir = Path::new(obj_path).parent().map(Path::to_path_buf);
-    // First pass: compute global bounds across all models
-    let (global_min, global_max) = bounding_box(&models);
+    // First pass: collect global vertices across all models.
+    let global_vertices = collect_model_vertices(models);
     // Build a single transform to be applied to every submesh
     let global_transform: PreprocessTransform =
-        build_transform_from_bounds(global_min, global_max, resolution);
+        build_transform_from_vertices(&global_vertices, resolution);
     // Second pass: process each model using the global transform
     for model in models {
         if let Some(submesh) = process_single_submesh_with_texture(

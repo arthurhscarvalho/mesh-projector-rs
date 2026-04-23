@@ -1,5 +1,6 @@
 //! Scene preprocessing operations for vertex and normal data.
 
+use crate::constants::{BOUNDS_EPSILON, MIN_BOUNDING_SPHERE_RADIUS};
 use log::{info, warn};
 use ndarray::Array2;
 
@@ -12,6 +13,12 @@ pub struct PreprocessTransform {
     pub scale: f32,
     pub shift: [f32; 3],
     pub target_max_val: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BoundingSphere {
+    center: [f32; 3],
+    radius: f32,
 }
 
 /// Compute vertex normals for a mesh by averaging face normals
@@ -68,17 +75,9 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, resolution: u16) -> Array2
         "Original BBox Min: {:?}, Max: {:?}",
         original_bounds.min, original_bounds.max
     );
-    // Center the mesh
-    center_vertices(&mut vertices, &original_bounds);
-    let centered_bounds = calculate_bounding_box(&vertices);
-    info!(
-        "Centered BBox Min: {:?}, Max: {:?}",
-        centered_bounds.min, centered_bounds.max
-    );
-    // Scale vertices to fit resolution
-    scale_vertices_to_resolution(&mut vertices, resolution);
-    // Center in the resolution cube
-    center_in_resolution_cube(&mut vertices, resolution);
+    let points = collect_vertices(&vertices);
+    let transform = build_transform_from_vertices(&points, resolution);
+    apply_transform_to_vertices(&mut vertices, &transform);
     let final_bounds = calculate_bounding_box(&vertices);
     info!(
         "Final BBox Min: {:?}, Max: {:?}",
@@ -87,39 +86,24 @@ pub fn preprocess_vertices(mut vertices: Array2<f32>, resolution: u16) -> Array2
     vertices
 }
 
-/// Build a global preprocessing transform from a known bounding box and resolution.
+/// Build a global preprocessing transform from vertex positions and resolution.
 /// This lets us preprocess all meshes consistently using a single transform.
-pub fn build_transform_from_bounds(
-    min_bound: [f32; 3],
-    max_bound: [f32; 3],
+pub fn build_transform_from_vertices(
+    vertices: &[[f32; 3]],
     resolution: u16,
 ) -> PreprocessTransform {
-    let bounds = BoundingBox {
-        min: min_bound,
-        max: max_bound,
-    };
-    let size = bounds.size();
-    // Avoid division by zero per component
-    let mut safe_size = size;
-    for component in 0..3 {
-        if safe_size[component] == 0.0 {
-            safe_size[component] = 1e-9;
-        }
-    }
-    let max_dimension = safe_size[0].max(safe_size[1]).max(safe_size[2]);
+    let sphere = ritter_bounding_sphere(vertices);
     let target_max_val = resolution as f32 - 1.0;
-    // Safety margin currently 1.0 (no margin)
-    let safety_margin = 1.0;
-    let scale_factor = (target_max_val * safety_margin) / max_dimension;
-    let center = bounds.center();
+    let diameter = 2.0 * sphere.radius.max(MIN_BOUNDING_SPHERE_RADIUS);
+    let scale_factor = target_max_val / diameter;
     let cube_center = target_max_val / 2.0;
     let shift = [cube_center, cube_center, cube_center];
     info!(
-        "Global transform — center: {:?}, scale: {}, cube_center: {}",
-        center, scale_factor, cube_center
+        "Global sphere transform — center: {:?}, radius: {}, scale: {}, cube_center: {}",
+        sphere.center, sphere.radius, scale_factor, cube_center
     );
     PreprocessTransform {
-        center,
+        center: sphere.center,
         scale: scale_factor,
         shift,
         target_max_val,
@@ -152,29 +136,93 @@ pub fn apply_transform_to_vertices(vertices: &mut Array2<f32>, t: &PreprocessTra
     clamp_vertices_if_needed(vertices, t.target_max_val);
 }
 
+fn collect_vertices(vertices: &Array2<f32>) -> Vec<[f32; 3]> {
+    (0..vertices.shape()[0])
+        .map(|vertex_idx| {
+            [
+                vertices[[vertex_idx, 0]],
+                vertices[[vertex_idx, 1]],
+                vertices[[vertex_idx, 2]],
+            ]
+        })
+        .collect()
+}
+
+fn ritter_bounding_sphere(vertices: &[[f32; 3]]) -> BoundingSphere {
+    if vertices.is_empty() {
+        return BoundingSphere {
+            center: [0.0, 0.0, 0.0],
+            radius: MIN_BOUNDING_SPHERE_RADIUS,
+        };
+    }
+
+    let x = farthest_point(vertices, vertices[0]);
+    let y = farthest_point(vertices, x);
+    let mut center = midpoint(x, y);
+    let mut radius = distance(x, y) * 0.5;
+
+    for &vertex in vertices {
+        let offset = subtract_vertices(&vertex, &center);
+        let distance_sq = dot(&offset, &offset);
+        let radius_sq = radius * radius;
+        if distance_sq > radius_sq {
+            let distance = distance_sq.sqrt();
+            if distance > MIN_BOUNDING_SPHERE_RADIUS {
+                let new_radius = (radius + distance) * 0.5;
+                let center_shift = (new_radius - radius) / distance;
+                for component in 0..3 {
+                    center[component] += offset[component] * center_shift;
+                }
+                radius = new_radius;
+            }
+        }
+    }
+
+    BoundingSphere {
+        center,
+        radius: radius.max(MIN_BOUNDING_SPHERE_RADIUS),
+    }
+}
+
+fn farthest_point(vertices: &[[f32; 3]], from: [f32; 3]) -> [f32; 3] {
+    let mut farthest = vertices[0];
+    let mut farthest_distance_sq = distance_sq(farthest, from);
+    for &vertex in &vertices[1..] {
+        let candidate_distance_sq = distance_sq(vertex, from);
+        if candidate_distance_sq > farthest_distance_sq {
+            farthest = vertex;
+            farthest_distance_sq = candidate_distance_sq;
+        }
+    }
+    farthest
+}
+
+fn midpoint(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        (a[0] + b[0]) * 0.5,
+        (a[1] + b[1]) * 0.5,
+        (a[2] + b[2]) * 0.5,
+    ]
+}
+
+fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    distance_sq(a, b).sqrt()
+}
+
+fn distance_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let offset = subtract_vertices(&a, &b);
+    dot(&offset, &offset)
+}
+
+fn dot(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 /// Bounding box structure for cleaner code
 #[derive(Debug)]
 struct BoundingBox {
     min: [f32; 3],
     max: [f32; 3],
-}
-
-impl BoundingBox {
-    fn size(&self) -> [f32; 3] {
-        [
-            self.max[0] - self.min[0],
-            self.max[1] - self.min[1],
-            self.max[2] - self.min[2],
-        ]
-    }
-
-    fn center(&self) -> [f32; 3] {
-        [
-            (self.min[0] + self.max[0]) / 2.0,
-            (self.min[1] + self.max[1]) / 2.0,
-            (self.min[2] + self.max[2]) / 2.0,
-        ]
-    }
 }
 
 /// Calculate bounding box of vertices
@@ -195,80 +243,14 @@ fn calculate_bounding_box(vertices: &Array2<f32>) -> BoundingBox {
     }
 }
 
-/// Center vertices by translating to origin
-fn center_vertices(vertices: &mut Array2<f32>, bounds: &BoundingBox) {
-    let center = bounds.center();
-    let vertex_count = vertices.shape()[0];
-    info!("Center of mass: {:?}", center);
-    for vertex_idx in 0..vertex_count {
-        for component in 0..3 {
-            vertices[[vertex_idx, component]] -= center[component];
-        }
-    }
-}
-
-/// Scale vertices to fit within resolution bounds
-fn scale_vertices_to_resolution(vertices: &mut Array2<f32>, resolution: u16) {
-    let bounds = calculate_bounding_box(vertices);
-    let mut bbox_size = bounds.size();
-    // Avoid division by zero
-    for component in 0..3 {
-        if bbox_size[component] == 0.0 {
-            bbox_size[component] = 1e-9;
-        }
-    }
-    let max_dimension = bbox_size[0].max(bbox_size[1]).max(bbox_size[2]);
-    let target_max_val = resolution as f32 - 1.0;
-    // The safety margin is the amount of space to leave at the edges of the cube.
-    let safety_margin = 1.0;
-    let scale_factor = (target_max_val * safety_margin) / max_dimension;
-    info!(
-        "Scaling vertices. Max dimension: {}, Scale factor: {} (with {}% safety margin)",
-        max_dimension,
-        scale_factor,
-        100.0 - safety_margin * 100.0
-    );
-    apply_scale_factor(vertices, scale_factor);
-}
-
-/// Center vertices in the resolution cube
-fn center_in_resolution_cube(vertices: &mut Array2<f32>, resolution: u16) {
-    let target_max_val = resolution as f32 - 1.0;
-    let cube_center = target_max_val / 2.0;
-    let bounds = calculate_bounding_box(vertices);
-    let current_center = bounds.center();
-    let shift = [
-        cube_center - current_center[0],
-        cube_center - current_center[1],
-        cube_center - current_center[2],
-    ];
-    info!("Shifting vertices to center in cube by: {:?}", shift);
-    let vertex_count = vertices.shape()[0];
-    for vertex_idx in 0..vertex_count {
-        for component in 0..3 {
-            vertices[[vertex_idx, component]] += shift[component];
-        }
-    }
-    // Clamp to valid range if needed
-    clamp_vertices_if_needed(vertices, target_max_val);
-}
-
-/// Apply a uniform scale factor to all vertices
-fn apply_scale_factor(vertices: &mut Array2<f32>, scale_factor: f32) {
-    let vertex_count = vertices.shape()[0];
-    for vertex_idx in 0..vertex_count {
-        for component in 0..3 {
-            vertices[[vertex_idx, component]] *= scale_factor;
-        }
-    }
-}
-
 /// Clamp vertices to valid range if they exceed bounds
 fn clamp_vertices_if_needed(vertices: &mut Array2<f32>, max_val: f32) {
     let bounds = calculate_bounding_box(vertices);
     let mut needs_clamping = false;
     for component in 0..3 {
-        if bounds.min[component] < 0.0 || bounds.max[component] > max_val {
+        if bounds.min[component] < -BOUNDS_EPSILON
+            || bounds.max[component] > max_val + BOUNDS_EPSILON
+        {
             needs_clamping = true;
             break;
         }
@@ -377,4 +359,189 @@ fn set_default_normal(normals: &mut Array2<f32>, vertex_idx: usize) {
     normals[[vertex_idx, 0]] = 0.0;
     normals[[vertex_idx, 1]] = 0.0;
     normals[[vertex_idx, 2]] = 1.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::arr2;
+
+    fn assert_close(actual: f32, expected: f32, epsilon: f32) {
+        assert!(
+            (actual - expected).abs() <= epsilon,
+            "expected {actual} to be within {epsilon} of {expected}"
+        );
+    }
+
+    fn assert_contains_all(sphere: BoundingSphere, vertices: &[[f32; 3]]) {
+        let radius_sq = sphere.radius * sphere.radius;
+        for &vertex in vertices {
+            assert!(
+                distance_sq(vertex, sphere.center) <= radius_sq + BOUNDS_EPSILON,
+                "sphere {:?} did not contain vertex {:?}",
+                sphere,
+                vertex
+            );
+        }
+    }
+
+    fn assert_vertices_in_resolution_cube(vertices: &Array2<f32>, max_val: f32) {
+        for vertex_idx in 0..vertices.shape()[0] {
+            for component in 0..3 {
+                let value = vertices[[vertex_idx, component]];
+                assert!(
+                    value >= -BOUNDS_EPSILON && value <= max_val + BOUNDS_EPSILON,
+                    "vertex {vertex_idx} component {component} out of bounds: {value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ritter_sphere_for_two_points_uses_midpoint_and_half_distance() {
+        let vertices = [[-2.0, 0.0, 0.0], [4.0, 0.0, 0.0]];
+
+        let sphere = ritter_bounding_sphere(&vertices);
+
+        assert_close(sphere.center[0], 1.0, 1e-6);
+        assert_close(sphere.center[1], 0.0, 1e-6);
+        assert_close(sphere.center[2], 0.0, 1e-6);
+        assert_close(sphere.radius, 3.0, 1e-6);
+        assert_contains_all(sphere, &vertices);
+    }
+
+    #[test]
+    fn ritter_sphere_contains_cube_corners() {
+        let vertices = [
+            [-1.0, -1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, 1.0, 1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [1.0, 1.0, 1.0],
+        ];
+
+        let sphere = ritter_bounding_sphere(&vertices);
+
+        assert_contains_all(sphere, &vertices);
+        assert_close(sphere.radius, 3.0_f32.sqrt(), 1e-6);
+    }
+
+    #[test]
+    fn ritter_sphere_expands_to_contain_asymmetric_point_cloud() {
+        let vertices = [
+            [0.0, 0.0, 0.0],
+            [8.0, 0.0, 0.0],
+            [2.0, 5.0, 0.5],
+            [-1.0, 3.0, 2.0],
+            [3.0, -4.0, -2.5],
+            [2.0, 1.0, 6.0],
+        ];
+
+        let sphere = ritter_bounding_sphere(&vertices);
+
+        assert_contains_all(sphere, &vertices);
+        assert!(sphere.radius.is_finite());
+        assert!(sphere.radius > MIN_BOUNDING_SPHERE_RADIUS);
+    }
+
+    #[test]
+    fn degenerate_vertices_produce_finite_nonzero_transform() {
+        let vertices = [[3.0, -2.0, 7.0]; 4];
+
+        let transform = build_transform_from_vertices(&vertices, 64);
+
+        assert_eq!(transform.center, [3.0, -2.0, 7.0]);
+        assert!(transform.scale.is_finite());
+        assert!(transform.scale > 0.0);
+    }
+
+    #[test]
+    fn sphere_transform_places_vertices_inside_resolution_cube() {
+        let points = [
+            [-4.0, -1.0, 0.0],
+            [7.0, 2.0, 1.0],
+            [0.0, 5.0, -3.0],
+            [2.0, -6.0, 4.0],
+        ];
+        let mut vertices = arr2(&[
+            [-4.0, -1.0, 0.0],
+            [7.0, 2.0, 1.0],
+            [0.0, 5.0, -3.0],
+            [2.0, -6.0, 4.0],
+        ]);
+        let resolution = 128;
+        let max_val = resolution as f32 - 1.0;
+        let transform = build_transform_from_vertices(&points, resolution);
+
+        apply_transform_to_vertices(&mut vertices, &transform);
+
+        assert_vertices_in_resolution_cube(&vertices, max_val);
+    }
+
+    #[test]
+    fn transformed_vertices_remain_in_sphere_cube_after_non_axis_rotation() {
+        let points = [
+            [-4.0, -1.0, 0.0],
+            [7.0, 2.0, 1.0],
+            [0.0, 5.0, -3.0],
+            [2.0, -6.0, 4.0],
+            [-2.0, 3.0, 5.0],
+        ];
+        let mut vertices = arr2(&[
+            [-4.0, -1.0, 0.0],
+            [7.0, 2.0, 1.0],
+            [0.0, 5.0, -3.0],
+            [2.0, -6.0, 4.0],
+            [-2.0, 3.0, 5.0],
+        ]);
+        let resolution = 256;
+        let max_val = resolution as f32 - 1.0;
+        let cube_center = max_val * 0.5;
+        let transform = build_transform_from_vertices(&points, resolution);
+
+        apply_transform_to_vertices(&mut vertices, &transform);
+        rotate_vertices_around_center(&mut vertices, cube_center, 0.37, -0.71, 0.23);
+
+        assert_vertices_in_resolution_cube(&vertices, max_val);
+    }
+
+    fn rotate_vertices_around_center(
+        vertices: &mut Array2<f32>,
+        center: f32,
+        pitch: f32,
+        yaw: f32,
+        roll: f32,
+    ) {
+        let (sin_pitch, cos_pitch) = pitch.sin_cos();
+        let (sin_yaw, cos_yaw) = yaw.sin_cos();
+        let (sin_roll, cos_roll) = roll.sin_cos();
+
+        for vertex_idx in 0..vertices.shape()[0] {
+            let mut x = vertices[[vertex_idx, 0]] - center;
+            let mut y = vertices[[vertex_idx, 1]] - center;
+            let mut z = vertices[[vertex_idx, 2]] - center;
+
+            let y_pitch = y * cos_pitch - z * sin_pitch;
+            let z_pitch = y * sin_pitch + z * cos_pitch;
+            y = y_pitch;
+            z = z_pitch;
+
+            let x_yaw = x * cos_yaw + z * sin_yaw;
+            let z_yaw = -x * sin_yaw + z * cos_yaw;
+            x = x_yaw;
+            z = z_yaw;
+
+            let x_roll = x * cos_roll - y * sin_roll;
+            let y_roll = x * sin_roll + y * cos_roll;
+            x = x_roll;
+            y = y_roll;
+
+            vertices[[vertex_idx, 0]] = x + center;
+            vertices[[vertex_idx, 1]] = y + center;
+            vertices[[vertex_idx, 2]] = z + center;
+        }
+    }
 }
