@@ -1,8 +1,11 @@
 //! Packed image output readback.
 
 use crate::error::{WgpuProjectorError, WgpuResult};
-use crate::image::output::{PlaneView, WgpuMappedImageReadback, WgpuOutputSelection};
-use crate::image::resources::{PackedOutputGpuBuffers, WgpuReadbackLease};
+use crate::image::output::{
+    OwnedPlaneView, PlaneView, WgpuMappedImageReadback, WgpuOutputSelection,
+    WgpuOwnedMappedImageReadback,
+};
+use crate::image::resources::{PackedOutputGpuBuffers, WgpuReadbackLease, WgpuReadbackLeaseGuard};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -49,7 +52,6 @@ pub(crate) fn with_mapped_readback<R>(
     selection: WgpuOutputSelection,
     num_views: usize,
     resolution: usize,
-    image_channels: usize,
     scheduled: ScheduledReadbacks,
     callback: impl FnOnce(WgpuMappedImageReadback<'_>) -> R,
 ) -> WgpuResult<(R, ReadbackWaitTimings)> {
@@ -79,7 +81,6 @@ pub(crate) fn with_mapped_readback<R>(
         selection,
         num_views,
         resolution,
-        image_channels,
         color: color.as_ref().map(|view| PlaneView {
             bytes: &view[..],
             bytes_per_view: buffers.color.bytes_per_view as usize,
@@ -111,6 +112,58 @@ pub(crate) fn with_mapped_readback<R>(
     unmap_readbacks(readback);
 
     Ok((result, ReadbackWaitTimings { map_wait }))
+}
+
+pub(crate) fn into_owned_mapped_readback(
+    instance: &wgpu::Instance,
+    buffers: &PackedOutputGpuBuffers,
+    mut readback: WgpuReadbackLeaseGuard,
+    selection: WgpuOutputSelection,
+    num_views: usize,
+    resolution: usize,
+    scheduled: ScheduledReadbacks,
+) -> WgpuResult<(WgpuOwnedMappedImageReadback, ReadbackWaitTimings)> {
+    let map_started = Instant::now();
+    instance.poll_all(true);
+    wait_for_maps(scheduled)?;
+    let map_wait = map_started.elapsed();
+    readback.mark_mapped();
+
+    let color = readback.lease().color.as_ref().map(|buffer| {
+        OwnedPlaneView::mapped(
+            buffer.get_mapped_range(..),
+            buffers.color.bytes_per_view as usize,
+            buffers.color.stride_bytes as usize,
+        )
+    });
+    let depth = readback.lease().depth.as_ref().map(|buffer| {
+        OwnedPlaneView::mapped(
+            buffer.get_mapped_range(..),
+            buffers.depth.bytes_per_view as usize,
+            buffers.depth.stride_bytes as usize,
+        )
+    });
+    let normal = readback.lease().normal.as_ref().map(|buffer| {
+        OwnedPlaneView::mapped(
+            buffer.get_mapped_range(..),
+            buffers.normal.bytes_per_view as usize,
+            buffers.normal.stride_bytes as usize,
+        )
+    });
+    let occupancy = readback.lease().occupancy.as_ref().map(|buffer| {
+        OwnedPlaneView::mapped(
+            buffer.get_mapped_range(..),
+            buffers.occupancy.bytes_per_view as usize,
+            buffers.occupancy.stride_bytes as usize,
+        )
+    });
+
+    Ok((
+        WgpuOwnedMappedImageReadback::new(
+            selection, num_views, resolution, color, depth, normal, occupancy, readback,
+        ),
+        ReadbackWaitTimings { map_wait },
+    ))
 }
 
 fn collect_pending_planes(

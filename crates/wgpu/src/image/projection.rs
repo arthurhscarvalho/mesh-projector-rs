@@ -30,7 +30,7 @@ pub(crate) struct GpuImageParams {
     pub(crate) depth: [f32; 4],
     pub(crate) light_kind: u32,
     pub(crate) light_count: u32,
-    pub(crate) image_channels: u32,
+    pub(crate) _pad0: u32,
     pub(crate) projection_kind: u32,
 }
 
@@ -117,7 +117,6 @@ fn build_image_view_params(
     params.background = background_vec4(settings.background.to_srgba8());
     params.projection = [offset_u, offset_v, cube_center, focal_length];
     params.depth = [z_near, z_far, max_bound, 0.0];
-    params.image_channels = settings.background.channels() as u32;
     params.projection_kind = projection_kind;
     Ok((params, view_direction, camera_position, projection_kind))
 }
@@ -161,7 +160,7 @@ fn build_image_params(lighting_config: &LightingConfig) -> WgpuResult<GpuImagePa
         depth: [0.0, 1.0, 1.0, 0.0],
         light_kind: LIGHT_AMBIENT,
         light_count: 0,
-        image_channels: 4,
+        _pad0: 0,
         projection_kind: 0,
     };
 

@@ -7,6 +7,7 @@ mod projector;
 pub use error::{WgpuProjectorError, WgpuResult};
 pub use image::output::{
     PackedWgpuImageOutput, PlaneView, WgpuMappedImageReadback, WgpuOutputSelection,
+    WgpuOwnedMappedImageReadback,
 };
 pub use image::prepared_scene::WgpuPreparedScene;
 pub use image::timings::WgpuImageTimings;

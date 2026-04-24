@@ -10,15 +10,18 @@ use crate::gpu::buffers as gpu_buffers;
 use crate::gpu::formats::*;
 use crate::image::output::{
     PackedWgpuImageOutput, PlaneView, WgpuMappedImageReadback, WgpuOutputSelection,
+    WgpuOwnedMappedImageReadback,
 };
 use crate::image::pipelines::{create_image_pipeline_resources, ImagePipelineResources};
 use crate::image::prepared_scene::{prepare_image_scene_input, WgpuPreparedScene};
 use crate::image::projection::prepare_prepared_view;
-use crate::image::readback::{schedule_readback_maps, with_mapped_readback};
+use crate::image::readback::{
+    into_owned_mapped_readback, schedule_readback_maps, with_mapped_readback,
+};
 use crate::image::render_pass;
 use crate::image::resources::{
     create_packed_output_buffers, create_render_textures, enqueue_packed_output_copies,
-    WgpuReadbackPool,
+    WgpuReadbackLeaseGuard, WgpuReadbackPool, WgpuReadbackPoolHandle,
 };
 use crate::image::ssao;
 use crate::image::timings::WgpuImageTimings;
@@ -29,7 +32,7 @@ use mesh_projector_core::types::image_batch::ImageBatch;
 use mesh_projector_core::types::mesh::{Scene, ShadingMode};
 use ndarray::Array2;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
@@ -44,7 +47,7 @@ pub struct WgpuProjector {
     queue: wgpu::Queue,
     image_pipeline: ImagePipelineResources,
     supported_msaa_sample_counts: Vec<u32>,
-    readback_pool: Mutex<WgpuReadbackPool>,
+    readback_pool: WgpuReadbackPoolHandle,
 }
 
 impl WgpuProjector {
@@ -92,7 +95,7 @@ impl WgpuProjector {
             queue,
             image_pipeline,
             supported_msaa_sample_counts,
-            readback_pool: Mutex::new(WgpuReadbackPool::default()),
+            readback_pool: Arc::new(Mutex::new(WgpuReadbackPool::default())),
         })
     }
 
@@ -279,6 +282,268 @@ impl WgpuProjector {
         Ok((result, timings))
     }
 
+    pub fn project_to_owned_image_readback(
+        &self,
+        mesh: &Scene,
+        settings: &ProjectionConfig,
+        lighting_config: &LightingConfig,
+        selection: WgpuOutputSelection,
+    ) -> WgpuResult<(WgpuOwnedMappedImageReadback, WgpuImageTimings)> {
+        let prepare_started = Instant::now();
+        let prepared = self.prepare_scene(mesh)?;
+        let prepare_elapsed = prepare_started.elapsed();
+        let (result, mut timings) = self.project_prepared_to_owned_image_readback(
+            &prepared,
+            settings,
+            lighting_config,
+            selection,
+        )?;
+        timings.prepare_scene += prepare_elapsed;
+        timings.setup += prepare_elapsed;
+        timings.total += prepare_elapsed;
+        Ok((result, timings))
+    }
+
+    pub fn project_prepared_to_owned_image_readback(
+        &self,
+        prepared: &WgpuPreparedScene,
+        settings: &ProjectionConfig,
+        lighting_config: &LightingConfig,
+        selection: WgpuOutputSelection,
+    ) -> WgpuResult<(WgpuOwnedMappedImageReadback, WgpuImageTimings)> {
+        if prepared.projector_id != self.id {
+            return Err(WgpuProjectorError::PreparedSceneProjectorMismatch);
+        }
+        if selection.is_empty() {
+            return Err(WgpuProjectorError::NoOutputsSelected);
+        }
+        let sample_count = self.msaa_sample_count(&settings.msaa.sample_count)?;
+        if settings.ssao.enabled && prepared.shading_mode != ShadingMode::BlinnPhong {
+            log::warn!(
+                "SSAO enabled but shading mode is {:?}. GPU SSAO is only applied with Blinn-Phong lighting.",
+                prepared.shading_mode
+            );
+        }
+        let apply_ssao = settings.ssao.enabled
+            && prepared.shading_mode == ShadingMode::BlinnPhong
+            && selection.color;
+
+        let total_started = Instant::now();
+        let setup_started = Instant::now();
+        let resolution = settings.resolution as usize;
+        let num_views = settings.view_angles.len();
+        let pixels_per_view = resolution * resolution;
+
+        if prepared.corner_count == 0 || settings.view_angles.is_empty() {
+            let setup_elapsed = setup_started.elapsed();
+            return Ok((
+                WgpuOwnedMappedImageReadback::zeroed(selection, num_views, resolution),
+                WgpuImageTimings {
+                    total: total_started.elapsed(),
+                    setup: setup_elapsed,
+                    ..Default::default()
+                },
+            ));
+        }
+
+        let setup_elapsed = setup_started.elapsed();
+        log::info!(
+            "wgpu image setup: {:.3?} (prepared corners: {})",
+            setup_elapsed,
+            prepared.corner_count
+        );
+
+        let mut cull_elapsed = std::time::Duration::ZERO;
+        let mut upload_indices_elapsed = std::time::Duration::ZERO;
+        let mut render_elapsed = std::time::Duration::ZERO;
+        let mut msaa_resolve_elapsed = std::time::Duration::ZERO;
+        let mut pack_elapsed = std::time::Duration::ZERO;
+        let mut readback_elapsed = std::time::Duration::ZERO;
+        let mut copy_to_readback_elapsed = std::time::Duration::ZERO;
+        let mut map_wait_elapsed = std::time::Duration::ZERO;
+        let mut ssao_elapsed = std::time::Duration::ZERO;
+        let packed_buffers =
+            create_packed_output_buffers(&self.device, num_views, pixels_per_view, selection);
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mesh-projector batched image encoder"),
+            });
+        let mut textures_to_keep_alive = Vec::new();
+
+        for (view_index, orientation) in settings.view_angles.iter().enumerate() {
+            let cull_started = Instant::now();
+            let view_geometry =
+                prepare_prepared_view(prepared, settings, lighting_config, orientation)?;
+            cull_elapsed += cull_started.elapsed();
+            if view_geometry.indices.is_empty() {
+                continue;
+            }
+
+            let upload_started = Instant::now();
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("mesh-projector image visible indices"),
+                    contents: bytemuck::cast_slice(&view_geometry.indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            let params_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("mesh-projector image params"),
+                    contents: bytemuck::bytes_of(&view_geometry.params),
+                    usage: wgpu::BufferUsages::UNIFORM,
+                });
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mesh-projector image bind group"),
+                layout: &self.image_pipeline.bind_group_layout,
+                entries: &[
+                    bind_entry(0, &prepared.texel_buffer),
+                    bind_entry(1, &params_buffer),
+                    bind_entry(2, &prepared.material_buffer),
+                ],
+            });
+            let mut textures =
+                create_render_textures(&self.device, settings.resolution, sample_count);
+            upload_indices_elapsed += upload_started.elapsed();
+            let render_selection = WgpuOutputSelection {
+                color: selection.color || apply_ssao,
+                depth: selection.depth,
+                normal: selection.normal || apply_ssao,
+                occupancy: selection.occupancy || apply_ssao,
+            };
+
+            let render_started = Instant::now();
+            render_pass::encode_image_view(
+                &mut encoder,
+                self.image_pipeline
+                    .pipeline_for(render_selection, sample_count),
+                &bind_group,
+                &prepared.vertex_buffer,
+                &index_buffer,
+                view_geometry.indices.len() as u32,
+                settings.background.to_srgba8(),
+                render_selection,
+                &textures,
+            );
+            render_elapsed += render_started.elapsed();
+
+            if sample_count > 1 {
+                let resolve_started = Instant::now();
+                render_pass::encode_msaa_resolve(
+                    &self.device,
+                    &self.image_pipeline,
+                    &mut encoder,
+                    &textures,
+                    settings.resolution,
+                    sample_count,
+                );
+                msaa_resolve_elapsed += resolve_started.elapsed();
+            }
+
+            if apply_ssao {
+                let ssao_started = Instant::now();
+                let color = ssao::encode_ssao(
+                    &self.device,
+                    &self.image_pipeline.ssao,
+                    &mut encoder,
+                    &textures,
+                    settings.resolution,
+                    &settings.ssao,
+                    view_geometry.params.projection_kind,
+                    view_geometry.params.projection[3],
+                    view_geometry.params.projection[2],
+                );
+                ssao_elapsed += ssao_started.elapsed();
+                textures.ssao_color = Some(color);
+            }
+
+            let pack_started = Instant::now();
+            render_pass::encode_pack_outputs(
+                &self.device,
+                &self.image_pipeline,
+                &mut encoder,
+                &textures,
+                settings.resolution,
+                view_index,
+                selection,
+                apply_ssao,
+                &packed_buffers,
+            );
+            pack_elapsed += pack_started.elapsed();
+
+            textures_to_keep_alive.push(textures);
+        }
+
+        let readback_lease = self
+            .readback_pool
+            .lock()
+            .expect("readback pool mutex poisoned")
+            .acquire(&self.device, &packed_buffers, selection);
+
+        let copy_to_readback_started = Instant::now();
+        enqueue_packed_output_copies(&mut encoder, &packed_buffers, &readback_lease, selection);
+        let scheduled = schedule_readback_maps(&encoder, &readback_lease, selection);
+        copy_to_readback_elapsed += copy_to_readback_started.elapsed();
+
+        let submit_started = Instant::now();
+        self.queue.submit(Some(encoder.finish()));
+        render_elapsed += submit_started.elapsed();
+
+        let readback_guard =
+            WgpuReadbackLeaseGuard::new(Arc::clone(&self.readback_pool), readback_lease);
+        let (owned_readback, readback_wait_timings) = into_owned_mapped_readback(
+            &self.instance,
+            &packed_buffers,
+            readback_guard,
+            selection,
+            num_views,
+            resolution,
+            scheduled,
+        )?;
+        readback_elapsed += readback_wait_timings.map_wait;
+        map_wait_elapsed += readback_wait_timings.map_wait;
+
+        drop(textures_to_keep_alive);
+
+        let timings = WgpuImageTimings {
+            total: total_started.elapsed(),
+            setup: setup_elapsed,
+            prepare_scene: std::time::Duration::ZERO,
+            prepare_vertices: cull_elapsed,
+            cull_indices: cull_elapsed,
+            upload: upload_indices_elapsed,
+            upload_indices: upload_indices_elapsed,
+            render_submit: render_elapsed,
+            msaa_resolve: msaa_resolve_elapsed,
+            ssao: ssao_elapsed,
+            copy_to_staging: pack_elapsed,
+            pack_output: pack_elapsed,
+            copy_to_readback: copy_to_readback_elapsed,
+            map_wait: map_wait_elapsed,
+            readback: readback_elapsed,
+            cpu_copy: std::time::Duration::ZERO,
+            image_batch_conversion: std::time::Duration::ZERO,
+        };
+        log::info!(
+            "wgpu image timings: total={:.3?}, setup={:.3?}, prep={:.3?}, upload={:.3?}, render_submit={:.3?}, pack_output={:.3?}, copy_to_readback={:.3?}, map_wait={:.3?}, readback={:.3?}, cpu_copy={:.3?}",
+            timings.total,
+            timings.setup,
+            timings.prepare_vertices,
+            timings.upload,
+            timings.render_submit,
+            timings.pack_output,
+            timings.copy_to_readback,
+            timings.map_wait,
+            timings.readback,
+            timings.cpu_copy
+        );
+
+        Ok((owned_readback, timings))
+    }
+
     pub fn project_prepared_to_image_readback_with<R>(
         &self,
         prepared: &WgpuPreparedScene,
@@ -307,14 +572,12 @@ impl WgpuProjector {
         let total_started = Instant::now();
         let setup_started = Instant::now();
         let resolution = settings.resolution as usize;
-        let image_channels = settings.background.channels();
         let num_views = settings.view_angles.len();
         let pixels_per_view = resolution * resolution;
 
         if prepared.corner_count == 0 || settings.view_angles.is_empty() {
             let setup_elapsed = setup_started.elapsed();
-            let result =
-                with_zeroed_readback(selection, num_views, resolution, image_channels, callback);
+            let result = with_zeroed_readback(selection, num_views, resolution, callback);
             return Ok((
                 result,
                 WgpuImageTimings {
@@ -478,7 +741,6 @@ impl WgpuProjector {
             selection,
             num_views,
             resolution,
-            image_channels,
             scheduled,
             callback,
         );
@@ -569,7 +831,6 @@ fn with_zeroed_readback<R>(
     selection: WgpuOutputSelection,
     num_views: usize,
     resolution: usize,
-    image_channels: usize,
     callback: impl FnOnce(WgpuMappedImageReadback<'_>) -> R,
 ) -> R {
     let pixels_per_view = resolution * resolution;
@@ -580,9 +841,13 @@ fn with_zeroed_readback<R>(
     let depth = selection
         .depth
         .then(|| vec![0; num_views * pixels_per_view]);
-    let normal = selection
-        .normal
-        .then(|| vec![0; num_views * color_bytes_per_view]);
+    let normal = selection.normal.then(|| {
+        let mut bytes = vec![0; num_views * color_bytes_per_view];
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel[3] = 255;
+        }
+        bytes
+    });
     let occupancy = selection
         .occupancy
         .then(|| vec![0; num_views * pixels_per_view]);
@@ -591,7 +856,6 @@ fn with_zeroed_readback<R>(
         selection,
         num_views,
         resolution,
-        image_channels,
         color: color.as_ref().map(|bytes| PlaneView {
             bytes,
             bytes_per_view: color_bytes_per_view,

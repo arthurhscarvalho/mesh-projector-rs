@@ -2,6 +2,7 @@
 
 use crate::gpu::formats::{texture_extent, DEPTH_FORMAT, R8_FORMAT, RAW_DEPTH_FORMAT, RGBA_FORMAT};
 use crate::image::output::WgpuOutputSelection;
+use std::sync::{Arc, Mutex};
 
 const READBACK_RING_SLOTS: usize = 3;
 
@@ -63,6 +64,48 @@ pub(crate) struct WgpuReadbackLease {
     pub(crate) depth: Option<wgpu::Buffer>,
     pub(crate) normal: Option<wgpu::Buffer>,
     pub(crate) occupancy: Option<wgpu::Buffer>,
+}
+
+pub(crate) type WgpuReadbackPoolHandle = Arc<Mutex<WgpuReadbackPool>>;
+
+pub(crate) struct WgpuReadbackLeaseGuard {
+    pool: WgpuReadbackPoolHandle,
+    lease: Option<WgpuReadbackLease>,
+    mapped: bool,
+}
+
+impl WgpuReadbackLeaseGuard {
+    pub(crate) fn new(pool: WgpuReadbackPoolHandle, lease: WgpuReadbackLease) -> Self {
+        Self {
+            pool,
+            lease: Some(lease),
+            mapped: false,
+        }
+    }
+
+    pub(crate) fn lease(&self) -> &WgpuReadbackLease {
+        self.lease
+            .as_ref()
+            .expect("readback lease was already released")
+    }
+
+    pub(crate) fn mark_mapped(&mut self) {
+        self.mapped = true;
+    }
+}
+
+impl Drop for WgpuReadbackLeaseGuard {
+    fn drop(&mut self) {
+        if let Some(lease) = self.lease.take() {
+            if self.mapped {
+                lease.unmap_all();
+            }
+            self.pool
+                .lock()
+                .expect("readback pool mutex poisoned")
+                .release(lease);
+        }
+    }
 }
 
 pub(crate) fn create_render_textures(
@@ -411,6 +454,23 @@ impl WgpuReadbackPool {
         self.slots.push(ReadbackSlot::default());
         self.next_slot = (index + 1) % READBACK_RING_SLOTS;
         index
+    }
+}
+
+impl WgpuReadbackLease {
+    pub(crate) fn unmap_all(&self) {
+        if let Some(buffer) = &self.color {
+            buffer.unmap();
+        }
+        if let Some(buffer) = &self.depth {
+            buffer.unmap();
+        }
+        if let Some(buffer) = &self.normal {
+            buffer.unmap();
+        }
+        if let Some(buffer) = &self.occupancy {
+            buffer.unmap();
+        }
     }
 }
 

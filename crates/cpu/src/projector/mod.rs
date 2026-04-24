@@ -5,7 +5,6 @@ mod projection;
 
 use mesh_projector_core::config::{LightingConfig, RenderPassConfig, ViewConfig};
 use mesh_projector_core::config::{PointCloudConfig, ProjectionConfig};
-use mesh_projector_core::constants::NORMAL_CHANNELS;
 use mesh_projector_core::geometry::create_view_matrix;
 use mesh_projector_core::types::coordinate::Coordinate;
 use mesh_projector_core::types::image_batch::ImageBatch;
@@ -35,10 +34,9 @@ pub fn project_to_image(
     let rows = max_bound_u;
     let cols = max_bound_u;
     let num_views = settings.view_angles.len();
-    let image_channels = settings.background.channels();
     let mut render_pass_configs = Vec::with_capacity(num_views);
     // Initialize image batch
-    let mut image_batch = ImageBatch::new(num_views, rows, cols, image_channels, NORMAL_CHANNELS);
+    let mut image_batch = ImageBatch::new(num_views, rows, cols);
     // Handle empty meshes
     if mesh.meshes.is_empty() {
         log::warn!("Empty mesh (no meshes). Returning empty image batch.");

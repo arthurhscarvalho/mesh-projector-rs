@@ -6,6 +6,7 @@
 //! produce images, depth maps, and related outputs.
 
 use crate::config::SsaoConfig;
+use crate::constants::IMAGE_CHANNELS;
 use crate::types::color::Color;
 use crate::types::orientation::Orientation;
 
@@ -97,64 +98,41 @@ impl Default for MsaaConfig {
     }
 }
 
-/// Background color configuration for output images.
-/// Determines both the background color and the number of output channels.
-pub enum BackgroundConfig {
-    /// RGB output (3 channels, no alpha). Material transparency is premultiplied.
-    Rgb(Color),
-    /// RGBA output (4 channels with alpha).
-    Rgba(Color, u8),
+/// RGBA background color configuration for output images.
+pub struct BackgroundConfig {
+    pub color: Color,
+    pub alpha: u8,
 }
 
 impl BackgroundConfig {
-    /// Returns the number of image channels (3 for RGB, 4 for RGBA).
+    /// Returns the fixed number of image channels.
     pub fn channels(&self) -> usize {
-        match self {
-            BackgroundConfig::Rgb(_) => 3,
-            BackgroundConfig::Rgba(_, _) => 4,
-        }
+        IMAGE_CHANNELS
     }
 
-    /// Returns the background color as a byte array (either [R,G,B] or [R,G,B,A]).
+    /// Returns the background color as an RGBA byte array.
     pub fn to_bytes(&self) -> Vec<u8> {
-        match self {
-            BackgroundConfig::Rgb(color) => {
-                let srgb = color.to_srgb8();
-                vec![srgb[0], srgb[1], srgb[2]]
-            }
-            BackgroundConfig::Rgba(color, alpha) => {
-                let srgb = color.to_srgb8();
-                vec![srgb[0], srgb[1], srgb[2], *alpha]
-            }
-        }
+        self.to_srgba8().to_vec()
     }
 
     /// Returns the background color encoded as sRGBA8 for buffer initialization.
-    /// For RGB mode, alpha is set to 255 (opaque).
     pub fn to_srgba8(&self) -> [u8; 4] {
-        match self {
-            BackgroundConfig::Rgb(color) => {
-                let srgb = color.to_srgb8();
-                [srgb[0], srgb[1], srgb[2], 255]
-            }
-            BackgroundConfig::Rgba(color, alpha) => {
-                let srgb = color.to_srgb8();
-                [srgb[0], srgb[1], srgb[2], *alpha]
-            }
-        }
+        let srgb = self.color.to_srgb8();
+        [srgb[0], srgb[1], srgb[2], self.alpha]
     }
 
     /// Returns the background color.
     pub fn color(&self) -> &Color {
-        match self {
-            BackgroundConfig::Rgb(color) => color,
-            BackgroundConfig::Rgba(color, _) => color,
-        }
+        &self.color
+    }
+
+    pub fn rgba(color: Color, alpha: u8) -> Self {
+        Self { color, alpha }
     }
 }
 
 impl Default for BackgroundConfig {
     fn default() -> Self {
-        BackgroundConfig::Rgb(Color::white())
+        BackgroundConfig::rgba(Color::white(), 255)
     }
 }

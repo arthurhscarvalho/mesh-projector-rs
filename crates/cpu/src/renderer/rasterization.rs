@@ -414,7 +414,6 @@ pub fn rasterize_triangle_to_images(
         return;
     };
     let alpha_u8 = (submesh.material.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let color_channels = buffers.image.shape()[2];
     for row in min_row..max_row {
         for col in min_col..max_col {
             let pixel_center = (
@@ -446,9 +445,7 @@ pub fn rasterize_triangle_to_images(
             buffers.image[[row, col, 0]] = final_color_srgb[0];
             buffers.image[[row, col, 1]] = final_color_srgb[1];
             buffers.image[[row, col, 2]] = final_color_srgb[2];
-            if color_channels > 3 {
-                buffers.image[[row, col, 3]] = alpha_u8;
-            }
+            buffers.image[[row, col, 3]] = alpha_u8;
             buffers.occupancy_map[[row, col]] = 255;
             let depth_byte = projected_triangle.depth_norm.to_byte(depth_value);
             buffers.depth_map[[row, col]] = depth_byte;
@@ -468,6 +465,7 @@ pub fn rasterize_triangle_to_images(
             normal_map[[row, col, 0]] = nx as u8;
             normal_map[[row, col, 1]] = ny as u8;
             normal_map[[row, col, 2]] = nz as u8;
+            normal_map[[row, col, 3]] = 255;
         }
     }
 }

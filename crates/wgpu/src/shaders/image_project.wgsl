@@ -24,7 +24,7 @@ struct Params {
     depth: vec4<f32>,
     light_kind: u32,
     light_count: u32,
-    image_channels: u32,
+    pad0: u32,
     projection_kind: u32,
 };
 

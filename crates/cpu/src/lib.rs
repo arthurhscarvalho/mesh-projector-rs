@@ -53,8 +53,14 @@ mod tests {
 
         let batch = project_to_image(&scene, &settings, &lighting);
 
-        assert_eq!(batch.images.shape(), &[1, 8, 8, 3]);
+        assert_eq!(batch.images.shape(), &[1, 8, 8, 4]);
         assert_eq!(batch.depth_maps.shape(), &[1, 8, 8]);
+        assert_eq!(batch.normal_maps.shape(), &[1, 8, 8, 4]);
+        assert!(batch
+            .normal_maps
+            .lanes(ndarray::Axis(3))
+            .into_iter()
+            .all(|pixel| pixel[3] == 255));
         assert!(batch.occupancy_maps.iter().all(|value| *value == 0));
     }
 }

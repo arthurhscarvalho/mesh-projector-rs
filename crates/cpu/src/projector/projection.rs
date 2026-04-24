@@ -10,7 +10,6 @@ use crate::renderer::rasterization::rasterize_triangle_to_images;
 use crate::renderer::ssao::apply_ssao;
 use mesh_projector_core::config::{CameraConfig, ProjectionConfig, ProjectionType};
 use mesh_projector_core::config::{PerspectiveParameters, ProjectionModel, RenderPassConfig};
-use mesh_projector_core::constants::NORMAL_CHANNELS;
 use mesh_projector_core::types::coordinate::Coordinate;
 use mesh_projector_core::types::mesh::Scene;
 use mesh_projector_core::types::mesh::ShadingMode;
@@ -80,16 +79,9 @@ fn render_without_msaa(
     render_pass_config: &RenderPassConfig,
     rows: usize,
     cols: usize,
-    image_channels: usize,
     background_color: [u8; 4],
 ) -> ImageBuffers {
-    let mut buffers = ImageBuffers::new(
-        rows,
-        cols,
-        image_channels,
-        NORMAL_CHANNELS,
-        background_color,
-    );
+    let mut buffers = ImageBuffers::new(rows, cols, background_color);
     rasterize_all_triangles(mesh, render_pass_config, &mut buffers, (0.0, 0.0));
     buffers
 }
@@ -100,26 +92,13 @@ fn render_with_msaa(
     render_pass_config: &RenderPassConfig,
     rows: usize,
     cols: usize,
-    image_channels: usize,
     background_color: [u8; 4],
     sample_count: u8,
 ) -> ImageBuffers {
     let sample_offsets = sample_offsets(sample_count);
-    let mut msaa_accum = MsaaAccumulator::new(
-        rows,
-        cols,
-        image_channels,
-        NORMAL_CHANNELS,
-        background_color,
-    );
+    let mut msaa_accum = MsaaAccumulator::new(rows, cols, background_color);
     for &sample_offset in &sample_offsets {
-        let mut buffers = ImageBuffers::new(
-            rows,
-            cols,
-            image_channels,
-            NORMAL_CHANNELS,
-            background_color,
-        );
+        let mut buffers = ImageBuffers::new(rows, cols, background_color);
         rasterize_all_triangles(mesh, render_pass_config, &mut buffers, sample_offset);
         msaa_accum.accumulate(&buffers);
     }
@@ -135,25 +114,16 @@ pub fn compute_projection(
     let max_bound: u16 = settings.resolution;
     let rows = max_bound as usize;
     let cols = max_bound as usize;
-    let image_channels = settings.background.channels();
     let background_color = settings.background.to_srgba8();
     let sample_count = settings.msaa.sample_count.samples();
     let mut buffers = if sample_count == 1 {
-        render_without_msaa(
-            mesh,
-            render_pass_config,
-            rows,
-            cols,
-            image_channels,
-            background_color,
-        )
+        render_without_msaa(mesh, render_pass_config, rows, cols, background_color)
     } else {
         render_with_msaa(
             mesh,
             render_pass_config,
             rows,
             cols,
-            image_channels,
             background_color,
             sample_count,
         )

@@ -1,3 +1,4 @@
+use crate::constants::{IMAGE_CHANNELS, NORMAL_CHANNELS};
 use ndarray::iter::{AxisIter, AxisIterMut};
 use ndarray::{Array3, Array4, ArrayView2, ArrayView3, ArrayViewMut2, ArrayViewMut3, Axis};
 use rayon::iter::IntoParallelIterator;
@@ -6,9 +7,9 @@ use rayon::iter::IntoParallelIterator;
 ///
 /// This struct stores multiple images and their corresponding depth maps,
 /// normal maps, and occupancy maps in 4D/3D arrays for efficient batch processing.
-/// - `images`: (N, H, W, C) array of image data.
-/// - `depth_maps`: (N, H, W, C) array of depth map data.
-/// - `normal_maps`: (N, H, W, C) array of normal map data.
+/// - `images`: (N, H, W, 4) array of RGBA image data.
+/// - `depth_maps`: (N, H, W) array of grayscale depth map data.
+/// - `normal_maps`: (N, H, W, 4) array of RGBA normal map data.
 /// - `occupancy_maps`: (N, H, W) array indicating pixel occupancy.
 pub struct ImageBatch {
     pub images: Array4<u8>,
@@ -18,17 +19,20 @@ pub struct ImageBatch {
 }
 
 impl ImageBatch {
-    pub fn new(
-        num_images: usize,
-        rows: usize,
-        cols: usize,
-        image_channels: usize,
-        normal_channels: usize,
-    ) -> Self {
+    pub fn new(num_images: usize, rows: usize, cols: usize) -> Self {
         ImageBatch {
-            images: Array4::zeros((num_images, rows, cols, image_channels)),
+            images: Array4::zeros((num_images, rows, cols, IMAGE_CHANNELS)),
             depth_maps: Array3::zeros((num_images, rows, cols)),
-            normal_maps: Array4::zeros((num_images, rows, cols, normal_channels)),
+            normal_maps: Array4::from_shape_fn(
+                (num_images, rows, cols, NORMAL_CHANNELS),
+                |(_, _, _, ch)| {
+                    if ch == 3 {
+                        255
+                    } else {
+                        0
+                    }
+                },
+            ),
             occupancy_maps: Array3::zeros((num_images, rows, cols)),
         }
     }
