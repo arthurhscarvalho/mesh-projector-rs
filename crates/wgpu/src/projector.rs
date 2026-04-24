@@ -8,14 +8,17 @@ use crate::error::{WgpuProjectorError, WgpuResult};
 use crate::gpu::bindings::*;
 use crate::gpu::buffers as gpu_buffers;
 use crate::gpu::formats::*;
-use crate::image::output::{PackedWgpuImageOutput, WgpuOutputSelection};
+use crate::image::output::{
+    PackedWgpuImageOutput, PlaneView, WgpuMappedImageReadback, WgpuOutputSelection,
+};
 use crate::image::pipelines::{create_image_pipeline_resources, ImagePipelineResources};
 use crate::image::prepared_scene::{prepare_image_scene_input, WgpuPreparedScene};
 use crate::image::projection::prepare_prepared_view;
-use crate::image::readback::read_packed_output_buffers;
+use crate::image::readback::{schedule_readback_maps, with_mapped_readback};
 use crate::image::render_pass;
 use crate::image::resources::{
     create_packed_output_buffers, create_render_textures, enqueue_packed_output_copies,
+    WgpuReadbackPool,
 };
 use crate::image::ssao;
 use crate::image::timings::WgpuImageTimings;
@@ -26,6 +29,7 @@ use mesh_projector_core::types::image_batch::ImageBatch;
 use mesh_projector_core::types::mesh::{Scene, ShadingMode};
 use ndarray::Array2;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
 
@@ -40,6 +44,7 @@ pub struct WgpuProjector {
     queue: wgpu::Queue,
     image_pipeline: ImagePipelineResources,
     supported_msaa_sample_counts: Vec<u32>,
+    readback_pool: Mutex<WgpuReadbackPool>,
 }
 
 impl WgpuProjector {
@@ -63,11 +68,15 @@ impl WgpuProjector {
         }
 
         let supported_msaa_sample_counts = supported_image_msaa_sample_counts(&adapter);
+        let mut required_limits = adapter.limits();
+        required_limits.max_storage_buffer_binding_size = required_limits
+            .max_storage_buffer_binding_size
+            .max(wgpu::Limits::default().max_storage_buffer_binding_size);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("mesh-projector-wgpu device"),
                 required_features,
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 ..Default::default()
             })
             .await?;
@@ -83,6 +92,7 @@ impl WgpuProjector {
             queue,
             image_pipeline,
             supported_msaa_sample_counts,
+            readback_pool: Mutex::new(WgpuReadbackPool::default()),
         })
     }
 
@@ -228,6 +238,55 @@ impl WgpuProjector {
         lighting_config: &LightingConfig,
         selection: WgpuOutputSelection,
     ) -> WgpuResult<(PackedWgpuImageOutput, WgpuImageTimings)> {
+        let mut copy_elapsed = std::time::Duration::ZERO;
+        let (packed, mut timings) = self.project_prepared_to_image_readback_with(
+            prepared,
+            settings,
+            lighting_config,
+            selection,
+            |mapped| {
+                let copy_started = Instant::now();
+                let packed = mapped.to_packed_output();
+                copy_elapsed = copy_started.elapsed();
+                packed
+            },
+        )?;
+        timings.cpu_copy += copy_elapsed;
+        Ok((packed, timings))
+    }
+
+    pub fn project_to_image_readback_with<R>(
+        &self,
+        mesh: &Scene,
+        settings: &ProjectionConfig,
+        lighting_config: &LightingConfig,
+        selection: WgpuOutputSelection,
+        callback: impl FnOnce(WgpuMappedImageReadback<'_>) -> R,
+    ) -> WgpuResult<(R, WgpuImageTimings)> {
+        let prepare_started = Instant::now();
+        let prepared = self.prepare_scene(mesh)?;
+        let prepare_elapsed = prepare_started.elapsed();
+        let (result, mut timings) = self.project_prepared_to_image_readback_with(
+            &prepared,
+            settings,
+            lighting_config,
+            selection,
+            callback,
+        )?;
+        timings.prepare_scene += prepare_elapsed;
+        timings.setup += prepare_elapsed;
+        timings.total += prepare_elapsed;
+        Ok((result, timings))
+    }
+
+    pub fn project_prepared_to_image_readback_with<R>(
+        &self,
+        prepared: &WgpuPreparedScene,
+        settings: &ProjectionConfig,
+        lighting_config: &LightingConfig,
+        selection: WgpuOutputSelection,
+        callback: impl FnOnce(WgpuMappedImageReadback<'_>) -> R,
+    ) -> WgpuResult<(R, WgpuImageTimings)> {
         if prepared.projector_id != self.id {
             return Err(WgpuProjectorError::PreparedSceneProjectorMismatch);
         }
@@ -251,29 +310,13 @@ impl WgpuProjector {
         let image_channels = settings.background.channels();
         let num_views = settings.view_angles.len();
         let pixels_per_view = resolution * resolution;
-        let mut packed = PackedWgpuImageOutput {
-            selection,
-            num_views,
-            resolution,
-            image_channels,
-            color: selection
-                .color
-                .then(|| vec![0; num_views * pixels_per_view * 4]),
-            depth: selection
-                .depth
-                .then(|| vec![0; num_views * pixels_per_view]),
-            normal: selection
-                .normal
-                .then(|| vec![0; num_views * pixels_per_view * 4]),
-            occupancy: selection
-                .occupancy
-                .then(|| vec![0; num_views * pixels_per_view]),
-        };
 
         if prepared.corner_count == 0 || settings.view_angles.is_empty() {
             let setup_elapsed = setup_started.elapsed();
+            let result =
+                with_zeroed_readback(selection, num_views, resolution, image_channels, callback);
             return Ok((
-                packed,
+                result,
                 WgpuImageTimings {
                     total: total_started.elapsed(),
                     setup: setup_elapsed,
@@ -295,6 +338,8 @@ impl WgpuProjector {
         let mut msaa_resolve_elapsed = std::time::Duration::ZERO;
         let mut pack_elapsed = std::time::Duration::ZERO;
         let mut readback_elapsed = std::time::Duration::ZERO;
+        let mut copy_to_readback_elapsed = std::time::Duration::ZERO;
+        let mut map_wait_elapsed = std::time::Duration::ZERO;
         let mut ssao_elapsed = std::time::Duration::ZERO;
         let packed_buffers =
             create_packed_output_buffers(&self.device, num_views, pixels_per_view, selection);
@@ -411,16 +456,40 @@ impl WgpuProjector {
             textures_to_keep_alive.push(textures);
         }
 
-        enqueue_packed_output_copies(&mut encoder, &packed_buffers, selection);
+        let readback_lease = self
+            .readback_pool
+            .lock()
+            .expect("readback pool mutex poisoned")
+            .acquire(&self.device, &packed_buffers, selection);
+
+        let copy_to_readback_started = Instant::now();
+        enqueue_packed_output_copies(&mut encoder, &packed_buffers, &readback_lease, selection);
+        let scheduled = schedule_readback_maps(&encoder, &readback_lease, selection);
+        copy_to_readback_elapsed += copy_to_readback_started.elapsed();
 
         let submit_started = Instant::now();
         self.queue.submit(Some(encoder.finish()));
-        self.instance.poll_all(true);
         render_elapsed += submit_started.elapsed();
 
-        let readback_started = Instant::now();
-        read_packed_output_buffers(&self.instance, &packed_buffers, &mut packed)?;
-        readback_elapsed += readback_started.elapsed();
+        let mapped_result = with_mapped_readback(
+            &self.instance,
+            &packed_buffers,
+            &readback_lease,
+            selection,
+            num_views,
+            resolution,
+            image_channels,
+            scheduled,
+            callback,
+        );
+
+        self.readback_pool
+            .lock()
+            .expect("readback pool mutex poisoned")
+            .release(readback_lease);
+        let (result, readback_wait_timings) = mapped_result?;
+        readback_elapsed += readback_wait_timings.map_wait;
+        map_wait_elapsed += readback_wait_timings.map_wait;
 
         drop(textures_to_keep_alive);
 
@@ -437,23 +506,27 @@ impl WgpuProjector {
             ssao: ssao_elapsed,
             copy_to_staging: pack_elapsed,
             pack_output: pack_elapsed,
+            copy_to_readback: copy_to_readback_elapsed,
+            map_wait: map_wait_elapsed,
             readback: readback_elapsed,
             cpu_copy: std::time::Duration::ZERO,
             image_batch_conversion: std::time::Duration::ZERO,
         };
         log::info!(
-            "wgpu image timings: total={:.3?}, setup={:.3?}, prep={:.3?}, upload={:.3?}, render_submit={:.3?}, copy_to_staging={:.3?}, readback={:.3?}, cpu_copy={:.3?}",
+            "wgpu image timings: total={:.3?}, setup={:.3?}, prep={:.3?}, upload={:.3?}, render_submit={:.3?}, pack_output={:.3?}, copy_to_readback={:.3?}, map_wait={:.3?}, readback={:.3?}, cpu_copy={:.3?}",
             timings.total,
             timings.setup,
             timings.prepare_vertices,
             timings.upload,
             timings.render_submit,
-            timings.copy_to_staging,
+            timings.pack_output,
+            timings.copy_to_readback,
+            timings.map_wait,
             timings.readback,
             timings.cpu_copy
         );
 
-        Ok((packed, timings))
+        Ok((result, timings))
     }
 
     /// Generates a point cloud using a deterministic WGPU compute pipeline.
@@ -490,6 +563,56 @@ fn validate_msaa_sample_count(
             sample_count: samples,
         })
     }
+}
+
+fn with_zeroed_readback<R>(
+    selection: WgpuOutputSelection,
+    num_views: usize,
+    resolution: usize,
+    image_channels: usize,
+    callback: impl FnOnce(WgpuMappedImageReadback<'_>) -> R,
+) -> R {
+    let pixels_per_view = resolution * resolution;
+    let color_bytes_per_view = pixels_per_view * 4;
+    let color = selection
+        .color
+        .then(|| vec![0; num_views * color_bytes_per_view]);
+    let depth = selection
+        .depth
+        .then(|| vec![0; num_views * pixels_per_view]);
+    let normal = selection
+        .normal
+        .then(|| vec![0; num_views * color_bytes_per_view]);
+    let occupancy = selection
+        .occupancy
+        .then(|| vec![0; num_views * pixels_per_view]);
+
+    callback(WgpuMappedImageReadback {
+        selection,
+        num_views,
+        resolution,
+        image_channels,
+        color: color.as_ref().map(|bytes| PlaneView {
+            bytes,
+            bytes_per_view: color_bytes_per_view,
+            stride_bytes: color_bytes_per_view,
+        }),
+        depth: depth.as_ref().map(|bytes| PlaneView {
+            bytes,
+            bytes_per_view: pixels_per_view,
+            stride_bytes: pixels_per_view,
+        }),
+        normal: normal.as_ref().map(|bytes| PlaneView {
+            bytes,
+            bytes_per_view: color_bytes_per_view,
+            stride_bytes: color_bytes_per_view,
+        }),
+        occupancy: occupancy.as_ref().map(|bytes| PlaneView {
+            bytes,
+            bytes_per_view: pixels_per_view,
+            stride_bytes: pixels_per_view,
+        }),
+    })
 }
 
 #[cfg(test)]

@@ -12,6 +12,8 @@ pub struct WgpuImageTimings {
     pub ssao: std::time::Duration,
     pub copy_to_staging: std::time::Duration,
     pub pack_output: std::time::Duration,
+    pub copy_to_readback: std::time::Duration,
+    pub map_wait: std::time::Duration,
     pub readback: std::time::Duration,
     pub cpu_copy: std::time::Duration,
     pub image_batch_conversion: std::time::Duration,

@@ -1,7 +1,7 @@
 //! Image render, MSAA resolve, and output packing pass encoding.
 
 use crate::gpu::bindings::{
-    bind_entry, render_attachment, storage_texture_bind_entry, texture_bind_entry,
+    bind_entry, bind_entry_range, render_attachment, storage_texture_bind_entry, texture_bind_entry,
 };
 use crate::gpu::formats::IMAGE_WORKGROUP_SIZE;
 use crate::image::output::WgpuOutputSelection;
@@ -26,7 +26,9 @@ struct GpuPackParams {
     view_index: u32,
     selection_bits: u32,
     dispatch_width: u32,
-    _pad0: [u32; 3],
+    color_stride_words: u32,
+    scalar_words_per_view: u32,
+    scalar_stride_words: u32,
 }
 
 pub(crate) fn encode_image_view(
@@ -232,12 +234,13 @@ pub(crate) fn encode_pack_outputs(
     let params = GpuPackParams {
         resolution: resolution as u32,
         pixels_per_view: resolution as u32 * resolution as u32,
-        view_index: 0,
+        view_index: view_index as u32,
         selection_bits: output_selection_bits(selection),
         dispatch_width: pack_dispatch_width(resolution),
-        _pad0: [0; 3],
+        color_stride_words: buffers.color_stride_words,
+        scalar_words_per_view: buffers.scalar_words_per_view,
+        scalar_stride_words: buffers.scalar_stride_words,
     };
-    let view_buffers = &buffers.views[view_index];
     let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh-projector pack params"),
         contents: bytemuck::bytes_of(&params),
@@ -247,6 +250,10 @@ pub(crate) fn encode_pack_outputs(
     let depth_view = textures.depth_byte.create_view(&Default::default());
     let normal_view = textures.normal.create_view(&Default::default());
     let occupancy_view = textures.occupancy.create_view(&Default::default());
+    let color_offset = plane_binding_offset(&buffers.color, view_index);
+    let depth_offset = plane_binding_offset(&buffers.depth, view_index);
+    let normal_offset = plane_binding_offset(&buffers.normal, view_index);
+    let occupancy_offset = plane_binding_offset(&buffers.occupancy, view_index);
     let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("mesh-projector pack bind group"),
         layout: &pipeline_resources.pack.layout,
@@ -255,10 +262,30 @@ pub(crate) fn encode_pack_outputs(
             texture_bind_entry(1, &depth_view),
             texture_bind_entry(2, &normal_view),
             texture_bind_entry(3, &occupancy_view),
-            bind_entry(4, &view_buffers.color),
-            bind_entry(5, &view_buffers.depth),
-            bind_entry(6, &view_buffers.normal),
-            bind_entry(7, &view_buffers.occupancy),
+            bind_entry_range(
+                4,
+                &buffers.color.storage,
+                color_offset,
+                buffers.color.stride_bytes,
+            ),
+            bind_entry_range(
+                5,
+                &buffers.depth.storage,
+                depth_offset,
+                buffers.depth.stride_bytes,
+            ),
+            bind_entry_range(
+                6,
+                &buffers.normal.storage,
+                normal_offset,
+                buffers.normal.stride_bytes,
+            ),
+            bind_entry_range(
+                7,
+                &buffers.occupancy.storage,
+                occupancy_offset,
+                buffers.occupancy.stride_bytes,
+            ),
             bind_entry(8, &params_buffer),
         ],
     });
@@ -273,6 +300,17 @@ pub(crate) fn encode_pack_outputs(
     pass.set_pipeline(&pipeline_resources.pack.pipeline);
     pass.set_bind_group(0, &bind_group, &[]);
     pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+}
+
+fn plane_binding_offset(
+    plane: &crate::image::resources::PackedOutputPlaneBuffer,
+    view_index: usize,
+) -> u64 {
+    if plane.bytes_per_view == 0 {
+        0
+    } else {
+        view_index as u64 * plane.stride_bytes
+    }
 }
 
 fn output_selection_bits(selection: WgpuOutputSelection) -> u32 {

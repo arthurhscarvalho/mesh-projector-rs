@@ -6,9 +6,9 @@ struct PackParams {
     view_index: u32,
     selection_bits: u32,
     dispatch_width: u32,
-    pad0: u32,
-    pad1: u32,
-    pad2: u32,
+    color_stride_words: u32,
+    scalar_words_per_view: u32,
+    scalar_stride_words: u32,
 };
 
 @group(0) @binding(0) var color_tex: texture_2d<f32>;
@@ -61,9 +61,8 @@ fn pack_outputs(@builtin(global_invocation_id) id: vec3<u32>) {
     let x = pixel % params.resolution;
     let y = pixel / params.resolution;
     let coord = vec2<i32>(i32(x), i32(y));
-    let color_base = params.view_index * params.pixels_per_view;
-    let scalar_words_per_view = (params.pixels_per_view + 3u) / 4u;
-    let scalar_base = params.view_index * scalar_words_per_view;
+    let color_base = 0u;
+    let scalar_base = 0u;
 
     if (params.selection_bits & 1u) != 0u {
         color_out[color_base + pixel] = pack_rgba(textureLoad(color_tex, coord, 0));

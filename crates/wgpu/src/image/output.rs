@@ -53,6 +53,81 @@ pub struct PackedWgpuImageOutput {
     pub occupancy: Option<Vec<u8>>,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct PlaneView<'a> {
+    pub bytes: &'a [u8],
+    pub bytes_per_view: usize,
+    pub stride_bytes: usize,
+}
+
+impl<'a> PlaneView<'a> {
+    fn copy_views_to(&self, dst: &mut [u8], num_views: usize) {
+        for view_index in 0..num_views {
+            let src_start = view_index * self.stride_bytes;
+            let dst_start = view_index * self.bytes_per_view;
+            let src_end = src_start + self.bytes_per_view;
+            let dst_end = dst_start + self.bytes_per_view;
+            dst[dst_start..dst_end].copy_from_slice(&self.bytes[src_start..src_end]);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WgpuMappedImageReadback<'a> {
+    pub selection: WgpuOutputSelection,
+    pub num_views: usize,
+    pub resolution: usize,
+    pub image_channels: usize,
+    pub color: Option<PlaneView<'a>>,
+    pub depth: Option<PlaneView<'a>>,
+    pub normal: Option<PlaneView<'a>>,
+    pub occupancy: Option<PlaneView<'a>>,
+}
+
+impl<'a> WgpuMappedImageReadback<'a> {
+    pub fn to_packed_output(&self) -> PackedWgpuImageOutput {
+        let pixels_per_view = self.resolution * self.resolution;
+        let color_bytes_per_view = pixels_per_view * 4;
+        let mut packed = PackedWgpuImageOutput {
+            selection: self.selection,
+            num_views: self.num_views,
+            resolution: self.resolution,
+            image_channels: self.image_channels,
+            color: self
+                .color
+                .map(|_| vec![0; self.num_views * color_bytes_per_view]),
+            depth: self
+                .depth
+                .map(|_| vec![0; self.num_views * pixels_per_view]),
+            normal: self
+                .normal
+                .map(|_| vec![0; self.num_views * color_bytes_per_view]),
+            occupancy: self
+                .occupancy
+                .map(|_| vec![0; self.num_views * pixels_per_view]),
+        };
+
+        if let (Some(src), Some(dst)) = (self.color, packed.color.as_mut()) {
+            src.copy_views_to(dst, self.num_views);
+        }
+        if let (Some(src), Some(dst)) = (self.depth, packed.depth.as_mut()) {
+            src.copy_views_to(dst, self.num_views);
+        }
+        if let (Some(src), Some(dst)) = (self.normal, packed.normal.as_mut()) {
+            src.copy_views_to(dst, self.num_views);
+        }
+        if let (Some(src), Some(dst)) = (self.occupancy, packed.occupancy.as_mut()) {
+            src.copy_views_to(dst, self.num_views);
+        }
+
+        packed
+    }
+
+    pub fn to_image_batch(&self) -> ImageBatch {
+        self.to_packed_output().into_image_batch()
+    }
+}
+
 impl PackedWgpuImageOutput {
     pub fn into_image_batch(self) -> ImageBatch {
         let mut image_batch = ImageBatch::new(
@@ -198,5 +273,46 @@ mod tests {
         assert_eq!(image_batch.occupancy_maps.as_slice().unwrap(), &[128, 255]);
         assert!(image_batch.depth_maps.iter().all(|value| *value == 0));
         assert!(image_batch.normal_maps.iter().all(|value| *value == 0));
+    }
+
+    #[test]
+    fn mapped_readback_to_packed_output_skips_stride_padding() {
+        let color = vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 0, 0, 0, 17, 18, 19, 20, 21,
+            22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 0, 0, 0, 0,
+        ];
+        let occupancy = vec![41, 42, 43, 44, 0, 0, 0, 0, 45, 46, 47, 48, 0, 0, 0, 0];
+        let mapped = WgpuMappedImageReadback {
+            selection: WgpuOutputSelection::color_and_occupancy(),
+            num_views: 2,
+            resolution: 2,
+            image_channels: 4,
+            color: Some(PlaneView {
+                bytes: &color,
+                bytes_per_view: 16,
+                stride_bytes: 20,
+            }),
+            depth: None,
+            normal: None,
+            occupancy: Some(PlaneView {
+                bytes: &occupancy,
+                bytes_per_view: 4,
+                stride_bytes: 8,
+            }),
+        };
+
+        let packed = mapped.to_packed_output();
+
+        assert_eq!(
+            packed.color.unwrap(),
+            vec![
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+                24, 25, 26, 27, 28, 29, 30, 31, 32
+            ]
+        );
+        assert_eq!(
+            packed.occupancy.unwrap(),
+            vec![41, 42, 43, 44, 45, 46, 47, 48]
+        );
     }
 }
