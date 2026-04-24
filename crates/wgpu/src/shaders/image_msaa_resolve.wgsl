@@ -4,6 +4,7 @@ struct ResolveParams {
     resolution: u32,
     sample_count: u32,
     pad0: vec2<u32>,
+    background: vec4<f32>,
 };
 
 @group(0) @binding(0) var color_msaa: texture_multisampled_2d<f32>;
@@ -41,12 +42,19 @@ fn resolve_msaa_gbuffer(@builtin(global_invocation_id) id: vec3<u32>) {
 
     for (var i = 0u; i < params.sample_count; i = i + 1u) {
         let occ = textureLoad(occupancy_msaa, coord, i).r;
-        if occ <= 0.0 {
-            continue;
-        }
-        occupied_count = occupied_count + 1u;
+        var color = params.background;
+        if occ > 0.0 {
+            occupied_count = occupied_count + 1u;
+            color = textureLoad(color_msaa, coord, i);
 
-        let color = textureLoad(color_msaa, coord, i);
+            let raw_depth = textureLoad(raw_depth_msaa, coord, i).r;
+            if raw_depth < best_depth {
+                best_depth = raw_depth;
+                best_depth_byte = textureLoad(depth_byte_msaa, coord, i).r;
+                best_normal = textureLoad(normal_msaa, coord, i);
+            }
+        }
+
         let alpha = clamp(color.a, 0.0, 1.0);
         color_linear_sum = color_linear_sum + vec3<f32>(
             srgb_to_linear(color.r),
@@ -54,13 +62,6 @@ fn resolve_msaa_gbuffer(@builtin(global_invocation_id) id: vec3<u32>) {
             srgb_to_linear(color.b),
         ) * alpha;
         alpha_sum = alpha_sum + alpha;
-
-        let raw_depth = textureLoad(raw_depth_msaa, coord, i).r;
-        if raw_depth < best_depth {
-            best_depth = raw_depth;
-            best_depth_byte = textureLoad(depth_byte_msaa, coord, i).r;
-            best_normal = textureLoad(normal_msaa, coord, i);
-        }
     }
 
     let sample_count_f = max(f32(params.sample_count), 1.0);

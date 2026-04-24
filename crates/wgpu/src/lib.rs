@@ -11,4 +11,7 @@ pub use image::output::{
 };
 pub use image::prepared_scene::WgpuPreparedScene;
 pub use image::timings::WgpuImageTimings;
+pub use point_cloud::output::{WgpuMappedPointCloudReadback, WgpuOwnedMappedPointCloudReadback};
+pub use point_cloud::prepared_scene::WgpuPreparedPointCloudScene;
+pub use point_cloud::timings::WgpuPointCloudTimings;
 pub use projector::WgpuProjector;

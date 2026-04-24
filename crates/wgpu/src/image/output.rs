@@ -107,7 +107,7 @@ impl OwnedPlaneView {
         }
     }
 
-    fn owned_bytes(bytes: Vec<u8>, bytes_per_view: usize, stride_bytes: usize) -> Self {
+    pub(crate) fn owned_bytes(bytes: Vec<u8>, bytes_per_view: usize, stride_bytes: usize) -> Self {
         Self {
             storage: OwnedPlaneStorage::Bytes(bytes),
             bytes_per_view,

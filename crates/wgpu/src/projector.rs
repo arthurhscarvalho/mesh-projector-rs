@@ -25,7 +25,14 @@ use crate::image::resources::{
 };
 use crate::image::ssao;
 use crate::image::timings::WgpuImageTimings;
+use crate::point_cloud::output::WgpuOwnedMappedPointCloudReadback;
 use crate::point_cloud::pipeline as point_cloud_pipeline;
+use crate::point_cloud::pipelines::{
+    create_point_cloud_pipeline_resources, PointCloudPipelineResources,
+};
+use crate::point_cloud::prepared_scene::WgpuPreparedPointCloudScene;
+use crate::point_cloud::resources::{PointCloudReadbackPool, PointCloudReadbackPoolHandle};
+use crate::point_cloud::timings::WgpuPointCloudTimings;
 use mesh_projector_core::config::LightingConfig;
 use mesh_projector_core::config::{MsaaSampleCount, PointCloudConfig, ProjectionConfig};
 use mesh_projector_core::types::image_batch::ImageBatch;
@@ -46,8 +53,10 @@ pub struct WgpuProjector {
     device: wgpu::Device,
     queue: wgpu::Queue,
     image_pipeline: ImagePipelineResources,
+    point_cloud_pipeline: PointCloudPipelineResources,
     supported_msaa_sample_counts: Vec<u32>,
     readback_pool: WgpuReadbackPoolHandle,
+    point_cloud_readback_pool: PointCloudReadbackPoolHandle,
 }
 
 impl WgpuProjector {
@@ -86,6 +95,7 @@ impl WgpuProjector {
 
         let image_pipeline =
             create_image_pipeline_resources(&device, &supported_msaa_sample_counts);
+        let point_cloud_pipeline = create_point_cloud_pipeline_resources(&device);
 
         Ok(Self {
             id: NEXT_PROJECTOR_ID.fetch_add(1, Ordering::Relaxed),
@@ -94,8 +104,10 @@ impl WgpuProjector {
             device,
             queue,
             image_pipeline,
+            point_cloud_pipeline,
             supported_msaa_sample_counts,
             readback_pool: Arc::new(Mutex::new(WgpuReadbackPool::default())),
+            point_cloud_readback_pool: Arc::new(Mutex::new(PointCloudReadbackPool::default())),
         })
     }
 
@@ -432,6 +444,7 @@ impl WgpuProjector {
 
             if sample_count > 1 {
                 let resolve_started = Instant::now();
+                let background = settings.background.to_srgba8();
                 render_pass::encode_msaa_resolve(
                     &self.device,
                     &self.image_pipeline,
@@ -439,6 +452,7 @@ impl WgpuProjector {
                     &textures,
                     settings.resolution,
                     sample_count,
+                    background,
                 );
                 msaa_resolve_elapsed += resolve_started.elapsed();
             }
@@ -674,6 +688,7 @@ impl WgpuProjector {
 
             if sample_count > 1 {
                 let resolve_started = Instant::now();
+                let background = settings.background.to_srgba8();
                 render_pass::encode_msaa_resolve(
                     &self.device,
                     &self.image_pipeline,
@@ -681,6 +696,7 @@ impl WgpuProjector {
                     &textures,
                     settings.resolution,
                     sample_count,
+                    background,
                 );
                 msaa_resolve_elapsed += resolve_started.elapsed();
             }
@@ -798,12 +814,84 @@ impl WgpuProjector {
         settings: &PointCloudConfig,
         lighting_config: &LightingConfig,
     ) -> WgpuResult<(Array2<f32>, Array2<u8>)> {
-        point_cloud_pipeline::project_to_point_cloud_by_sampling(
+        self.project_to_point_cloud_by_sampling_with_timings(mesh, settings, lighting_config)
+            .map(|(point_cloud, _timings)| point_cloud)
+    }
+
+    pub fn project_to_point_cloud_by_sampling_with_timings(
+        &self,
+        mesh: &Scene,
+        settings: &PointCloudConfig,
+        lighting_config: &LightingConfig,
+    ) -> WgpuResult<((Array2<f32>, Array2<u8>), WgpuPointCloudTimings)> {
+        let prepare_started = Instant::now();
+        let prepared = self.prepare_point_cloud_scene(mesh, settings)?;
+        let prepare_elapsed = prepare_started.elapsed();
+        let (point_cloud, mut timings) =
+            self.project_prepared_to_point_cloud_with_timings(&prepared, lighting_config)?;
+        timings.prepare_scene += prepare_elapsed;
+        timings.total += prepare_elapsed;
+        Ok((point_cloud, timings))
+    }
+
+    pub fn prepare_point_cloud_scene(
+        &self,
+        mesh: &Scene,
+        settings: &PointCloudConfig,
+    ) -> WgpuResult<WgpuPreparedPointCloudScene> {
+        point_cloud_pipeline::prepare_point_cloud_scene(&self.device, self.id, mesh, settings)
+    }
+
+    pub fn project_prepared_to_point_cloud_with_timings(
+        &self,
+        prepared: &WgpuPreparedPointCloudScene,
+        lighting_config: &LightingConfig,
+    ) -> WgpuResult<((Array2<f32>, Array2<u8>), WgpuPointCloudTimings)> {
+        if prepared.projector_id != self.id {
+            return Err(WgpuProjectorError::PreparedSceneProjectorMismatch);
+        }
+        point_cloud_pipeline::project_prepared_to_point_cloud_with_timings(
             &self.instance,
             &self.device,
             &self.queue,
-            mesh,
-            settings,
+            &self.point_cloud_pipeline,
+            &self.point_cloud_readback_pool,
+            prepared,
+            lighting_config,
+        )
+    }
+
+    pub fn project_to_owned_point_cloud_readback(
+        &self,
+        mesh: &Scene,
+        settings: &PointCloudConfig,
+        lighting_config: &LightingConfig,
+    ) -> WgpuResult<(WgpuOwnedMappedPointCloudReadback, WgpuPointCloudTimings)> {
+        let prepare_started = Instant::now();
+        let prepared = self.prepare_point_cloud_scene(mesh, settings)?;
+        let prepare_elapsed = prepare_started.elapsed();
+        let (readback, mut timings) =
+            self.project_prepared_to_owned_point_cloud_readback(&prepared, lighting_config)?;
+        timings.prepare_scene += prepare_elapsed;
+        timings.total += prepare_elapsed;
+        Ok((readback, timings))
+    }
+
+    pub fn project_prepared_to_owned_point_cloud_readback(
+        &self,
+        prepared: &WgpuPreparedPointCloudScene,
+        lighting_config: &LightingConfig,
+    ) -> WgpuResult<(WgpuOwnedMappedPointCloudReadback, WgpuPointCloudTimings)> {
+        if prepared.projector_id != self.id {
+            return Err(WgpuProjectorError::PreparedSceneProjectorMismatch);
+        }
+        point_cloud_pipeline::project_prepared_to_owned_point_cloud_readback(
+            &self.instance,
+            &self.device,
+            &self.queue,
+            &self.point_cloud_pipeline,
+            &self.point_cloud_readback_pool,
+            prepared,
             lighting_config,
         )
     }
@@ -916,6 +1004,13 @@ mod tests {
         }
     }
 
+    fn point_cloud_settings() -> PointCloudConfig {
+        PointCloudConfig {
+            resolution: 8,
+            point_cloud_density_factor: 1.0,
+        }
+    }
+
     #[test]
     fn msaa_validation_returns_direct_unsupported_error() {
         let err = validate_msaa_sample_count(&[1, 4], &MsaaSampleCount::X8)
@@ -938,5 +1033,21 @@ mod tests {
             Err(err) => panic!("expected outlier filtering error, got {err}"),
             Ok(_) => panic!("outlier filtering should not be supported by the GPU-only image path"),
         }
+    }
+
+    #[test]
+    fn empty_scene_returns_empty_point_cloud() {
+        let projector = WgpuProjector::new_blocking().expect("wgpu projector should initialize");
+
+        let (points, colors) = projector
+            .project_to_point_cloud_by_sampling(
+                &empty_scene(),
+                &point_cloud_settings(),
+                &lighting_config(),
+            )
+            .expect("empty point cloud projection should succeed");
+
+        assert_eq!(points.shape(), &[0, 3]);
+        assert_eq!(colors.shape(), &[0, 3]);
     }
 }

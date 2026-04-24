@@ -4,6 +4,7 @@ struct ResolveParams {
     resolution: u32,
     sample_count: u32,
     pad0: vec2<u32>,
+    background: vec4<f32>,
 };
 
 @group(0) @binding(0) var raw_depth_msaa: texture_multisampled_2d<f32>;
