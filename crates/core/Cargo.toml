@@ -1,0 +1,17 @@
+[package]
+name = "mesh-projector-core"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+name = "mesh_projector_core"
+
+[dependencies]
+ndarray.workspace = true
+num.workspace = true
+log.workspace = true
+colog.workspace = true
+rayon.workspace = true
+tobj.workspace = true
+image.workspace = true
+once_cell.workspace = true

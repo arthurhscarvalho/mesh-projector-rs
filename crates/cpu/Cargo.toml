@@ -1,0 +1,13 @@
+[package]
+name = "mesh-projector-cpu"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+name = "mesh_projector_cpu"
+
+[dependencies]
+mesh-projector-core.workspace = true
+ndarray.workspace = true
+log.workspace = true
+rayon.workspace = true
