@@ -16,6 +16,7 @@ struct GpuResolveParams {
     resolution: u32,
     sample_count: u32,
     _pad0: [u32; 2],
+    background: [f32; 4],
 }
 
 #[repr(C)]
@@ -133,6 +134,7 @@ pub(crate) fn encode_msaa_resolve(
     textures: &RenderTextures,
     resolution: u16,
     sample_count: u32,
+    background: [u8; 4],
 ) {
     let Some(color_msaa) = &textures.color_msaa else {
         return;
@@ -153,6 +155,12 @@ pub(crate) fn encode_msaa_resolve(
         resolution: resolution as u32,
         sample_count,
         _pad0: [0; 2],
+        background: [
+            background[0] as f32 / 255.0,
+            background[1] as f32 / 255.0,
+            background[2] as f32 / 255.0,
+            background[3] as f32 / 255.0,
+        ],
     };
     let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("mesh-projector MSAA resolve params"),

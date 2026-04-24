@@ -444,6 +444,7 @@ impl WgpuProjector {
 
             if sample_count > 1 {
                 let resolve_started = Instant::now();
+                let background = settings.background.to_srgba8();
                 render_pass::encode_msaa_resolve(
                     &self.device,
                     &self.image_pipeline,
@@ -451,6 +452,7 @@ impl WgpuProjector {
                     &textures,
                     settings.resolution,
                     sample_count,
+                    background,
                 );
                 msaa_resolve_elapsed += resolve_started.elapsed();
             }
@@ -686,6 +688,7 @@ impl WgpuProjector {
 
             if sample_count > 1 {
                 let resolve_started = Instant::now();
+                let background = settings.background.to_srgba8();
                 render_pass::encode_msaa_resolve(
                     &self.device,
                     &self.image_pipeline,
@@ -693,6 +696,7 @@ impl WgpuProjector {
                     &textures,
                     settings.resolution,
                     sample_count,
+                    background,
                 );
                 msaa_resolve_elapsed += resolve_started.elapsed();
             }
